@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
+import { useTranslations } from "next-intl";
 import { Loader2 } from "lucide-react";
 
 import { AgentIdentityCard } from "@/components/agents-workshop/AgentIdentityCard";
@@ -84,6 +85,7 @@ function WorkshopLoading() {
  * deliberately no picker.
  */
 export function AgentsWorkshopView({ projectId }: { projectId?: string }) {
+  const t = useTranslations("AgentsWorkshop");
   const scope: "global" | "project" = projectId ? "project" : "global";
 
   const {
@@ -188,10 +190,10 @@ export function AgentsWorkshopView({ projectId }: { projectId?: string }) {
         });
       } else {
         // A 409 here is a duplicate name the user needs to read verbatim.
-        setError(result.error || "Could not save this agent. Try again.");
+        setError(result.error || t("editor.saveFailed"));
       }
     } catch {
-      setError("Could not save this agent. Check the connection and try again.");
+      setError(t("editor.saveFailedConnection"));
     } finally {
       setSaving(false);
     }
@@ -224,12 +226,10 @@ export function AgentsWorkshopView({ projectId }: { projectId?: string }) {
         });
         setSelectedId(neighbour?.id ?? null);
       } else {
-        setError("Could not delete this agent. Try again.");
+        setError(t("editor.deleteFailed"));
       }
     } catch {
-      setError(
-        "Could not delete this agent. Check the connection and try again.",
-      );
+      setError(t("editor.deleteFailedConnection"));
     } finally {
       setDeleting(false);
     }
@@ -324,7 +324,7 @@ export function AgentsWorkshopView({ projectId }: { projectId?: string }) {
         // Five empty bands would be noise; one line is the whole state.
         <div className="flex min-w-0 flex-1 items-center justify-center">
           <p className="font-sans text-[13.5px] text-muted-foreground">
-            No agents yet — create your first one on the left.
+            {t("editor.empty")}
           </p>
         </div>
       )}

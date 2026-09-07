@@ -1,0 +1,8 @@
+{
+  "link": {
+    "label": "Frictions",
+    "count": "{count} open",
+    "countLoading": "Open friction count loading",
+    "countAria": "{count, plural, one {# open friction} other {# open frictions}}"
+  }
+}

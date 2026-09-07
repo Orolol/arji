@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { BandHeader, Mono, QuietLink, RatioBar, StrataBand } from "@/components/piscine";
 import { PROMPT_TOKEN_BUDGET_GLOBAL_SETTING_KEY } from "@/lib/tokens/budget-settings";
 import {
@@ -40,6 +42,7 @@ export interface BudgetBandProps {
 }
 
 export function BudgetBand({ draft, cap }: BudgetBandProps) {
+  const t = useTranslations("Settings");
   const spent = cap?.spentUsd ?? null;
   const capUsd = cap?.capUsd ?? null;
   const showBar = cap !== null && spent !== null && capUsd !== null;
@@ -49,17 +52,17 @@ export function BudgetBand({ draft, cap }: BudgetBandProps) {
       <StrataBand stratum="land" gap={9} grow>
         <BandHeader
           stratum="land"
-          label="Budget"
+          label={t("budget.label")}
           right={
             <QuietLink href="/usage" tone="next" size={12}>
-              open usage →
+              {t("budget.openUsage")}
             </QuietLink>
           }
         />
 
         <div className="flex flex-wrap items-end gap-[16px]">
           <SettingField
-            kicker="PLAFOND MENSUEL"
+            kicker={t("budget.monthlyCap")}
             stratum="land"
             htmlFor="monthly-cap"
             width={150}
@@ -71,7 +74,7 @@ export function BudgetBand({ draft, cap }: BudgetBandProps) {
               type="number"
               min={0}
               step="1"
-              placeholder="Aucun plafond"
+              placeholder={t("budget.monthlyCapPlaceholder")}
               value={draft.text(MONTHLY_CAP_SETTING_KEY)}
               onChange={(event) =>
                 draft.set(MONTHLY_CAP_SETTING_KEY, event.target.value)
@@ -80,7 +83,7 @@ export function BudgetBand({ draft, cap }: BudgetBandProps) {
           </SettingField>
 
           <SettingField
-            kicker="PLAFOND HEBDO · CLAUDE"
+            kicker={t("budget.weeklyCap")}
             stratum="land"
             htmlFor="usage-budget"
             width={170}
@@ -92,7 +95,7 @@ export function BudgetBand({ draft, cap }: BudgetBandProps) {
               type="number"
               min={0}
               step="1"
-              placeholder="No budget"
+              placeholder={t("budget.weeklyCapPlaceholder")}
               value={draft.text(CLAUDE_WEEKLY_BUDGET_SETTING_KEY)}
               onChange={(event) =>
                 draft.set(CLAUDE_WEEKLY_BUDGET_SETTING_KEY, event.target.value)
@@ -101,7 +104,7 @@ export function BudgetBand({ draft, cap }: BudgetBandProps) {
           </SettingField>
 
           <SettingField
-            kicker="BUDGET TOKENS / PROMPT"
+            kicker={t("budget.promptTokens")}
             stratum="land"
             htmlFor="prompt-token-budget"
             width={190}
@@ -112,7 +115,7 @@ export function BudgetBand({ draft, cap }: BudgetBandProps) {
               data-testid="prompt-token-budget-setting"
               chrome="paper"
               type="text"
-              placeholder="e.g. 50000 or 50k (no threshold by default)"
+              placeholder={t("budget.promptTokensPlaceholder")}
               value={draft.text(PROMPT_TOKEN_BUDGET_GLOBAL_SETTING_KEY)}
               onChange={(event) =>
                 draft.set(PROMPT_TOKEN_BUDGET_GLOBAL_SETTING_KEY, event.target.value)
@@ -123,7 +126,10 @@ export function BudgetBand({ draft, cap }: BudgetBandProps) {
           {showBar ? (
             <div className="flex min-w-[180px] flex-1 flex-col gap-[6px] pb-[3px]">
               <Mono size={11} tone="land-mid">
-                {`${formatCostUsd(spent) ?? "—"} dépensés · alerte à ${cap.alertPercent} %`}
+                {t("budget.spend", {
+                  spent: formatCostUsd(spent) ?? "—",
+                  percent: cap.alertPercent,
+                })}
               </Mono>
               <RatioBar
                 height={8}
@@ -141,9 +147,7 @@ export function BudgetBand({ draft, cap }: BudgetBandProps) {
         </div>
 
         <span className="font-sans text-[11.5px] leading-snug text-strata-land-mid">
-          Le plafond est indicatif : rien ne met Full Auto ni les night runs en
-          pause automatiquement. Le cap par night run, lui, arrête bien les
-          vagues suivantes.
+          {t("budget.note")}
         </span>
       </StrataBand>
     </SettingsSection>

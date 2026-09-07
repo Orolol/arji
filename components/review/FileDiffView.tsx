@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ChevronDown, ChevronRight, FileText, FilePlus, FileMinus, FileEdit } from "lucide-react";
@@ -40,6 +41,7 @@ export function FileDiffView({
   defaultExpanded = true,
 }: FileDiffViewProps) {
   const [expanded, setExpanded] = useState(defaultExpanded);
+  const t = useTranslations("Review");
   const fileComments = comments.filter((c) => c.filePath === file.filePath);
   const openComments = fileComments.filter((c) => c.status === "open");
   const StatusIcon = statusIcons[file.status] || FileText;
@@ -71,12 +73,12 @@ export function FileDiffView({
         </span>
         {file.oldPath && (
           <span className="text-xs text-muted-foreground mr-2">
-            (from {file.oldPath})
+            {t("file.renamedFrom", { path: file.oldPath })}
           </span>
         )}
         {openComments.length > 0 && (
           <Badge variant="outline" className="text-[10px] h-5 px-1.5 mr-2 border-blue-500/30 text-blue-500">
-            {openComments.length} comment{openComments.length !== 1 ? "s" : ""}
+            {t("file.comments", { count: openComments.length })}
           </Badge>
         )}
         <span className="text-xs shrink-0">

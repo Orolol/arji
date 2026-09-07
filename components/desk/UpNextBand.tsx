@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useTranslations } from "next-intl";
 
 import {
   BandHeader,
@@ -19,8 +20,8 @@ import { cn } from "@/lib/utils";
 /**
  * UP NEXT — the pool-blue stratum: the order Full Auto will pick from.
  *
- * The header's meta is a HINT, not a counter ("l'ordre où Full Auto va
- * piocher"), and the band has no count at all. That is deliberate in the frame
+ * The header's meta is a HINT, not a counter ("the order Full Auto picks
+ * from"), and the band has no count at all. That is deliberate in the frame
  * and it is also honest here: the ranks come from `compareExecutionOrder` in
  * lib/kanban/queue.ts, which IS `compareEpics` in lib/auto-mode/select.ts —
  * one function, so the column shows the supervisor's own order rather than a
@@ -84,16 +85,27 @@ export function chipRank(ticket: DeskQueueTicket): QueueChipRank {
   return 3;
 }
 
-export function chipLabel(ticket: DeskQueueTicket): string {
+/**
+ * The chip's three phrasings, already resolved by the caller's translator —
+ * `chipLabel` composes, it does not hold copy. A ticket with no readable id
+ * passes an empty one, which is why every branch still trims.
+ */
+export interface ChipLabelCopy {
+  blocked: (id: string) => string;
+  awaiting: (id: string) => string;
+  spec: (label: string) => string;
+}
+
+export function chipLabel(ticket: DeskQueueTicket, copy: ChipLabelCopy): string {
   const id = ticket.readableId ?? "";
   if (ticket.blockedBy.length > 0) {
-    return `${id} bloqué`.trim();
+    return copy.blocked(id).trim();
   }
   if (ticket.awaitingReply) {
-    return `${id} en attente`.trim();
+    return copy.awaiting(id).trim();
   }
   const base = `${id} ${ticket.title}`.trim();
-  return ticket.specOnly ? `${base} · spec` : base;
+  return ticket.specOnly ? copy.spec(base) : base;
 }
 
 /**
@@ -132,7 +144,13 @@ export function UpNextBand({
   selectedEpicIds,
   className,
 }: UpNextBandProps) {
+  const t = useTranslations("Desk");
   const rows = upNext.filter((row) => row.tickets.length > 0);
+  const chipCopy: ChipLabelCopy = {
+    blocked: (id) => t("upNext.chipBlocked", { id }),
+    awaiting: (id) => t("upNext.chipAwaiting", { id }),
+    spec: (label) => t("upNext.chipSpec", { label }),
+  };
 
   return (
     <StrataBand
@@ -142,13 +160,13 @@ export function UpNextBand({
       className={cn("min-w-0", className)}
     >
       <BandHeader
-        label="Up next"
+        label={t("upNext.label")}
         stratum="next"
         labelSize={13}
         right={
           rows.length > 0 ? (
             <Mono size={11} tone="next-mid">
-              l&apos;ordre où Full Auto va piocher
+              {t("upNext.hint")}
             </Mono>
           ) : undefined
         }
@@ -207,7 +225,7 @@ export function UpNextBand({
                   onClick={(event) => onOpenTicket?.(ticket.epicId, event)}
                   title={
                     ticket.blockedBy.length > 0
-                      ? `Bloqué par ${ticket.blockedBy.join(", ")}`
+                      ? t("upNext.blockedBy", { ids: ticket.blockedBy.join(", ") })
                       : ticket.title
                   }
                   className={cn(
@@ -221,7 +239,7 @@ export function UpNextBand({
                     index >= mobileVisible && "max-lg:hidden",
                   )}
                 >
-                  {chipLabel(ticket)}
+                  {chipLabel(ticket, chipCopy)}
                 </button>
               );
             })}

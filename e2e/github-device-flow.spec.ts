@@ -1,9 +1,9 @@
 import { test, expect, type Page } from "@playwright/test";
 
 /**
- * "Se connecter avec GitHub" (OAuth Device Flow), driven in a real browser.
+ * "Sign in with GitHub" (OAuth Device Flow), driven in a real browser.
  *
- * WHAT IS REAL HERE: the Settings → Intégrations page, its hydration, the
+ * WHAT IS REAL HERE: the Settings → Integrations page, its hydration, the
  * hook's poll loop on real timers, the clipboard, focus and the rendered
  * states. That is the half the component tests cannot speak for — they assert a
  * DOM, not a browser.
@@ -18,7 +18,7 @@ import { test, expect, type Page } from "@playwright/test";
  *   `__tests__/github-device-flow-routes.test.ts` (33 cases).
  * - `GET`/`PATCH /api/settings` — so this spec writes NOTHING to the shared
  *   e2e database. It can therefore run beside every other spec, and a
- *   Déconnecter click here cannot clear a token another test is relying on.
+ *   A Disconnect click here cannot clear a token another test is relying on.
  *
  * The consequence, stated plainly: this file is evidence about the UI and the
  * poll loop in a browser. It is no evidence at all about the device-flow
@@ -56,7 +56,7 @@ async function stubSettings(page: Page, data: Record<string, unknown>) {
   );
 }
 
-test.describe("Settings → Intégrations — connexion GitHub", () => {
+test.describe("Settings → Integrations — GitHub sign-in", () => {
   test("shows the code, polls, and lands on the connected state", async ({
     page,
   }) => {
@@ -98,13 +98,13 @@ test.describe("Settings → Intégrations — connexion GitHub", () => {
     // slot, OpenAI's, Webhooks'), and only this one belongs to the flow.
     await expect(
       page.getByTestId("github-device-flow").getByRole("status")
-    ).toContainText("En attente de votre autorisation");
+    ).toContainText("Waiting for your authorisation");
     await page.screenshot({
       path: "e2e/test-results/github-device-flow-awaiting.png",
     });
 
     await expect(page.getByTestId("github-connected")).toContainText(
-      "Connecté en tant que octocat",
+      "Connected as octocat",
       { timeout: 15_000 }
     );
     await expect(page.getByTestId("github-connected")).toContainText(
@@ -132,7 +132,7 @@ test.describe("Settings → Intégrations — connexion GitHub", () => {
     await expect(page.getByTestId("github-device-code")).toBeVisible();
 
     await page.getByTestId("github-device-copy").click();
-    await expect(page.getByTestId("github-device-copy")).toHaveText("Copié");
+    await expect(page.getByTestId("github-device-copy")).toHaveText("Copied");
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
       "WDJB-MJHT"
     );
@@ -211,10 +211,10 @@ test.describe("Settings → Intégrations — connexion GitHub", () => {
 
     await page.goto("/settings/integrations");
     await expect(page.getByTestId("github-connected")).toContainText(
-      "Connecté en tant que octocat"
+      "Connected as octocat"
     );
 
-    await page.getByRole("button", { name: "Déconnecter" }).click();
+    await page.getByRole("button", { name: "Disconnect" }).click();
 
     await expect(page.getByTestId("github-connect")).toBeVisible();
     await expect(page.getByTestId("github-connected")).toHaveCount(0);

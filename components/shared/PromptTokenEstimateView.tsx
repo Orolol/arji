@@ -1,12 +1,31 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 import { AlertTriangle, Sparkles } from "lucide-react";
 import { formatTokens } from "@/lib/utils/format-usage";
+import type { TranslationKey } from "@/lib/i18n/catalogue";
 import type {
   PromptTokenBreakdown,
   LargestContextSection,
 } from "@/lib/tokens/estimator";
+
+/**
+ * The short name each per-session chip prints, as catalogue KEY REFERENCES
+ * (`lib/i18n/catalogue.ts`, pattern 3) — an `id → key` choice is an explicit
+ * map, never `t(`reviewType.${id}`)`. An unlisted review type keeps its raw
+ * id with the underscore softened, which is data rather than copy.
+ *
+ * Three of the four are the review picker's own words. `compliance` is not:
+ * this chip has room for "Compliance" and not for "Compliance /
+ * Accessibility", and that shorter word is its own string.
+ */
+const PER_SESSION_LABEL_KEYS: Record<string, TranslationKey> = {
+  security: "Shared.reviewTypes.security.label",
+  code_review: "Shared.reviewTypes.codeReview.label",
+  compliance: "Shared.promptEstimate.compliance",
+  feature_review: "Shared.reviewTypes.featureReview.label",
+};
 
 export interface PromptTokenEstimateData {
   skipped?: boolean;
@@ -43,6 +62,10 @@ export function PromptTokenEstimateView({
   comment,
   enabled = true,
 }: PromptTokenEstimateViewProps) {
+  const t = useTranslations("Shared");
+  // The per-session table holds full dotted paths, so it resolves through the
+  // namespace-less translator.
+  const tKey = useTranslations();
   const [estimate, setEstimate] = useState<PromptTokenEstimateData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -71,6 +94,9 @@ export function PromptTokenEstimateView({
       })
         .then((res) => {
           if (!res.ok) {
+            // Not copy: `error` is only ever read as a boolean below — the
+            // failure branch draws its own sentence — so this string never
+            // reaches the screen.
             throw new Error(`Estimate failed (${res.status})`);
           }
           return res.json();
@@ -83,6 +109,7 @@ export function PromptTokenEstimateView({
         })
         .catch((err) => {
           if (!cancelled) {
+            // Same as above: `error` is read as a flag, never printed.
             setError(err instanceof Error ? err.message : "Estimate unavailable");
           }
         })
@@ -117,7 +144,7 @@ export function PromptTokenEstimateView({
         className="rounded-[8px] border border-border bg-band/40 px-3 py-2 text-xs text-muted-foreground animate-pulse"
         data-testid="prompt-estimate-loading"
       >
-        Estimating prompt tokens...
+        {t("promptEstimate.loading")}
       </div>
     );
   }
@@ -128,7 +155,7 @@ export function PromptTokenEstimateView({
         className="rounded-[8px] border border-border/50 bg-band/20 px-3 py-1.5 text-xs text-muted-foreground italic"
         data-testid="prompt-estimate-unavailable"
       >
-        Prompt estimate unavailable
+        {t("promptEstimate.unavailable")}
       </div>
     );
   }
@@ -143,7 +170,8 @@ export function PromptTokenEstimateView({
         className="rounded-[8px] border border-border/50 bg-band/20 px-3 py-1.5 text-xs text-muted-foreground"
         data-testid="prompt-estimate-skipped"
       >
-        {estimate.skipReason ?? "No agent session will be dispatched"}
+        {/* `skipReason` is the route's own words, not catalogue copy. */}
+        {estimate.skipReason ?? t("promptEstimate.skipped")}
       </div>
     );
   }
@@ -159,22 +187,24 @@ export function PromptTokenEstimateView({
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-1.5 font-medium text-foreground">
           <Sparkles className="h-3.5 w-3.5 text-muted-foreground" />
-          <span>Estimated Prompt:</span>
+          <span>{t("promptEstimate.label")}</span>
           <span
             className="font-mono font-semibold"
             data-testid="prompt-estimate-total"
           >
-            ~{formatTokens(total) ?? total} tokens
+            {t("promptEstimate.total", {
+              tokens: formatTokens(total) ?? String(total),
+            })}
             {sessionsCount > 1 && (
               <span className="ml-1 text-[11px] font-normal text-muted-foreground">
-                across {sessionsCount} sessions
+                {t("promptEstimate.acrossSessions", { count: sessionsCount })}
               </span>
             )}
           </span>
         </div>
         {budget != null && (
           <span className="text-[11px] text-muted-foreground font-mono">
-            Budget: {formatTokens(budget)}
+            {t("promptEstimate.budget", { tokens: formatTokens(budget) ?? "" })}
           </span>
         )}
       </div>
@@ -183,22 +213,19 @@ export function PromptTokenEstimateView({
           className="flex flex-wrap items-center gap-1.5 pt-0.5 text-[11px] text-muted-foreground"
           data-testid="prompt-estimate-per-session"
         >
-          <span className="font-medium text-foreground">Per session:</span>
+          <span className="font-medium text-foreground">
+            {t("promptEstimate.perSession")}
+          </span>
           {perSessionEstimates.map((s) => (
             <span
               key={s.reviewType}
               className="inline-flex items-center gap-1 rounded bg-background/50 px-1.5 py-0.5 border border-border/40 font-mono"
             >
               <span>
-                {s.reviewType === "security"
-                  ? "Security"
-                  : s.reviewType === "code_review"
-                    ? "Code Review"
-                    : s.reviewType === "compliance"
-                      ? "Compliance"
-                      : s.reviewType === "feature_review"
-                        ? "Feature Review"
-                        : s.reviewType.replace("_", " ")}:
+                {PER_SESSION_LABEL_KEYS[s.reviewType]
+                  ? tKey(PER_SESSION_LABEL_KEYS[s.reviewType])
+                  : s.reviewType.replace("_", " ")}
+                :
               </span>
               <span>~{formatTokens(s.tokens)}</span>
             </span>
@@ -211,35 +238,51 @@ export function PromptTokenEstimateView({
         data-testid="prompt-estimate-breakdown"
       >
         <div className="flex items-center justify-between rounded-[4px] bg-background/60 px-2 py-1 border border-border/50">
-          <span className="text-muted-foreground">Spec:</span>
+          <span className="text-muted-foreground">
+            {t("promptEstimate.breakdown.spec")}
+          </span>
           <span className="font-mono font-medium">{formatTokens(breakdown.spec) ?? 0}</span>
         </div>
         <div className="flex items-center justify-between rounded-[4px] bg-background/60 px-2 py-1 border border-border/50">
-          <span className="text-muted-foreground">Memory:</span>
+          <span className="text-muted-foreground">
+            {t("promptEstimate.breakdown.memory")}
+          </span>
           <span className="font-mono font-medium">{formatTokens(breakdown.memory) ?? 0}</span>
         </div>
         <div className="flex items-center justify-between rounded-[4px] bg-background/60 px-2 py-1 border border-border/50">
-          <span className="text-muted-foreground">Ticket / Stories:</span>
+          <span className="text-muted-foreground">
+            {t("promptEstimate.breakdown.ticket")}
+          </span>
           <span className="font-mono font-medium">{formatTokens(breakdown.ticket) ?? 0}</span>
         </div>
         <div className="flex items-center justify-between rounded-[4px] bg-background/60 px-2 py-1 border border-border/50">
-          <span className="text-muted-foreground">Comments:</span>
+          <span className="text-muted-foreground">
+            {t("promptEstimate.breakdown.comments")}
+          </span>
           <span className="font-mono font-medium">{formatTokens(breakdown.comments) ?? 0}</span>
         </div>
         <div className="flex items-center justify-between rounded-[4px] bg-background/60 px-2 py-1 border border-border/50">
-          <span className="text-muted-foreground">Findings:</span>
+          <span className="text-muted-foreground">
+            {t("promptEstimate.breakdown.findings")}
+          </span>
           <span className="font-mono font-medium">{formatTokens(breakdown.findings) ?? 0}</span>
         </div>
         <div className="flex items-center justify-between rounded-[4px] bg-background/60 px-2 py-1 border border-border/50">
-          <span className="text-muted-foreground">Documents:</span>
+          <span className="text-muted-foreground">
+            {t("promptEstimate.breakdown.documents")}
+          </span>
           <span className="font-mono font-medium">{formatTokens(breakdown.documents) ?? 0}</span>
         </div>
         <div className="flex items-center justify-between rounded-[4px] bg-background/60 px-2 py-1 border border-border/50">
-          <span className="text-muted-foreground">System:</span>
+          <span className="text-muted-foreground">
+            {t("promptEstimate.breakdown.system")}
+          </span>
           <span className="font-mono font-medium">{formatTokens(breakdown.system) ?? 0}</span>
         </div>
         <div className="flex items-center justify-between rounded-[4px] bg-background/60 px-2 py-1 border border-border/50">
-          <span className="text-muted-foreground">Other / Instr:</span>
+          <span className="text-muted-foreground">
+            {t("promptEstimate.breakdown.other")}
+          </span>
           <span className="font-mono font-medium">{formatTokens(breakdown.other) ?? 0}</span>
         </div>
       </div>
@@ -254,12 +297,26 @@ export function PromptTokenEstimateView({
             <AlertTriangle className="h-4 w-4 shrink-0 text-priority-yellow mt-0.5" />
             <div className="space-y-0.5">
               <p className="font-medium text-[11.5px] text-priority-yellow">
-                Prompt token budget warning
+                {t("promptEstimate.budgetWarning.title")}
               </p>
               <p className="text-[11px] text-muted-foreground leading-tight">
-                Estimated prompt (~{formatTokens(total)} tokens) exceeds the configured budget ({formatTokens(budget)} tokens).
+                {t("promptEstimate.budgetWarning.body", {
+                  total: formatTokens(total) ?? "",
+                  budget: formatTokens(budget) ?? "",
+                })}
                 {largestSection && (
-                  <> Largest section is <strong className="text-foreground">{largestSection.label}</strong> (~{formatTokens(largestSection.tokens)} tokens, {largestSection.percentage}%).</>
+                  <>
+                    {" "}
+                    {/* `label` is the estimator's section name, not copy. */}
+                    {t.rich("promptEstimate.budgetWarning.largest", {
+                      label: largestSection.label,
+                      tokens: formatTokens(largestSection.tokens) ?? "",
+                      percentage: String(largestSection.percentage),
+                      strong: (chunks) => (
+                        <strong className="text-foreground">{chunks}</strong>
+                      ),
+                    })}
+                  </>
                 )}
               </p>
             </div>

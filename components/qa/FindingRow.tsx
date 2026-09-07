@@ -1,5 +1,6 @@
 "use client";
 
+import { useLocale, useTranslations } from "next-intl";
 import { Hammer } from "lucide-react";
 
 import {
@@ -9,7 +10,8 @@ import {
   SurfaceCard,
   projectTone,
 } from "@/components/piscine";
-import { formatRelativeAge } from "@/components/usage/formatters";
+import { formatRelative } from "@/lib/i18n/format";
+import type { UiLocale } from "@/lib/i18n/locales";
 import type { DeskProject } from "@/lib/control-desk/types";
 import type { QaFinding } from "@/lib/qa/types";
 import { cn } from "@/lib/utils";
@@ -67,21 +69,16 @@ export interface FindingRowProps {
 }
 
 /**
- * "6m" / "1h" / "2h" — `components/usage/formatters.ts`, already shipped and
- * client-safe. An unparseable stamp is an em-dash, never "just now".
- *
- * SQLite's CURRENT_TIMESTAMP writes "2026-08-30 06:00:00" while the routes
- * write ISO; the space form is normalised to UTC first, the same way
- * `AttentionRow.relativeAge` does it.
+ * "6m ago" / "1h ago" / "2h ago" — the shared `formatRelative`, which also
+ * reads SQLite's zone-less "2026-08-30 06:00:00" as UTC. An unparseable stamp
+ * is an em-dash, never "just now".
  */
-export function findingAge(filedAt: string | null, now: number = Date.now()): string {
-  if (!filedAt) return "—";
-  const normalized = filedAt.includes("T")
-    ? filedAt
-    : `${filedAt.replace(" ", "T")}Z`;
-  const then = Date.parse(normalized);
-  if (Number.isNaN(then)) return "—";
-  return formatRelativeAge(Math.max(0, now - then));
+export function findingAge(
+  filedAt: string | null,
+  locale: UiLocale,
+  now: number = Date.now(),
+): string {
+  return formatRelative(filedAt, { locale, now }) || "—";
 }
 
 export function FindingRow({
@@ -93,6 +90,8 @@ export function FindingRow({
   pending = false,
   className,
 }: FindingRowProps) {
+  const locale = useLocale();
+  const t = useTranslations("Qa");
   const minor = finding.tier === "minor";
   const tone = projectTone(project?.colorIndex ?? 0);
 
@@ -133,7 +132,10 @@ export function FindingRow({
         {finding.text}
         {!minor && finding.filePath ? (
           <Mono size={11.5} tone="muted">
-            {` · ${finding.filePath}:${finding.lineNumber}`}
+            {` ${t("finding.location", {
+              path: finding.filePath,
+              line: finding.lineNumber,
+            })}`}
           </Mono>
         ) : null}
       </span>
@@ -148,7 +150,10 @@ export function FindingRow({
         className="order-none ml-auto min-w-0 truncate lg:ml-0 lg:shrink-0"
       >
         <Mono size={10} tone={minor ? "you-mid" : "muted"}>
-          {`${finding.reviewer ?? "—"} · ${findingAge(finding.filedAt)}`}
+          {t("finding.meta", {
+            reviewer: finding.reviewer ?? "—",
+            age: findingAge(finding.filedAt, locale),
+          })}
         </Mono>
       </span>
 
@@ -169,10 +174,10 @@ export function FindingRow({
             icon={Hammer}
             onClick={() => onFix?.(finding)}
             pending={pending}
-            pendingLabel="Dispatch…"
+            pendingLabel={t("finding.dispatchPending")}
             data-testid="qa-finding-fix"
           >
-            Fix with agent
+            {t("finding.fix")}
           </PillButton>
         ) : null}
 
@@ -184,7 +189,7 @@ export function FindingRow({
             onClick={() => onDiff?.(finding)}
             data-testid="qa-finding-diff"
           >
-            Diff
+            {t("finding.diff")}
           </PillButton>
         ) : null}
 
@@ -200,7 +205,7 @@ export function FindingRow({
           className="text-muted-foreground"
           data-testid="qa-finding-dismiss"
         >
-          Dismiss
+          {t("finding.dismiss")}
         </PillButton>
       </div>
     </SurfaceCard>

@@ -194,7 +194,7 @@ describe("FindingsBand — counters, filters and the footnote", () => {
         projectsById={projectsById}
       />,
     );
-    expect(screen.getByText("Aucun finding pour ce filtre.")).toBeInTheDocument();
+    expect(screen.getByText("No finding for this filter.")).toBeInTheDocument();
     expect(screen.queryAllByTestId("qa-finding-row")).toHaveLength(0);
   });
 
@@ -202,7 +202,7 @@ describe("FindingsBand — counters, filters and the footnote", () => {
     renderBand([]);
     const footnote = screen.getByTestId("qa-findings-footnote");
     expect(footnote.textContent).toBe(
-      "Un finding blocking retire le ticket de Ready to land ; Fix with agent relance un build ciblé sur le finding.",
+      "A blocking finding removes the ticket from Ready to land; Fix with agent relaunches a build targeted at the finding.",
     );
     expect(within(footnote).getByText("blocking").tagName).toBe("STRONG");
   });

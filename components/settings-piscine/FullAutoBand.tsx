@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { useTranslations } from "next-intl";
 
 import {
   BandHeader,
@@ -89,6 +90,7 @@ type ConcurrencySegment = "2" | "4" | "8" | "inf" | "";
 const LADDER: readonly ConcurrencySegment[] = ["2", "4", "8", "inf"];
 
 export function FullAutoBand({ draft, projectCount }: FullAutoBandProps) {
+  const t = useTranslations("Settings");
   const { agents: namedAgents } = useNamedAgentsList();
   const enabled = draft.flag(AUTO_MODE_ENABLED_SETTING_KEY);
   const dimmed = !enabled;
@@ -121,10 +123,10 @@ export function FullAutoBand({ draft, projectCount }: FullAutoBandProps) {
       <StrataBand stratum="live">
         <BandHeader
           stratum="live"
-          label="Full Auto"
+          label={t("fullAuto.label")}
           meta={
             <span className="font-sans text-[11.5px] leading-normal">
-              le pilote qui dispatche tout seul — ces règles le bornent
+              {t("fullAuto.meta")}
             </span>
           }
           right={
@@ -132,7 +134,7 @@ export function FullAutoBand({ draft, projectCount }: FullAutoBandProps) {
               size="lg"
               on={enabled}
               onChange={(next) => draft.set(AUTO_MODE_ENABLED_SETTING_KEY, next)}
-              label="Full Auto"
+              label={t("fullAuto.label")}
               testId="full-auto-master"
             />
           }
@@ -141,7 +143,7 @@ export function FullAutoBand({ draft, projectCount }: FullAutoBandProps) {
         <BandDim dimmed={dimmed} testId="full-auto-body">
           <div className="flex flex-wrap items-end gap-[20px]">
             <SettingField
-              kicker="AGENTS EN PARALLÈLE, MAX"
+              kicker={t("fullAuto.maxParallel")}
               stratum="live"
               flex={1}
               testId="agent-max-concurrent"
@@ -162,7 +164,7 @@ export function FullAutoBand({ draft, projectCount }: FullAutoBandProps) {
               />
               {offLadder ? (
                 <Mono size={10} tone="live-mid" as="div">
-                  {`réglé sur ${stored} — hors des paliers`}
+                  {t("fullAuto.offLadder", { value: stored })}
                 </Mono>
               ) : null}
             </SettingField>
@@ -180,7 +182,7 @@ export function FullAutoBand({ draft, projectCount }: FullAutoBandProps) {
               a project armed from the desk is dispatching under their value.
             */}
             <SettingField
-              kicker="AGENTS PAR DÉFAUT"
+              kicker={t("fullAuto.defaultAgents")}
               stratum="live"
               flex={1}
               testId="full-auto-agents"
@@ -191,17 +193,15 @@ export function FullAutoBand({ draft, projectCount }: FullAutoBandProps) {
                 className="pointer-events-auto flex items-center gap-[6px]"
               >
                 <RolePill
-                  role="build"
                   settingKey={AUTO_MODE_BUILD_AGENT_SETTING_KEY}
-                  label="Build"
+                  label={t("fullAuto.buildRole")}
                   testId="auto-build-agent"
                   draft={draft}
                   agents={namedAgents}
                 />
                 <RolePill
-                  role="review"
                   settingKey={AUTO_MODE_REVIEW_AGENT_SETTING_KEY}
-                  label="Review"
+                  label={t("fullAuto.reviewRole")}
                   testId="auto-review-agent"
                   draft={draft}
                   agents={namedAgents}
@@ -218,13 +218,13 @@ export function FullAutoBand({ draft, projectCount }: FullAutoBandProps) {
                       draft.set(AUTO_MODE_SMART_DISPATCH_SETTING_KEY, next)
                     }
                     disabled={dimmed}
-                    label="Choisir l'agent d'après son historique"
+                    label={t("fullAuto.smartDispatch")}
                     testId="auto-smart-dispatch"
                   />
                 }
                 off={!draft.flag(AUTO_MODE_SMART_DISPATCH_SETTING_KEY)}
-                label="Choisir l'agent d'après son historique"
-                suffix="· rôles non assignés"
+                label={t("fullAuto.smartDispatch")}
+                suffix={t("fullAuto.smartDispatchSuffix")}
                 suffixTone="live-mid"
               />
               <SettingRow
@@ -235,31 +235,32 @@ export function FullAutoBand({ draft, projectCount }: FullAutoBandProps) {
                       draft.set(FULL_AUTO_SECOND_OPINION_SETTING_KEY, next)
                     }
                     disabled={dimmed}
-                    label="Second avis indépendant avant le land"
+                    label={t("fullAuto.secondOpinion")}
                     testId="auto-second-opinion"
                   />
                 }
                 off={!draft.flag(FULL_AUTO_SECOND_OPINION_SETTING_KEY)}
-                label="Second avis indépendant avant le land"
-                suffix="· un slot review"
+                label={t("fullAuto.secondOpinion")}
+                suffix={t("fullAuto.secondOpinionSuffix")}
                 suffixTone="live-mid"
               />
               <SettingRow
                 toggle={<CheckMark checked shape="disc" tone="live" />}
-                label="Refuser les tickets avec findings ouverts"
-                suffix="· toujours"
+                label={t("fullAuto.openFindings")}
+                suffix={t("fullAuto.openFindingsSuffix")}
                 suffixTone="live-mid"
               />
             </div>
           </div>
 
           <Mono size={10.5} tone="live-mid" as="div">
-            Chaîne review puis land automatiquement si clean · land sans
-            confirmation humaine
+            {t("fullAuto.chaining")}
           </Mono>
           <div data-testid="full-auto-blast-radius">
             <Mono size={10.5} tone="live-mid" as="div">
-              {`arme ${armed === null ? "—" : armed} projets · ${optedOut} l'ont désactivé`}
+              {armed === null
+                ? t("fullAuto.blastRadiusUnknown", { optedOut })
+                : t("fullAuto.blastRadius", { count: armed, optedOut })}
             </Mono>
           </div>
         </BandDim>
@@ -273,24 +274,28 @@ export function FullAutoBand({ draft, projectCount }: FullAutoBandProps) {
  * an id on screen is unreadable, and a stored id whose agent has since been
  * deleted must not render as if it still resolved — it falls back to
  * "Default", which is what the resolution chain will actually do.
+ *
+ * `label` arrives already resolved from the band above — the role's own name —
+ * so the only copy this component looks up is the "Default" row and the
+ * screen-reader line that names the role.
  */
 function RolePill({
-  role,
   settingKey,
   label,
   testId,
   draft,
   agents,
 }: {
-  role: "build" | "review";
   settingKey: string;
   label: string;
   testId: string;
   draft: SettingsDraft;
   agents: readonly { id: string; name: string }[];
 }) {
+  const t = useTranslations("Settings");
   const selected = draft.text(settingKey);
-  const name = agents.find((agent) => agent.id === selected)?.name ?? "Default";
+  const fallback = t("fullAuto.defaultAgent");
+  const name = agents.find((agent) => agent.id === selected)?.name ?? fallback;
 
   return (
     <div data-testid={testId} className="min-w-0">
@@ -301,7 +306,7 @@ function RolePill({
         className="h-[30px]"
       >
         <DropdownMenuItem onSelect={() => draft.set(settingKey, "")}>
-          Default
+          {fallback}
         </DropdownMenuItem>
         {agents.map((agent) => (
           <DropdownMenuItem
@@ -312,7 +317,9 @@ function RolePill({
           </DropdownMenuItem>
         ))}
       </SelectPill>
-      <span className="sr-only">{`Agent ${role} par défaut`}</span>
+      <span className="sr-only">
+        {t("fullAuto.roleDefaultAgent", { role: label })}
+      </span>
     </div>
   );
 }

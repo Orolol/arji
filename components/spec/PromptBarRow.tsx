@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { FieldKicker, Mono, PROMPT_SEGMENT } from "@/components/piscine";
 import { PROMPT_ANATOMY_ORDER } from "@/lib/tokens/estimator";
 import { formatTokens, type PromptAnatomyRow } from "@/components/spec/spec-format";
@@ -18,6 +20,7 @@ interface PromptBarRowProps {
 const LABEL_MIN_PERCENT = 7.5;
 
 export function PromptBarRow({ row, max }: PromptBarRowProps) {
+  const t = useTranslations("Spec");
   const denominator = max > 0 ? max : row.total;
   const segments = PROMPT_ANATOMY_ORDER.map((key) => ({
     key,
@@ -31,7 +34,14 @@ export function PromptBarRow({ row, max }: PromptBarRowProps) {
     <div
       data-testid="prompt-bar-row"
       className="flex items-center gap-[12px]"
-      title={row.sampledAt ? `${row.agentName} · ${row.sampledAt}` : undefined}
+      title={
+        row.sampledAt
+          ? t("anatomy.rowTitle", {
+              agent: row.agentName,
+              sampledAt: row.sampledAt,
+            })
+          : undefined
+      }
     >
       <span className="flex w-[172px] shrink-0 items-baseline gap-[5px] text-[12.5px] font-semibold text-foreground max-[1199px]:w-[132px]">
         <span className="min-w-0 truncate">{row.agentName}</span>
@@ -39,7 +49,7 @@ export function PromptBarRow({ row, max }: PromptBarRowProps) {
             which is the only kind of label allowed below 11px — and only when
             it is tracked. FieldKicker is what enforces the tracking. */}
         <FieldKicker size={9.5} stratum="land" className="shrink-0">
-          {`· ${row.role}`}
+          {t("anatomy.role", { role: row.role })}
         </FieldKicker>
       </span>
 
@@ -66,7 +76,10 @@ export function PromptBarRow({ row, max }: PromptBarRowProps) {
                 // before that, and a clipped numeral is worse than none.
                 <Mono size={9.5} tone="ink" className="max-[899px]:hidden">
                   {annotation
-                    ? `${formatTokens(segment.tokens)} — ${annotation}`
+                    ? t("anatomy.segment", {
+                        tokens: formatTokens(segment.tokens),
+                        annotation,
+                      })
                     : formatTokens(segment.tokens)}
                 </Mono>
               ) : null}

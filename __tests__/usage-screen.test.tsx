@@ -1,5 +1,5 @@
 /**
- * Frame 8d's own behaviour: the range control, the PLAFOND MENSUEL tile and
+ * Frame 8d's own behaviour: the range control, the MONTHLY CAP tile and
  * its inline editor, band collapse, and the BY DAY failure caps.
  *
  * The provider subscription cards, the polling contract and the state
@@ -8,7 +8,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import UsagePage from "@/app/usage/page";
 import type {
   SubscriptionStatus,
@@ -165,7 +165,7 @@ describe("Usage screen — range control", () => {
     await screen.findByTestId("usage-band");
     expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/usage");
 
-    fireEvent.click(screen.getByText("7 j"));
+    fireEvent.click(screen.getByText("7d"));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     // A range change is a plain read: only Refresh pays the cold-poll latency.
     expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/usage?range=7d");
@@ -176,7 +176,7 @@ describe("Usage screen — range control", () => {
     render(<UsagePage />);
 
     await screen.findByTestId("usage-band");
-    fireEvent.click(screen.getByText("7 j"));
+    fireEvent.click(screen.getByText("7d"));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
 
     fireEvent.click(screen.getByTestId("usage-refresh"));
@@ -188,27 +188,30 @@ describe("Usage screen — range control", () => {
     const fetchMock = mockFetch(baseReport());
     render(<UsagePage />);
 
+    // Scoped to the KPI row: the subscription cards below carry their own
+    // "LAST 7 DAYS" label for the Arij-metered window.
+    const band = () => within(screen.getByTestId("usage-band"));
     await screen.findByTestId("usage-band");
-    expect(screen.getByText("30 DERNIERS JOURS")).toBeInTheDocument();
+    expect(band().getByText("LAST 30 DAYS")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByText("7 j"));
+    fireEvent.click(screen.getByText("7d"));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    expect(await screen.findByText("7 DERNIERS JOURS")).toBeInTheDocument();
+    await waitFor(() => expect(band().getByText("LAST 7 DAYS")).toBeInTheDocument());
   });
 
-  it("says DEPUIS LE DÉBUT on the all-time range", async () => {
+  it("says ALL TIME on the all-time range", async () => {
     const fetchMock = mockFetch(baseReport());
     render(<UsagePage />);
 
     await screen.findByTestId("usage-band");
-    fireEvent.click(screen.getByText("Tout"));
+    fireEvent.click(screen.getByText("All"));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/usage?range=all");
-    expect(await screen.findByText("DEPUIS LE DÉBUT")).toBeInTheDocument();
+    expect(await screen.findByText("ALL TIME")).toBeInTheDocument();
   });
 });
 
-describe("Usage screen — PLAFOND MENSUEL", () => {
+describe("Usage screen — MONTHLY CAP", () => {
   it("draws the ratio and a clamped bar when a cap is configured", async () => {
     mockFetch(
       baseReport(
@@ -223,7 +226,7 @@ describe("Usage screen — PLAFOND MENSUEL", () => {
       "$184.00 / $250.00"
     );
     expect(screen.getByTestId("usage-cap-fill")).toHaveStyle({ width: "74%" });
-    expect(screen.getByText("alerte à 80 %")).toBeInTheDocument();
+    expect(screen.getByText("alert at 80%")).toBeInTheDocument();
     // The promise the software cannot keep is deliberately not shipped.
     expect(screen.queryByText(/Full Auto/)).not.toBeInTheDocument();
   });
@@ -254,7 +257,7 @@ describe("Usage screen — PLAFOND MENSUEL", () => {
     // A bar with no denominator would be an invented number.
     expect(screen.queryByTestId("usage-cap-fill")).not.toBeInTheDocument();
     expect(screen.getByTestId("usage-cap-set")).toHaveTextContent(
-      "définir un plafond →"
+      "set a cap →"
     );
   });
 
@@ -318,7 +321,7 @@ describe("Usage screen — PLAFOND MENSUEL", () => {
     fireEvent.keyDown(screen.getByTestId("usage-cap-input"), { key: "Enter" });
 
     expect(await screen.findByTestId("usage-cap-message")).toHaveTextContent(
-      "Le plafond doit être un montant positif."
+      "The cap must be a positive amount."
     );
     expect(
       fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH")
@@ -396,7 +399,7 @@ describe("Usage screen — bands", () => {
     render(<UsagePage />);
 
     await screen.findByTestId("usage-band");
-    expect(screen.getByText("night runs inclus")).toBeInTheDocument();
+    expect(screen.getByText("night runs included")).toBeInTheDocument();
   });
 
   it("names yesterday's night batch when it reported a cost", async () => {
@@ -405,7 +408,7 @@ describe("Usage screen — bands", () => {
 
     await screen.findByTestId("usage-band");
     expect(
-      screen.getByText("night runs inclus — le lot d'hier : $4.20")
+      screen.getByText("night runs included — last night: $4.20")
     ).toBeInTheDocument();
   });
 });
@@ -454,7 +457,7 @@ describe("Usage screen — BY DAY", () => {
     render(<UsagePage />);
 
     await screen.findByTestId("usage-day-strip");
-    expect(screen.getByText(/30 jours/)).toBeInTheDocument();
-    expect(screen.getByText("rouge = sessions failed")).toBeInTheDocument();
+    expect(screen.getByText(/30 days/)).toBeInTheDocument();
+    expect(screen.getByText("red = failed sessions")).toBeInTheDocument();
   });
 });

@@ -1,0 +1,26 @@
+{
+  "title": "Inbox",
+  "subtitle": "Unread agent messages, across all projects. Only the questions flagged below need an answer.",
+  "loading": "Loading…",
+  "empty": "Inbox zero — no unread agent messages.",
+  "counts": {
+    "unread": "{count} unread",
+    "awaiting": "{count} awaiting your reply"
+  },
+  "row": {
+    "awaitingBadge": "Awaiting reply",
+    "unreadBadge": "Unread",
+    "replyPlaceholder": "Reply to the agent…",
+    "commentPlaceholder": "Comment on this ticket (optional)…",
+    "markRead": "Mark as read",
+    "markReadPending": "Marking…",
+    "reply": "Reply",
+    "comment": "Comment",
+    "sendPending": "Sending…",
+    "sendToDev": "Send to Dev",
+    "dispatchPending": "Dispatching…",
+    "replyError": "Failed to post reply",
+    "markReadError": "Failed to mark as read",
+    "dispatchError": "Failed to dispatch build agent"
+  }
+}

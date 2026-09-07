@@ -1,5 +1,8 @@
 "use client";
 
+import { useLocale, useTranslations } from "next-intl";
+import { formatDateTime } from "@/lib/i18n/format";
+import type { TranslationKey } from "@/lib/i18n/catalogue";
 import type { ReactNode } from "react";
 import { Brain, Download, RefreshCw } from "lucide-react";
 
@@ -13,10 +16,11 @@ import { MEMORY_WRITER_AGENT_TYPES } from "@/lib/workflow/dreaming-constants";
 import {
   describeProviderOptions,
   parseStoredProviderOptions,
+  type DescribedProviderOption,
 } from "@/lib/providers/options-registry";
 import { formatTokens } from "@/lib/utils/format-usage";
 
-import { OUTCOME_LABELS } from "./labels";
+import { OUTCOME_LABEL_KEYS } from "./labels";
 import type { SessionDetail } from "./types";
 
 /**
@@ -64,28 +68,24 @@ function TextValue({ children }: { children: ReactNode }) {
 }
 
 /**
- * The parenthesised section breakdown of the dispatch-time token estimate.
- * The eight labels and their order are pinned by tests; the parse is wrapped
- * so a malformed row degrades to no breakdown rather than a blank screen.
+ * The eight breakdown sections in the order the tests pin — a MODULE-SCOPE
+ * COPY TABLE holding catalogue KEY REFERENCES (`lib/i18n/catalogue.ts`,
+ * pattern 3).
  */
-function estimateBreakdown(raw: string | null | undefined): string {
-  if (!raw) return "";
-  try {
-    const b = JSON.parse(raw);
-    const parts: string[] = [];
-    if (b.spec) parts.push(`Spec ${formatTokens(b.spec)}`);
-    if (b.memory) parts.push(`Mem ${formatTokens(b.memory)}`);
-    if (b.ticket) parts.push(`Ticket ${formatTokens(b.ticket)}`);
-    if (b.comments) parts.push(`Comments ${formatTokens(b.comments)}`);
-    if (b.findings) parts.push(`Findings ${formatTokens(b.findings)}`);
-    if (b.documents) parts.push(`Docs ${formatTokens(b.documents)}`);
-    if (b.system) parts.push(`System ${formatTokens(b.system)}`);
-    if (b.other) parts.push(`Other ${formatTokens(b.other)}`);
-    return parts.length > 0 ? ` (${parts.join(" · ")})` : "";
-  } catch {
-    return "";
-  }
-}
+const BREAKDOWN_KEYS: ReadonlyArray<{ field: string; labelKey: TranslationKey }> =
+  [
+    { field: "spec", labelKey: "SessionLive.info.breakdownLabels.spec" },
+    { field: "memory", labelKey: "SessionLive.info.breakdownLabels.memory" },
+    { field: "ticket", labelKey: "SessionLive.info.breakdownLabels.ticket" },
+    { field: "comments", labelKey: "SessionLive.info.breakdownLabels.comments" },
+    { field: "findings", labelKey: "SessionLive.info.breakdownLabels.findings" },
+    {
+      field: "documents",
+      labelKey: "SessionLive.info.breakdownLabels.documents",
+    },
+    { field: "system", labelKey: "SessionLive.info.breakdownLabels.system" },
+    { field: "other", labelKey: "SessionLive.info.breakdownLabels.other" },
+  ];
 
 export function SessionInfoCard({
   session,
@@ -97,6 +97,50 @@ export function SessionInfoCard({
   distilling,
   distillError,
 }: SessionInfoCardProps) {
+  const locale = useLocale();
+  const t = useTranslations("SessionLive");
+  // Namespace-less, for the KEY REFERENCES `labels.ts` and the provider option
+  // registry hold.
+  const tKey = useTranslations();
+  /**
+   * The parenthesised section breakdown of the dispatch-time token estimate.
+   * The eight labels and their order are pinned by tests; the parse is wrapped
+   * so a malformed row degrades to no breakdown rather than a blank screen.
+   *
+   * A closure rather than a module function: it composes four catalogue
+   * strings, and closing over the card's two translators is what keeps their
+   * next-intl key types intact.
+   */
+  const estimateBreakdown = (raw: string | null | undefined): string => {
+    if (!raw) return "";
+    try {
+      const b = JSON.parse(raw);
+      const parts = BREAKDOWN_KEYS.filter(({ field }) => b[field]).map(
+        ({ field, labelKey }) =>
+          t("info.breakdownPart", {
+            label: tKey(labelKey),
+            tokens: formatTokens(b[field]) ?? "",
+          }),
+      );
+      return parts.length > 0
+        ? t("info.breakdown", { parts: parts.join(t("info.breakdownSeparator")) })
+        : "";
+    } catch {
+      return "";
+    }
+  };
+
+  /**
+   * One option's value: the catalogue word when the registry still names it,
+   * the stored value otherwise, and "CLI default" when the option is unset.
+   * "CLI default" is the registry's own semantic for an unset option — a real
+   * answer, not a missing one, so it is not an em-dash.
+   */
+  const optionValue = (option: DescribedProviderOption | undefined): string => {
+    if (!option) return t("info.cliDefault");
+    return option.valueKey ? tKey(option.valueKey) : option.fallbackValue;
+  };
+
   // Read from the SESSION ROW, never from the named agent: the agent can be
   // edited or deleted after the run and the trace has to stay true.
   const cliOptions = describeProviderOptions(
@@ -110,15 +154,13 @@ export function SessionInfoCard({
   const permissions = cliOptions.find(
     (option) => option.key === "permission_mode"
   );
-  // "CLI default" is the registry's own semantic for an unset option — a real
-  // answer, not a missing one, so it is not an em-dash.
   const otherOptions = cliOptions.filter(
     (option) => option !== effort && option !== permissions
   );
 
   const completedAt = session.endedAt || session.completedAt;
-  const outcomeLabel = session.outcome
-    ? OUTCOME_LABELS[session.outcome]
+  const outcomeLabelKey = session.outcome
+    ? OUTCOME_LABEL_KEYS[session.outcome]
     : undefined;
 
   const hasTokens =
@@ -136,29 +178,34 @@ export function SessionInfoCard({
 
   return (
     <StrataBand stratum="card" density="rail" gap={7}>
-      <BandHeader label="Session" stratum="neutral" labelSize={12} standalone />
+      <BandHeader
+        label={t("info.label")}
+        stratum="neutral"
+        labelSize={12}
+        standalone
+      />
 
       <div className="flex flex-col gap-[5px] font-sans text-[12.5px]">
-        <KeyValueRow label="Agent">
+        <KeyValueRow label={t("info.rows.agent")}>
           <TextValue>{providerLabel}</TextValue>
         </KeyValueRow>
 
-        <KeyValueRow label="Model">
+        <KeyValueRow label={t("info.rows.model")}>
           <Mono size={11.5}>{session.model ?? "—"}</Mono>
         </KeyValueRow>
 
-        <KeyValueRow label="Effort">
-          <TextValue>{effort?.value ?? "CLI default"}</TextValue>
+        <KeyValueRow label={t("info.rows.effort")}>
+          <TextValue>{optionValue(effort)}</TextValue>
         </KeyValueRow>
 
-        <KeyValueRow label="Permissions">
-          <TextValue>{permissions?.value ?? "CLI default"}</TextValue>
+        <KeyValueRow label={t("info.rows.permissions")}>
+          <TextValue>{optionValue(permissions)}</TextValue>
         </KeyValueRow>
 
-        <KeyValueRow label="Started">
+        <KeyValueRow label={t("info.rows.started")}>
           <Mono size={11.5}>
             {session.startedAt
-              ? new Date(session.startedAt).toLocaleTimeString()
+              ? formatDateTime(session.startedAt, { locale, style: "time" })
               : "—"}
           </Mono>
         </KeyValueRow>
@@ -166,47 +213,56 @@ export function SessionInfoCard({
         {/* Every other option in effect keeps its own row: "Thinking: High",
             "Advisor: on" and friends are part of the audit trail. */}
         {otherOptions.map((option) => (
-          <KeyValueRow key={option.key} label={option.label}>
-            <TextValue>{option.value}</TextValue>
+          <KeyValueRow
+            key={option.key}
+            label={
+              option.labelKey ? tKey(option.labelKey) : option.fallbackLabel
+            }
+          >
+            <TextValue>{optionValue(option)}</TextValue>
           </KeyValueRow>
         ))}
 
-        {outcomeLabel && (
-          <KeyValueRow label="Outcome">
+        {outcomeLabelKey && (
+          <KeyValueRow label={t("info.rows.outcome")}>
             <span
               className="font-semibold text-foreground"
               data-testid={`session-outcome-${session.outcome}`}
             >
-              {outcomeLabel}
+              {tKey(outcomeLabelKey)}
             </span>
           </KeyValueRow>
         )}
 
-        <KeyValueRow label="Completed">
+        <KeyValueRow label={t("info.rows.completed")}>
           <Mono size={11.5}>
             {completedAt
-              ? new Date(completedAt).toLocaleString()
+              ? formatDateTime(completedAt, { locale, style: "dateTimeSeconds" })
               : isRunning
-                ? "In progress..."
+                ? t("info.inProgress")
                 : "—"}
           </Mono>
         </KeyValueRow>
 
-        <KeyValueRow label="Tokens">
+        <KeyValueRow label={t("info.rows.tokens")}>
           <div className="flex flex-col items-end gap-[2px]">
             <Mono size={11.5}>
               {hasTokens
-                ? `${formatTokens(session.inputTokens) ?? "—"} in · ${
-                    formatTokens(session.outputTokens) ?? "—"
-                  } out`
+                ? t("info.tokens", {
+                    input: formatTokens(session.inputTokens) ?? "—",
+                    output: formatTokens(session.outputTokens) ?? "—",
+                  })
                 : "—"}
             </Mono>
             {session.estimatedPromptTokens != null && (
               <span data-testid="session-estimated-tokens">
                 <Mono size={11.5} tone="muted">
-                  Estimated input: ~
-                  {formatTokens(session.estimatedPromptTokens)} tokens
-                  {estimateBreakdown(session.estimatedPromptBreakdown)}
+                  {t("info.estimatedInput", {
+                    tokens: formatTokens(session.estimatedPromptTokens) ?? "",
+                    breakdown: estimateBreakdown(
+                      session.estimatedPromptBreakdown,
+                    ),
+                  })}
                 </Mono>
               </span>
             )}
@@ -214,7 +270,7 @@ export function SessionInfoCard({
         </KeyValueRow>
 
         {session.cliSessionId && (
-          <KeyValueRow label="CLI session">
+          <KeyValueRow label={t("info.rows.cliSession")}>
             <Mono size={11.5} className="block truncate">
               {session.cliSessionId}
             </Mono>
@@ -222,7 +278,7 @@ export function SessionInfoCard({
         )}
 
         {session.cliCommand && (
-          <KeyValueRow label="Command">
+          <KeyValueRow label={t("info.rows.command")}>
             <Mono
               as="div"
               size={12}
@@ -244,10 +300,10 @@ export function SessionInfoCard({
             icon={Brain}
             onClick={onDistill}
             pending={distilling}
-            pendingLabel="Distilling..."
-            title="Merge this session's learnings into the project memory"
+            pendingLabel={t("info.distilling")}
+            title={t("info.distillTitle")}
           >
-            Distill learnings
+            {t("info.distill")}
           </PillButton>
         )}
         {session.logs && (
@@ -258,7 +314,7 @@ export function SessionInfoCard({
             icon={Download}
             onClick={onExportLogs}
           >
-            Export Logs
+            {t("info.exportLogs")}
           </PillButton>
         )}
         <PillButton
@@ -268,7 +324,7 @@ export function SessionInfoCard({
           icon={RefreshCw}
           onClick={onRefresh}
         >
-          Refresh
+          {t("info.refresh")}
         </PillButton>
       </div>
 

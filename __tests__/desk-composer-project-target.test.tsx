@@ -76,7 +76,7 @@ function renderComposer(targetProjectId: string | null) {
 }
 
 async function type(title: string) {
-  const input = screen.getByRole("textbox", { name: "Décris une feature" });
+  const input = screen.getByRole("textbox", { name: "Describe a feature" });
   // `act`, because the submit handler is async: it flips `busy` on either side
   // of an awaited `onSubmit` and clears the title on success, so three state
   // updates land after the event returns.

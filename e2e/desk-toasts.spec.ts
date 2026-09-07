@@ -6,7 +6,7 @@ for (const scope of ["global", "project"] as const) {
     const browserErrors: string[] = [];
     page.on("pageerror", (error) => browserErrors.push(error.message));
     await page.goto(scope === "global" ? "/" : project.boardUrl);
-    const input = page.getByRole("textbox", { name: "Décris une feature" });
+    const input = page.getByRole("textbox", { name: "Describe a feature" });
     await expect(input).toBeEnabled();
     // The cross-project desk has no project of its own, so the composer falls
     // back to `projects[0]` (DeskComposer.tsx) — under `fullyParallel` that is
@@ -26,7 +26,7 @@ for (const scope of ["global", "project"] as const) {
     await expect(toast).toBeVisible();
     const ticket = withDatabase((db) => db.prepare("SELECT id FROM epics WHERE project_id = ? AND title = ?").get(project.id, title)) as { id: string };
     expect(ticket).toBeTruthy();
-    const link = toast.getByRole("link", { name: "Voir le ticket" });
+    const link = toast.getByRole("link", { name: "View the ticket" });
     await expect(link).toHaveAttribute("href", `/projects/${project.id}?ticket=${ticket.id}`);
     await expect(input).toHaveValue("");
     await toast.hover();
@@ -46,7 +46,7 @@ test("creation errors stay visible and preserve the draft on a narrow screen", a
     } else await route.continue();
   });
   await page.goto(project.boardUrl);
-  const input = page.getByRole("textbox", { name: "Décris une feature" });
+  const input = page.getByRole("textbox", { name: "Describe a feature" });
   await expect(input).toBeEnabled();
   await input.fill("Mon brouillon");
   await input.press("Enter");
@@ -57,6 +57,6 @@ test("creation errors stay visible and preserve the draft on a narrow screen", a
   expect(bounds!.x).toBeGreaterThanOrEqual(0);
   expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(390);
   await page.screenshot({ path: "data/toast-mobile.png" });
-  await toast.getByRole("button", { name: "Fermer la notification" }).click();
+  await toast.getByRole("button", { name: "Dismiss notification" }).click();
   await expect(toast).toBeHidden();
 });

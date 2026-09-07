@@ -1,4 +1,5 @@
 import path from "node:path";
+import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   dbMockState,
@@ -223,3 +224,70 @@ describe("Settings route", () => {
     expect(json.error).toBe("OpenAI API key must be saved as a string value.");
   });
 });
+
+describe("Settings route — ui_locale", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetDbMockState();
+  });
+
+  it("GET returns the stored ui_locale as-is and the browser-negotiated default", async () => {
+    dbMockState.allRows = [{ key: "ui_locale", value: JSON.stringify("fr") }];
+    const { GET } = await import("@/app/api/settings/route");
+    const res = await GET(
+      new NextRequest("http://localhost/api/settings", {
+        headers: { "accept-language": "en-GB,en;q=0.9" },
+      })
+    );
+    const json = await res.json();
+
+    expect(json.data.ui_locale).toBe("fr");
+    expect(json.defaults.ui_locale).toBe("en");
+  });
+
+  it("GET reports the default locale when the browser asks for one we cannot render yet", async () => {
+    const { GET } = await import("@/app/api/settings/route");
+    const res = await GET(
+      new NextRequest("http://localhost/api/settings", {
+        headers: { "accept-language": "fr-FR,fr;q=0.9" },
+      })
+    );
+    const json = await res.json();
+    // `fr` is a seed, not a shipped catalogue: the browser language may not
+    // pick it until the follow-up epic completes it.
+    expect(json.defaults.ui_locale).toBe("en");
+    expect(json.data.ui_locale).toBeUndefined();
+  });
+
+  it("PATCH persists a catalogue locale and accepts null to clear it", async () => {
+    dbMockState.getQueue = [null, { key: "ui_locale", value: JSON.stringify("fr") }];
+    const { PATCH } = await import("@/app/api/settings/route");
+
+    const stored = await PATCH(mockJsonRequest({ ui_locale: "fr" }));
+    expect(stored.status).toBe(200);
+    expect(dbMockState.insertCalls).toContainEqual(
+      expect.objectContaining({ key: "ui_locale", value: JSON.stringify("fr") })
+    );
+
+    const cleared = await PATCH(mockJsonRequest({ ui_locale: null }));
+    expect(cleared.status).toBe(200);
+    expect(dbMockState.updateCalls).toContainEqual(
+      expect.objectContaining({ value: JSON.stringify(null) })
+    );
+  });
+
+  it("PATCH refuses a locale with no catalogue, and writes nothing", async () => {
+    const { PATCH } = await import("@/app/api/settings/route");
+    for (const value of ["de", "", 42, { locale: "fr" }]) {
+      const res = await PATCH(mockJsonRequest({ ui_locale: value, global_prompt: "x" }));
+      const json = await res.json();
+      expect(res.status).toBe(400);
+      expect(json.error).toBe(
+        "Interface locale must be one of en, fr, or null to follow the browser language."
+      );
+    }
+    expect(dbMockState.insertCalls).toEqual([]);
+    expect(dbMockState.updateCalls).toEqual([]);
+  });
+});
+

@@ -1,9 +1,11 @@
 "use client";
 
 import { RefreshCw } from "lucide-react";
+import { useLocale, useTranslations } from "next-intl";
 
 import { Mono, PillButton, SegmentedControl } from "@/components/piscine";
 import { formatClock } from "@/components/usage/formatters";
+import type { TranslationKey } from "@/lib/i18n/catalogue";
 import type { UsageRange } from "@/lib/types/usage";
 
 /**
@@ -36,10 +38,11 @@ export interface UsageHeaderProps {
   onRefresh: () => void;
 }
 
-const RANGE_OPTIONS: { value: UsageRange; label: string }[] = [
-  { value: "7d", label: "7 j" },
-  { value: "30d", label: "30 j" },
-  { value: "all", label: "Tout" },
+/** A module-scope copy table: it holds the catalogue key, not the word. */
+const RANGE_OPTIONS: readonly { value: UsageRange; labelKey: TranslationKey }[] = [
+  { value: "7d", labelKey: "Usage.range.last7d" },
+  { value: "30d", labelKey: "Usage.range.last30d" },
+  { value: "all", labelKey: "Usage.range.all" },
 ];
 
 export function UsageHeader({
@@ -50,6 +53,13 @@ export function UsageHeader({
   loading,
   onRefresh,
 }: UsageHeaderProps) {
+  const locale = useLocale();
+  // Namespace-less: `RANGE_OPTIONS` holds full dotted catalogue keys.
+  const t = useTranslations();
+  const options = RANGE_OPTIONS.map(({ value, labelKey }) => ({
+    value,
+    label: t(labelKey),
+  }));
   return (
     <div
       data-testid="usage-controls"
@@ -61,7 +71,7 @@ export function UsageHeader({
         chrome="filled"
         size="sm"
         className="border-[1.5px] border-border"
-        options={RANGE_OPTIONS}
+        options={options}
         value={range}
         onChange={onRangeChange}
       />
@@ -75,7 +85,7 @@ export function UsageHeader({
           </span>
         )}
         <Mono size={10.5} tone="muted">
-          {`Updated ${formatClock(generatedAt)}`}
+          {t("Usage.header.updated", { time: formatClock(generatedAt, locale) })}
         </Mono>
         <PillButton
           variant="outline"
@@ -86,7 +96,7 @@ export function UsageHeader({
           onClick={onRefresh}
           data-testid="usage-refresh"
         >
-          Refresh
+          {t("Usage.header.refresh")}
         </PillButton>
       </div>
     </div>

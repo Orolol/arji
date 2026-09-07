@@ -1,5 +1,6 @@
 "use client";
 
+import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { Activity, Plus, RefreshCw } from "lucide-react";
@@ -13,15 +14,21 @@ import { useQaReports } from "@/hooks/useQaReports";
 import { checkTypeLabel } from "@/lib/qa/aggregate";
 import { consumeQueryParam } from "@/lib/navigation/deep-link";
 import { cn } from "@/lib/utils";
-import { timeAgo } from "@/lib/utils/format-date";
+import { formatRelative } from "@/lib/i18n/format";
+import type { TranslationKey } from "@/lib/i18n/catalogue";
 
 type FilterCheckType = "tech_check" | "e2e_test" | "failure_digest" | null;
 
-const CHECK_TYPE_FILTERS: { value: FilterCheckType; label: string }[] = [
-  { value: null, label: "All" },
-  { value: "tech_check", label: "Tech Check" },
-  { value: "e2e_test", label: "E2E Test" },
-  { value: "failure_digest", label: "Failure Digest" },
+/**
+ * A module-scope copy table, so it holds catalogue KEY REFERENCES and the
+ * screen resolves them at render with the namespace-less translator
+ * (`lib/i18n/catalogue.ts`, pattern 3).
+ */
+const CHECK_TYPE_FILTERS: { value: FilterCheckType; labelKey: TranslationKey }[] = [
+  { value: null, labelKey: "ProjectQaPage.filters.all" },
+  { value: "tech_check", labelKey: "ProjectQaPage.filters.techCheck" },
+  { value: "e2e_test", labelKey: "ProjectQaPage.filters.e2eTest" },
+  { value: "failure_digest", labelKey: "ProjectQaPage.filters.failureDigest" },
 ];
 
 function statusTone(status: string): string {
@@ -32,6 +39,11 @@ function statusTone(status: string): string {
 }
 
 export default function QAPage() {
+  const locale = useLocale();
+  const t = useTranslations("ProjectQaPage");
+  // The filter table stores full dotted paths, so it needs the namespace-less
+  // translator alongside the namespaced one.
+  const tKey = useTranslations();
   const params = useParams();
   const searchParams = useSearchParams();
   const projectId = params.projectId as string;
@@ -88,19 +100,15 @@ export default function QAPage() {
     noOp?: boolean;
   }) => {
     setActionMessage(
-      data.noOp
-        ? "Failure digest recorded: no evidence in the selected window."
-        : "QA check started.",
+      data.noOp ? t("actions.digestNoOp") : t("actions.started"),
     );
     setSelectedReportId(data.reportId);
     void refresh();
-  }, [refresh]);
+  }, [refresh, t]);
 
   const handleCreateEpics = useCallback((epics: Array<{ id: string; title: string }>) => {
-    setActionMessage(
-      `Created ${epics.length} epic${epics.length === 1 ? "" : "s"} from QA report.`,
-    );
-  }, []);
+    setActionMessage(t("actions.epicsCreated", { count: epics.length }));
+  }, [t]);
 
   const stats = useMemo(() => {
     const running = reports.filter((report) => report.status === "running").length;
@@ -113,10 +121,9 @@ export default function QAPage() {
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex flex-none items-start gap-[16px] px-[26px] pb-[18px] pt-[24px]">
         <div className="flex flex-col gap-[5px]">
-          <h2 className="text-[19px] font-semibold">QA</h2>
+          <h2 className="text-[19px] font-semibold">{t("page.heading")}</h2>
           <p className="text-[13px] text-muted-foreground">
-            Run tech checks, E2E tests, and recurring-failure digests; review
-            report history and create epics from findings.
+            {t("page.description")}
           </p>
         </div>
         <div className="ml-auto flex items-center gap-[9px]">
@@ -126,32 +133,32 @@ export default function QAPage() {
             onClick={() => void refresh()}
           >
             <RefreshCw className="h-[14px] w-[14px]" />
-            Refresh
+            {t("page.refresh")}
           </Button>
           <Button
             className="h-[31px] rounded-[8px] px-[13px] text-[13px]"
             onClick={() => setStartDialogOpen(true)}
           >
             <Plus className="h-[14px] w-[14px]" />
-            New Check
+            {t("page.newCheck")}
           </Button>
         </div>
       </div>
 
       <div className="flex flex-none flex-wrap items-center gap-[8px] px-[26px] pb-[16px]">
         <span className="rounded-full border border-border px-[11px] py-[3px] text-[12.5px] text-agent">
-          {stats.running} running
+          {t("page.running", { count: stats.running })}
         </span>
         <span className="rounded-full border border-border px-[11px] py-[3px] text-[12.5px] text-muted-foreground">
-          {stats.completed} completed
+          {t("page.completed", { count: stats.completed })}
         </span>
         <span className="rounded-full border border-border px-[11px] py-[3px] text-[12.5px] text-destructive">
-          {stats.failed} failed
+          {t("page.failed", { count: stats.failed })}
         </span>
         <span className="mx-[6px] h-4 w-px bg-border" />
         {CHECK_TYPE_FILTERS.map((option) => (
           <button
-            key={option.label}
+            key={option.labelKey}
             type="button"
             onClick={() => setFilterCheckType(option.value)}
             className={cn(
@@ -161,7 +168,7 @@ export default function QAPage() {
                 : "border border-border text-muted-foreground hover:bg-band"
             )}
           >
-            {option.label}
+            {tKey(option.labelKey)}
           </button>
         ))}
         {actionMessage && (
@@ -174,13 +181,13 @@ export default function QAPage() {
       <div className="flex min-h-0 flex-1 gap-[22px] px-[26px] pb-[26px]">
         <div className="flex w-[340px] flex-none flex-col gap-[10px] overflow-y-auto">
           <span className="text-[11.5px] uppercase tracking-[.08em] text-meta">
-            History
+            {t("page.history")}
           </span>
 
           {loading && (
             <div className="flex items-center gap-2 text-[12.5px] text-muted-foreground">
               <Activity className="h-3.5 w-3.5 animate-pulse" />
-              Loading reports...
+              {t("page.loading")}
             </div>
           )}
           {!loading && error && (
@@ -188,8 +195,7 @@ export default function QAPage() {
           )}
           {!loading && !error && filteredReports.length === 0 && (
             <p className="text-[12.5px] text-muted-foreground">
-              No QA reports yet. Start a check or failure digest to generate a
-              report.
+              {t("page.empty")}
             </p>
           )}
 
@@ -213,7 +219,7 @@ export default function QAPage() {
                   {report.status}
                 </span>
                 <span className="ml-auto font-mono text-[11px] text-meta">
-                  {timeAgo(report.createdAt)}
+                  {formatRelative(report.createdAt, { locale })}
                 </span>
               </div>
               <span className="line-clamp-2 text-[13.5px] font-medium leading-[1.35]">

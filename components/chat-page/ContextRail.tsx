@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { AtSign, Check, Minus } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { BandHeader, Mono, StrataBand } from "@/components/piscine";
 
@@ -55,6 +56,7 @@ function ContextRow({
 }
 
 export function ContextRail({ tokens }: ContextRailProps) {
+  const t = useTranslations("Chat");
   const specValue =
     tokens.spec === null ? "—" : `${formatTokens(tokens.spec)} tok`;
   const memoryValue =
@@ -73,7 +75,12 @@ export function ContextRail({ tokens }: ContextRailProps) {
       gap={8}
       className="rounded-[14px] px-[15px] py-[13px]"
     >
-      <BandHeader stratum="next" label="Contexte" labelSize={12} standalone />
+      <BandHeader
+        stratum="next"
+        label={t("context.label")}
+        labelSize={12}
+        standalone
+      />
 
       {empty ? null : (
         // A fragment, not a wrapper div: the band is a flex column and an
@@ -81,12 +88,12 @@ export function ContextRail({ tokens }: ContextRailProps) {
         <>
           <ContextRow
             available={tokens.spec !== null}
-            label="Spec projet"
+            label={t("context.spec")}
             value={specValue}
           />
           <ContextRow
             available={tokens.memory !== null}
-            label="Mémoire"
+            label={t("context.memory")}
             value={memoryValue}
           />
           {tokens.citedDocs.map((doc) => (

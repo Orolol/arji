@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { useTranslations } from "next-intl";
 
 import { BandHeader, StrataBand } from "@/components/piscine";
 import type { DeskProject } from "@/lib/control-desk/types";
@@ -56,13 +57,15 @@ export function QaChecksBand({
   action,
   className,
 }: QaChecksBandProps) {
+  const t = useTranslations("Qa");
+
   return (
     <StrataBand stratum="feed" density="full" gap={9} className={className}>
       <BandHeader
-        label="QA checks"
+        label={t("checks.label")}
         stratum="feed"
         labelSize={13}
-        meta={`${totals.running} running · ${totals.total} total`}
+        meta={t("checks.meta", { running: totals.running, total: totals.total })}
         right={action}
       />
       {checks.map((check) => (

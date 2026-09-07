@@ -1,0 +1,48 @@
+{
+  "tabs": {
+    "agentActive": "Agent active",
+    "newConversation": "New conversation",
+    "new": {
+      "chat": "Chat",
+      "brainstorm": "Brainstorm",
+      "epic": "New Epic"
+    }
+  },
+  "header": {
+    "sessionWarm": "session warm",
+    "sessionCold": "session cold",
+    "sessionLinked": "session linked",
+    "restart": "Restart session",
+    "restartBusy": "Stop and restart session",
+    "restartAria": "Restart persistent chat session"
+  },
+  "proposal": {
+    "label": "Proposed epic",
+    "createEpic": "Create Epic & Generate Stories",
+    "generateSpec": "Generate Spec & Plan"
+  },
+  "input": {
+    "placeholder": "Ask a question...",
+    "epicPlaceholder": "Describe your epic idea...",
+    "attachImage": "Attach image",
+    "send": "Send message"
+  },
+  "messages": {
+    "loading": "Loading messages...",
+    "empty": "Start a conversation to brainstorm your project with Claude"
+  },
+  "questions": {
+    "step": "Question {current} of {total}",
+    "submit": "Submit Answers",
+    "next": "Next"
+  },
+  "panel": {
+    "epicIntro": "Describe your epic idea and I'll help you structure it with user stories and acceptance criteria.",
+    "resize": "Resize panel",
+    "collapse": "Collapse panel",
+    "hide": "Hide panel",
+    "open": "Open chat panel",
+    "showStrip": "Show chat strip",
+    "stripLabel": "Chat"
+  }
+}

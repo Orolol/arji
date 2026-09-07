@@ -1,5 +1,6 @@
 "use client";
 
+import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
@@ -21,12 +22,15 @@ import { PROVIDER_LABELS } from "@/lib/agent-config/constants";
 import { SessionOutcomeBadge } from "@/components/shared/SessionOutcomeBadge";
 import { NightRunSummaryDialog } from "@/components/night/NightRunSummaryDialog";
 import {
+  NIGHT_RUN_STATUS_LABEL_KEYS,
   formatNightRunCounts,
   formatNightRunDuration,
+  type NightRunCountsCopy,
 } from "@/components/night/night-run-format";
 import { useNightRuns } from "@/hooks/useNightRuns";
 import { formatCostUsd } from "@/lib/utils/format-usage";
-import { formatTime } from "@/lib/utils/format-date";
+import type { TranslationKey } from "@/lib/i18n/catalogue";
+import { formatDateTime } from "@/lib/i18n/format";
 import { isNightRunId, type NightRunListEntry } from "@/lib/night/constants";
 import { cn } from "@/lib/utils";
 import {
@@ -88,39 +92,65 @@ interface ChatSession {
 
 type UnifiedSession = AgentSession | ChatSession;
 
-const AGENT_TYPE_LABELS: Record<string, string> = {
-  build: "Build",
-  ticket_build: "Ticket",
-  team_build: "Team",
-  review_security: "Security",
-  review_code: "Code Review",
-  review_compliance: "Compliance",
-  review_feature: "Feature Review",
-  review_second_opinion: "Second Opinion",
-  grading: "Acceptance Grading",
-  merge: "Merge",
-  tech_check: "Tech Check",
-  release_notes: "Release Notes",
-  memory_distill: "Memory Distill",
-  dreaming: "Dreaming",
-  forensic: "Forensic",
-  failure_digest: "Failure Digest",
+/**
+ * TWO MODULE-SCOPE COPY TABLES, so both hold catalogue KEY REFERENCES and the
+ * rows resolve them at render with the namespace-less translator
+ * (`lib/i18n/catalogue.ts`, pattern 3). An unmapped `agentType` still falls
+ * back to the raw id, which is DATA and never a key.
+ */
+const AGENT_TYPE_LABEL_KEYS: Record<string, TranslationKey> = {
+  build: "ProjectSessions.agentType.build",
+  ticket_build: "ProjectSessions.agentType.ticketBuild",
+  team_build: "ProjectSessions.agentType.teamBuild",
+  review_security: "ProjectSessions.agentType.reviewSecurity",
+  review_code: "ProjectSessions.agentType.reviewCode",
+  review_compliance: "ProjectSessions.agentType.reviewCompliance",
+  review_feature: "ProjectSessions.agentType.reviewFeature",
+  review_second_opinion: "ProjectSessions.agentType.reviewSecondOpinion",
+  grading: "ProjectSessions.agentType.grading",
+  merge: "ProjectSessions.agentType.merge",
+  tech_check: "ProjectSessions.agentType.techCheck",
+  release_notes: "ProjectSessions.agentType.releaseNotes",
+  memory_distill: "ProjectSessions.agentType.memoryDistill",
+  dreaming: "ProjectSessions.agentType.dreaming",
+  forensic: "ProjectSessions.agentType.forensic",
+  failure_digest: "ProjectSessions.agentType.failureDigest",
 };
 
 const STATUS_CONFIG: Record<
   string,
-  { icon: LucideIcon; color: string; label: string }
+  { icon: LucideIcon; color: string; labelKey: TranslationKey }
 > = {
-  queued: { icon: Clock, color: "text-priority-yellow", label: "Queued" },
-  pending: { icon: Circle, color: "text-meta", label: "Pending" },
-  running: { icon: LoaderCircle, color: "text-agent", label: "Running" },
+  queued: {
+    icon: Clock,
+    color: "text-priority-yellow",
+    labelKey: "ProjectSessions.status.queued",
+  },
+  pending: {
+    icon: Circle,
+    color: "text-meta",
+    labelKey: "ProjectSessions.status.pending",
+  },
+  running: {
+    icon: LoaderCircle,
+    color: "text-agent",
+    labelKey: "ProjectSessions.status.running",
+  },
   completed: {
     icon: CircleCheck,
     color: "text-agent",
-    label: "Completed",
+    labelKey: "ProjectSessions.status.completed",
   },
-  failed: { icon: TriangleAlert, color: "text-destructive", label: "Failed" },
-  cancelled: { icon: Ban, color: "text-meta", label: "Cancelled" },
+  failed: {
+    icon: TriangleAlert,
+    color: "text-destructive",
+    labelKey: "ProjectSessions.status.failed",
+  },
+  cancelled: {
+    icon: Ban,
+    color: "text-meta",
+    labelKey: "ProjectSessions.status.cancelled",
+  },
 };
 
 /** State chips (single-select) and provider chips (toggle) of the filter bar. */
@@ -163,6 +193,7 @@ function isTerminal(status: string): boolean {
 }
 
 export default function SessionsPage() {
+  const t = useTranslations("ProjectSessions");
   const params = useParams();
   const projectId = params.projectId as string;
   const [items, setItems] = useState<UnifiedSession[]>([]);
@@ -268,7 +299,7 @@ export default function SessionsPage() {
       setIncomplete(
         error instanceof UnifiedSessionListIncompleteError
           ? error.message
-          : "Could not load every session; the list below may be incomplete."
+          : t("incomplete")
       );
     } finally {
       if (!signal.aborted) setLoading(false);
@@ -368,7 +399,7 @@ export default function SessionsPage() {
   }, [items, stateFilter, providerFilter, ticketQuery, sortBy]);
 
   if (loading) {
-    return <div className="p-6 text-muted-foreground">Loading sessions...</div>;
+    return <div className="p-6 text-muted-foreground">{t("loading")}</div>;
   }
 
   return (
@@ -382,42 +413,50 @@ export default function SessionsPage() {
       >
         <BandCell
           index={0}
-          label="RUNNING"
+          label={t("band.running")}
           testId="sessions-band-running"
           value={
             band.running === 0
-              ? "None right now"
-              : `${band.running} session${band.running === 1 ? "" : "s"}`
+              ? t("band.noneRunning")
+              : t("band.sessions", { count: band.running })
           }
         />
         <BandCell
           index={1}
-          label="TODAY"
+          label={t("band.today")}
           testId="sessions-band-today"
           value={
             band.today === 0
-              ? "Nothing today"
-              : `${band.today} session${band.today === 1 ? "" : "s"}${
-                  band.todayCost > 0 ? ` · ${formatCostUsd(band.todayCost)}` : ""
-                }`
+              ? t("band.nothingToday")
+              : band.todayCost > 0
+                ? t("band.sessionsWithCost", {
+                    count: band.today,
+                    cost: formatCostUsd(band.todayCost) ?? "",
+                  })
+                : t("band.sessions", { count: band.today })
           }
         />
         <BandCell
           index={2}
-          label="SUCCESS RATE"
+          label={t("band.successRate")}
           testId="sessions-band-success"
           value={
             band.completed + band.failed === 0
-              ? "No finished sessions"
-              : `${band.completed} / ${band.completed + band.failed}`
+              ? t("band.noFinished")
+              : // Two numerals and a slash: no letters, so not copy.
+                `${band.completed} / ${band.completed + band.failed}`
           }
         />
         <BandCell
           index={3}
-          label="QUEUE"
+          label={t("band.queue")}
           testId="sessions-band-queue"
           last
-          value={band.queued === 0 ? "Nothing queued" : `${band.queued} queued`}
+          value={
+            band.queued === 0
+              ? t("band.nothingQueued")
+              : t("band.queued", { count: band.queued })
+          }
           valueClassName={band.queued > 0 ? "text-priority-yellow" : undefined}
         />
       </div>
@@ -433,7 +472,7 @@ export default function SessionsPage() {
             setProviderFilter(null);
           }}
         >
-          All
+          {t("filters.all")}
         </FilterChip>
         <FilterChip
           testId="sessions-filter-running"
@@ -442,7 +481,7 @@ export default function SessionsPage() {
             setStateFilter((s) => (s === "running" ? "all" : "running"))
           }
         >
-          Running
+          {t("filters.running")}
         </FilterChip>
         <FilterChip
           testId="sessions-filter-failed"
@@ -451,7 +490,7 @@ export default function SessionsPage() {
             setStateFilter((s) => (s === "failed" ? "all" : "failed"))
           }
         >
-          Failed
+          {t("filters.failed")}
         </FilterChip>
         <FilterChip
           testId="sessions-filter-night"
@@ -460,7 +499,7 @@ export default function SessionsPage() {
             setStateFilter((s) => (s === "night" ? "all" : "night"))
           }
         >
-          Night run
+          {t("filters.night")}
         </FilterChip>
         <span className="mx-[5px] hidden h-4 w-px bg-border sm:block" />
         <FilterChip
@@ -470,14 +509,14 @@ export default function SessionsPage() {
             setProviderFilter((p) => (p === "claude-code" ? null : "claude-code"))
           }
         >
-          Claude Code
+          {t("filters.claudeCode")}
         </FilterChip>
         <FilterChip
           testId="sessions-filter-codex"
           active={providerFilter === "codex"}
           onClick={() => setProviderFilter((p) => (p === "codex" ? null : "codex"))}
         >
-          Codex
+          {t("filters.codex")}
         </FilterChip>
 
         <div className="flex items-center gap-[7px] text-[12.5px] text-muted-foreground sm:ml-auto">
@@ -487,7 +526,7 @@ export default function SessionsPage() {
             onValueChange={(value) => setSortBy(value as SortOption)}
           >
             <SelectTrigger
-              aria-label="Sort sessions"
+              aria-label={t("filters.sort")}
               data-testid="sessions-sort"
               size="sm"
               className="h-7 min-w-[116px] border-0 px-1.5 text-[12.5px] shadow-none focus-visible:ring-1"
@@ -495,8 +534,10 @@ export default function SessionsPage() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent align="end">
-              <SelectItem value="created">Created</SelectItem>
-              <SelectItem value="last_activity">Last activity</SelectItem>
+              <SelectItem value="created">{t("filters.sortCreated")}</SelectItem>
+              <SelectItem value="last_activity">
+                {t("filters.sortLastActivity")}
+              </SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -507,12 +548,12 @@ export default function SessionsPage() {
             one with the sort control squeezed the input to nothing. */}
         <label className="flex w-full min-w-0 items-center gap-[7px] text-[12.5px] text-muted-foreground sm:w-auto">
           <Search className="h-[13px] w-[13px] shrink-0" />
-          <span className="sr-only">Filter by ticket</span>
+          <span className="sr-only">{t("filters.ticket")}</span>
           <input
             type="text"
             value={ticketQuery}
             onChange={(e) => setTicketQuery(e.target.value)}
-            placeholder="Filter by ticket"
+            placeholder={t("filters.ticket")}
             data-testid="sessions-ticket-filter"
             // There is no field box here — the label is a bare icon + input
             // row — so the ring belongs to the input itself. It replaces a
@@ -536,7 +577,7 @@ export default function SessionsPage() {
           className="shrink-0 border-b border-border bg-band px-[14px] py-[14px] sm:px-[22px]"
         >
           <span className="text-[11.5px] uppercase tracking-[.08em] text-meta">
-            Night runs
+            {t("nightRuns.title")}
           </span>
           {nightRuns.length === 0 && nightRunsError ? (
             /* Never let a dead request read as "you have no night runs" —
@@ -554,14 +595,14 @@ export default function SessionsPage() {
                 onClick={() => void refreshNightRuns()}
                 className="text-[12.5px] text-muted-foreground underline underline-offset-2 transition-colors hover:text-primary"
               >
-                Retry
+                {t("nightRuns.retry")}
               </button>
             </div>
           ) : nightRuns.length === 0 ? (
             <p className="pt-[8px] text-[13px] text-muted-foreground">
               {nightRunsLoading
-                ? "Loading night runs…"
-                : "No night runs recorded yet."}
+                ? t("nightRuns.loading")
+                : t("nightRuns.empty")}
             </p>
           ) : (
             <div className="mt-[8px] flex max-h-[180px] flex-col overflow-y-auto">
@@ -598,7 +639,7 @@ export default function SessionsPage() {
       )}
 
       {items.length === 0 ? (
-        <p className="p-6 text-sm text-muted-foreground">No sessions yet</p>
+        <p className="p-6 text-sm text-muted-foreground">{t("empty")}</p>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <div
@@ -609,10 +650,10 @@ export default function SessionsPage() {
             )}
           >
             <span className="text-[11.5px] uppercase tracking-[.08em] text-meta">
-              Session
+              {t("columns.session")}
             </span>
             <span className="text-[11.5px] uppercase tracking-[.08em] text-meta">
-              State
+              {t("columns.state")}
             </span>
             <span
               className={cn(
@@ -620,7 +661,7 @@ export default function SessionsPage() {
                 DESKTOP_CELL
               )}
             >
-              Duration
+              {t("columns.duration")}
             </span>
             <span
               className={cn(
@@ -628,7 +669,7 @@ export default function SessionsPage() {
                 DESKTOP_CELL
               )}
             >
-              Activity
+              {t("columns.activity")}
             </span>
             <span
               className={cn(
@@ -636,7 +677,7 @@ export default function SessionsPage() {
                 DESKTOP_CELL
               )}
             >
-              Cost
+              {t("columns.cost")}
             </span>
             <span className={DESKTOP_CELL} />
           </div>
@@ -644,7 +685,7 @@ export default function SessionsPage() {
           <div className="min-h-0 flex-1 overflow-y-auto">
             {visible.length === 0 ? (
               <p className="px-[14px] py-[18px] text-[13px] text-muted-foreground sm:px-[22px]">
-                No sessions match these filters.
+                {t("rows.noMatch")}
               </p>
             ) : (
               visible.map((item) =>
@@ -737,12 +778,25 @@ function NightRunRow({
   run: NightRunListEntry;
   onOpen: () => void;
 }) {
+  const locale = useLocale();
+  const t = useTranslations("ProjectSessions");
+  // The headline's own wording belongs to the night-run family, which the
+  // dialog and the monitor chip share; only this row's chrome is local copy.
+  const tNight = useTranslations("NightRuns");
+  // The per-status table holds full dotted paths, so it resolves through the
+  // namespace-less translator.
+  const tKey = useTranslations();
+  const countsCopy: NightRunCountsCopy = {
+    bucket: (count, label) => tNight("counts.bucket", { count, label }),
+    statusLabel: (status) => tKey(NIGHT_RUN_STATUS_LABEL_KEYS[status]),
+    none: tNight("counts.none"),
+  };
   const isLive = run.state === "running" && !run.interrupted;
   const subline = [
     run.runId,
-    formatTime(run.startedAt),
+    formatDateTime(run.startedAt, { locale, style: "dayTime" }),
     formatNightRunDuration(run.startedAt, run.endedAt),
-    run.interrupted ? "rebuilt from history" : null,
+    run.interrupted ? t("nightRuns.rebuilt") : null,
     run.abortReason,
   ]
     .filter(Boolean)
@@ -762,14 +816,14 @@ function NightRunRow({
       )}
       <div className="flex min-w-0 flex-col">
         <span className="truncate text-[13.5px]">
-          {formatNightRunCounts(run.counts)}
+          {formatNightRunCounts(run.counts, countsCopy)}
         </span>
         <span className="truncate font-mono text-[11px] text-meta">
           {subline}
         </span>
       </div>
       <span className="ml-auto shrink-0 pl-[10px] text-[12.5px] text-muted-foreground">
-        {isLive ? "Running" : "Summary"}
+        {isLive ? t("nightRuns.live") : t("nightRuns.summary")}
       </span>
     </button>
   );
@@ -813,6 +867,10 @@ function AgentSessionRow({
   projectId: string;
   getDuration: (s: AgentSession) => string;
 }) {
+  const t = useTranslations("ProjectSessions");
+  // The status and agent-type tables hold full dotted paths, so they resolve
+  // through the namespace-less translator.
+  const tKey = useTranslations();
   const config = STATUS_CONFIG[session.status] || STATUS_CONFIG.pending;
   const Icon = config.icon;
   const isRunning = session.status === "running";
@@ -822,9 +880,12 @@ function AgentSessionRow({
     (session.provider
       ? (PROVIDER_LABELS[session.provider as keyof typeof PROVIDER_LABELS] ??
         session.provider)
-      : "Agent");
+      : t("rows.agent"));
+  const agentTypeKey = session.agentType
+    ? AGENT_TYPE_LABEL_KEYS[session.agentType]
+    : undefined;
   const typeLabel = session.agentType
-    ? (AGENT_TYPE_LABELS[session.agentType] ?? session.agentType)
+    ? (agentTypeKey ? tKey(agentTypeKey) : session.agentType)
     : session.mode;
   const target = [`${session.id.slice(0, 8)}`, session.branchName || session.mode]
     .filter(Boolean)
@@ -858,7 +919,7 @@ function AgentSessionRow({
 
       <div className="flex min-w-0 flex-col gap-[3px]">
         <span className={cn("truncate text-[13px]", config.color)}>
-          {config.label}
+          {tKey(config.labelKey)}
         </span>
         {session.error ? (
           <span className="truncate font-mono text-[11px] text-destructive">
@@ -883,7 +944,7 @@ function AgentSessionRow({
           "truncate font-mono text-[12px] text-muted-foreground",
           DESKTOP_CELL
         )}
-        title="Session cost (when reported by the provider)"
+        title={t("rows.costTitle")}
       >
         {formatCostUsd(session.totalCostUsd) ?? "—"}
       </span>
@@ -893,7 +954,7 @@ function AgentSessionRow({
           DESKTOP_CELL
         )}
       >
-        Open
+        {t("rows.open")}
       </span>
     </Link>
   );
@@ -906,6 +967,7 @@ function ChatSessionRow({
   session: ChatSession;
   projectId: string;
 }) {
+  const t = useTranslations("ProjectSessions");
   const isGenerating = session.status === "generating";
   const TypeIcon = session.type === "epic" ? Sparkles : MessageSquare;
   const providerLabel =
@@ -913,7 +975,7 @@ function ChatSessionRow({
     (session.provider
       ? (PROVIDER_LABELS[session.provider as keyof typeof PROVIDER_LABELS] ??
         session.provider)
-      : "Chat");
+      : t("rows.chatProvider"));
 
   return (
     <Link
@@ -933,14 +995,12 @@ function ChatSessionRow({
         )}
         <div className="flex min-w-0 flex-col">
           <span className="truncate text-[13.5px] font-medium">
-            {providerLabel} · chat
+            {providerLabel} · {t("rows.chatKind")}
           </span>
           <span className="truncate font-mono text-[11px] text-meta">
             {session.label}
             {session.messageCount > 0
-              ? ` · ${session.messageCount} message${
-                  session.messageCount === 1 ? "" : "s"
-                }`
+              ? ` · ${t("rows.messages", { count: session.messageCount })}`
               : ""}
           </span>
         </div>
@@ -952,7 +1012,7 @@ function ChatSessionRow({
           isGenerating ? "text-agent" : "text-muted-foreground"
         )}
       >
-        {isGenerating ? "Generating" : "Chat"}
+        {isGenerating ? t("rows.generating") : t("rows.chat")}
       </span>
       <span
         className={cn("font-mono text-[12px] text-muted-foreground", DESKTOP_CELL)}
@@ -971,7 +1031,7 @@ function ChatSessionRow({
           DESKTOP_CELL
         )}
       >
-        Open
+        {t("rows.open")}
       </span>
     </Link>
   );
@@ -984,6 +1044,7 @@ function LastActivity({
   value: string | null;
   sessionId: string;
 }) {
+  const locale = useLocale();
   return (
     <span
       data-testid={`session-activity-${sessionId}`}
@@ -993,7 +1054,7 @@ function LastActivity({
       )}
       title={value ?? undefined}
     >
-      {value ? formatTime(value) : "—"}
+      {value ? formatDateTime(value, { locale, style: "dayTime" }) : "—"}
     </span>
   );
 }

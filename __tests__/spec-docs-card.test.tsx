@@ -1,13 +1,27 @@
 /**
  * The DOCS card of frame 8b: the `@mention` rows, their derived size suffix
- * (`· 4 KB` / `· converti` / nothing — never `· 0 KB`), and the drop zone
+ * (`· 4 KB` / `· converted` / nothing — never `· 0 KB`), and the drop zone
  * surfacing the upload route's own errors, in particular the duplicate-filename
  * 409 that dropping the same file twice produces.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
-import { DocsCard, documentSuffix } from "@/components/spec/DocsCard";
+import {
+  DocsCard,
+  documentSuffix,
+  type DocsSuffixCopy,
+} from "@/components/spec/DocsCard";
+
+/**
+ * `documentSuffix` is a pure derivation, so it takes its copy from the caller
+ * (`lib/i18n/catalogue.ts`) exactly as `formatSaveState` does. These are the
+ * `Spec.docs.suffix.*` values of the English catalogue.
+ */
+const SUFFIX_COPY: DocsSuffixCopy = {
+  size: (kilobytes) => `· ${kilobytes} KB`,
+  converted: "· converted",
+};
 
 vi.mock("next/navigation", () => ({
   useParams: () => ({ projectId: "proj-docs" }),
@@ -39,30 +53,37 @@ beforeEach(() => {
 
 describe("documentSuffix", () => {
   it("prints kilobytes for a sized document", () => {
-    expect(documentSuffix(doc({ sizeBytes: 4096 }))).toBe(" · 4 KB");
-    expect(documentSuffix(doc({ sizeBytes: 11 * 1024 }))).toBe(" · 11 KB");
+    expect(documentSuffix(doc({ sizeBytes: 4096 }), SUFFIX_COPY)).toBe(" · 4 KB");
+    expect(documentSuffix(doc({ sizeBytes: 11 * 1024 }), SUFFIX_COPY)).toBe(
+      " · 11 KB",
+    );
   });
 
   it("never prints 0 KB for a tiny document", () => {
-    expect(documentSuffix(doc({ sizeBytes: 200 }))).toBe(" · 1 KB");
+    expect(documentSuffix(doc({ sizeBytes: 200 }), SUFFIX_COPY)).toBe(" · 1 KB");
   });
 
-  it("prints `converti` for a converted text document with no stored size", () => {
+  it("prints `converted` for a converted text document with no stored size", () => {
     expect(
       documentSuffix(
         doc({ sizeBytes: null, kind: "text", mimeType: "application/pdf" }),
+        SUFFIX_COPY,
       ),
-    ).toBe(" · converti");
+    ).toBe(" · converted");
   });
 
   it("prints nothing when neither a size nor a conversion is known", () => {
     expect(
       documentSuffix(
         doc({ sizeBytes: null, kind: "text", mimeType: "text/markdown" }),
+        SUFFIX_COPY,
       ),
     ).toBeNull();
     expect(
-      documentSuffix(doc({ sizeBytes: 0, kind: "image", mimeType: "image/png" })),
+      documentSuffix(
+        doc({ sizeBytes: 0, kind: "image", mimeType: "image/png" }),
+        SUFFIX_COPY,
+      ),
     ).toBeNull();
   });
 });
@@ -88,7 +109,7 @@ describe("DocsCard", () => {
     expect(rows[1]).toHaveTextContent("@{api contract.md} · 11 KB");
   });
 
-  it("renders `· converti` for a converted row and no suffix at all for an unknown one", () => {
+  it("renders `· converted` for a converted row and no suffix at all for an unknown one", () => {
     render(
       <DocsCard
         projectId="proj-docs"
@@ -110,7 +131,7 @@ describe("DocsCard", () => {
     );
 
     const rows = screen.getAllByTestId("docs-card-row");
-    expect(rows[0]).toHaveTextContent("@onboarding.pdf · converti");
+    expect(rows[0]).toHaveTextContent("@onboarding.pdf · converted");
     expect(rows[1]).toHaveTextContent("@scanned.md");
     expect(rows[1].textContent).not.toContain("·");
     expect(rows[1].textContent).not.toContain("0 KB");
@@ -127,7 +148,7 @@ describe("DocsCard", () => {
     );
 
     expect(screen.getAllByTestId("docs-card-row")).toHaveLength(6);
-    expect(screen.getByRole("link", { name: /3 autres/ })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /3 more/ })).toHaveAttribute(
       "href",
       "/projects/proj-docs/documents",
     );
@@ -136,7 +157,7 @@ describe("DocsCard", () => {
   it("renders the drop zone copy verbatim", () => {
     render(<DocsCard projectId="proj-docs" initialDocuments={[]} />);
     expect(screen.getByTestId("docs-drop-zone")).toHaveTextContent(
-      "Déposer un doc — cité avec @ dans le chat",
+      "Drop a doc — cited with @ in the chat",
     );
   });
 

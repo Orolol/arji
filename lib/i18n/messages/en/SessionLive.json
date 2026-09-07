@@ -1,0 +1,152 @@
+{
+  "agentType": {
+    "build": "Build",
+    "ticketBuild": "Ticket Build",
+    "teamBuild": "Team Build",
+    "reviewSecurity": "Security Review",
+    "reviewCode": "Code Review",
+    "reviewCompliance": "Compliance Review",
+    "reviewFeature": "Feature Review",
+    "reviewSecondOpinion": "Second Opinion",
+    "grading": "Acceptance Grading",
+    "merge": "Merge",
+    "techCheck": "Tech Check",
+    "memoryDistill": "Memory Distill",
+    "dreaming": "Dreaming",
+    "forensic": "Forensic",
+    "failureDigest": "Failure Digest"
+  },
+  "outcome": {
+    "answered": "Answered",
+    "askedQuestion": "Asked a question",
+    "silent": "Silent",
+    "error": "Error",
+    "transitionRefused": "Transition held"
+  },
+  "status": {
+    "running": "LIVE",
+    "queued": "QUEUED",
+    "completed": "DONE",
+    "failed": "FAILED",
+    "cancelled": "CANCELLED"
+  },
+  "header": {
+    "sessions": "Sessions",
+    "stamp": "{word} · {type}",
+    "title": "{provider} · {type}",
+    "costLive": "{cost} live",
+    "stopSession": "Stop session",
+    "stopping": "Stopping…"
+  },
+  "screen": {
+    "errorLabel": "Error",
+    "failedNoMessage": "Failed — no error message captured",
+    "silentFailure": "This session failed before Arij could record an error message: the process exited (or was lost) without writing stderr or text. Whatever it did produce is kept in the live log above."
+  },
+  "log": {
+    "label": "Live log",
+    "meta": "{provider} · session #{id}",
+    "metaTailing": "{provider} · session #{id} · following the stream",
+    "paneLog": "Log",
+    "paneResponse": "Response",
+    "tailOn": "tail on",
+    "tailOff": "tail off",
+    "logsUnavailable": "This session's logs.json could not be read. The raw stream below is what the process actually wrote.",
+    "logsTruncated": "logs.json was too large to serve in full — the stream below is the same output, paged.",
+    "rawUnavailable": "This session's raw output could not be read — the record may be damaged. This is not the same as a session that produced no output.",
+    "waitingOutput": "Waiting for agent output…",
+    "logsEmpty": "No logs available",
+    "waitingResponse": "Waiting for agent to respond...",
+    "responseEmpty": "No response available",
+    "loadingMore": "Loading...",
+    "loadMore": "Load more output",
+    "truncated": "{count, plural, one {One oversized chunk is shown in part.} other {# oversized chunks are shown in part.}}",
+    "truncatedLoadMore": " Load more to continue reading it.",
+    "streamUnreadable": "This session's output could not be read.",
+    "loadMoreFailed": "Could not load more output."
+  },
+  "files": {
+    "label": "Files touched",
+    "readFailed": "Could not read the session's files.",
+    "count": "{count, plural, one {# file} other {# files}} · ",
+    "inProgress": "running",
+    "openDiff": "open diff →"
+  },
+  "worktree": {
+    "label": "Worktree",
+    "path": "{path} · isolated",
+    "mergeBaseLabel": "merge base ",
+    "upToDate": " · up to date",
+    "behind": " · {count} behind"
+  },
+  "prompt": {
+    "label": "Composed prompt",
+    "seeExact": "see the exact prompt →",
+    "loading": "Loading prompt...",
+    "loadFailed": "Could not load the prompt.",
+    "retry": "Retry",
+    "empty": "No prompt available",
+    "chips": {
+      "persona": "persona",
+      "spec": "project spec",
+      "ticket": "epic + stories",
+      "memory": "memory",
+      "documents": "cited docs",
+      "findings": "findings",
+      "comments": "comments"
+    }
+  },
+  "chain": {
+    "label": "Next",
+    "running": "{label} — running",
+    "stages": {
+      "build": "Build",
+      "grading": "Grading",
+      "reviewAuto": "Review auto",
+      "review": "Review",
+      "land": "Land",
+      "landIfClean": "Land if the review is clean"
+    }
+  },
+  "info": {
+    "label": "Session",
+    "cliDefault": "CLI default",
+    "inProgress": "In progress...",
+    "tokens": "{input} in · {output} out",
+    "estimatedInput": "Estimated input: ~{tokens} tokens{breakdown}",
+    "breakdown": " ({parts})",
+    "breakdownSeparator": " · ",
+    "breakdownPart": "{label} {tokens}",
+    "breakdownLabels": {
+      "spec": "Spec",
+      "memory": "Mem",
+      "ticket": "Ticket",
+      "comments": "Comments",
+      "findings": "Findings",
+      "documents": "Docs",
+      "system": "System",
+      "other": "Other"
+    },
+    "rows": {
+      "agent": "Agent",
+      "model": "Model",
+      "effort": "Effort",
+      "permissions": "Permissions",
+      "started": "Started",
+      "outcome": "Outcome",
+      "completed": "Completed",
+      "tokens": "Tokens",
+      "cliSession": "CLI session",
+      "command": "Command"
+    },
+    "distill": "Distill learnings",
+    "distilling": "Distilling...",
+    "distillTitle": "Merge this session's learnings into the project memory",
+    "exportLogs": "Export Logs",
+    "refresh": "Refresh"
+  },
+  "page": {
+    "loading": "Loading...",
+    "agentFallback": "Agent"
+  }
+}

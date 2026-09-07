@@ -1,5 +1,6 @@
 "use client";
 
+import { useLocale, useTranslations } from "next-intl";
 import { TriangleAlert } from "lucide-react";
 
 import {
@@ -10,14 +11,14 @@ import {
 } from "@/components/piscine";
 import { cn } from "@/lib/utils";
 import { formatCostUsd, formatTokens } from "@/lib/utils/format-usage";
+import { formatDayLabel, formatRelative } from "@/lib/i18n/format";
 import {
   formatCountdown,
-  formatDayLabel,
-  formatRelativeAge,
   numberOrDash,
   parseIsoMs,
   providerLabel,
   windowLabel,
+  type WindowLabelCopy,
 } from "@/components/usage/formatters";
 import type {
   ClaudeQuota,
@@ -57,6 +58,22 @@ import type {
 /* -------------------------------------------------------------------------- */
 
 /**
+ * `windowLabel` is a pure helper, so it takes RESOLVED PHRASES rather than a
+ * translator (`lib/i18n/catalogue.ts`). This is where they are resolved, next
+ * to their keys.
+ */
+function useWindowCopy(): WindowLabelCopy {
+  const t = useTranslations("Usage");
+  return {
+    unknown: t("window.unknown"),
+    weekly: t("window.weekly"),
+    days: (count) => t("window.days", { count }),
+    hours: (count) => t("window.hours", { count }),
+    minutes: (count) => t("window.minutes", { count }),
+  };
+}
+
+/**
  * The one "this data is old" marker in the card. Colour is not available to
  * say it (colour = stratum, never state), so it is said with an icon and a
  * word — the same way `ResetLine` says "window expired — data stale".
@@ -86,6 +103,7 @@ export function SubscriptionCard({
   sub: SubscriptionStatus;
   nowMs: number;
 }) {
+  const t = useTranslations("Usage");
   return (
     <SurfaceCard
       radius={12}
@@ -102,15 +120,15 @@ export function SubscriptionCard({
         >
           <FieldKicker size={10.5} stratum="card">
             {sub.source === "provider-reported"
-              ? "Provider-reported"
-              : "Metered via Arij"}
+              ? t("subscription.sourceProviderReported")
+              : t("subscription.sourceMetered")}
           </FieldKicker>
         </span>
       </div>
 
       {sub.plan && (
         <Mono as="div" size={11} tone="muted" className="mt-[6px]">
-          plan: {sub.plan}
+          {t("subscription.plan", { plan: sub.plan })}
         </Mono>
       )}
 
@@ -153,6 +171,8 @@ function ClaudeLiveBody({
   live: ClaudeQuota;
   nowMs: number;
 }) {
+  const locale = useLocale();
+  const t = useTranslations("Usage");
   const capturedMs =
     sub.capturedAt === null ? null : new Date(sub.capturedAt).getTime();
   const ageMs =
@@ -163,25 +183,25 @@ function ClaudeLiveBody({
   return (
     <>
       <ClaudeWindow
-        label="5H WINDOW"
+        label={t("subscription.claudeFiveHour")}
         window={live.fiveHour}
         nowMs={nowMs}
         testId="usage-sub-claude-live-5h"
       />
       <ClaudeWindow
-        label="7D WINDOW"
+        label={t("subscription.claudeSevenDay")}
         window={live.sevenDay}
         nowMs={nowMs}
         testId="usage-sub-claude-live-7d"
       />
       <ClaudeWindow
-        label="7D OPUS"
+        label={t("subscription.claudeSevenDayOpus")}
         window={live.sevenDayOpus}
         nowMs={nowMs}
         testId="usage-sub-claude-live-7d-opus"
       />
       <ClaudeWindow
-        label="7D SONNET"
+        label={t("subscription.claudeSevenDaySonnet")}
         window={live.sevenDaySonnet}
         nowMs={nowMs}
         testId="usage-sub-claude-live-7d-sonnet"
@@ -211,9 +231,11 @@ function ClaudeLiveBody({
         // wrapper rather than on a hand-rolled copy of its class recipe.
         <div className="mt-[12px]" data-testid="usage-sub-claude-extra">
           <Mono size={11} tone="muted">
-            Extra usage: {numberOrDash(extra.usedCredits)} /{" "}
-            {numberOrDash(extra.monthlyLimit)} credits ·{" "}
-            {numberOrDash(extra.utilizationPercent)}%
+            {t("subscription.extraUsage", {
+              used: numberOrDash(extra.usedCredits),
+              limit: numberOrDash(extra.monthlyLimit),
+              percent: numberOrDash(extra.utilizationPercent),
+            })}
           </Mono>
         </div>
       )}
@@ -225,8 +247,10 @@ function ClaudeLiveBody({
           data-testid="usage-sub-claude-captured"
         >
           {stale && <StaleMark />}
-          Live · polled {formatRelativeAge(ageMs)} ago · claude CLI
-          {stale ? " — stale" : ""}
+          {t("subscription.polledClaude", {
+            age: formatRelative(nowMs - ageMs, { locale, now: nowMs }),
+          })}
+          {stale ? ` ${t("subscription.stale")}` : ""}
         </p>
       )}
 
@@ -240,22 +264,22 @@ function ClaudeLiveBody({
           */}
           <span data-testid="usage-sub-claude-metered-sub">
             <FieldKicker size={10.5} stratum="card">
-              ARIJ-METERED · THIS MACHINE ONLY
+              {t("subscription.meteredSection")}
             </FieldKicker>
           </span>
           <MeteredLine
-            label="LAST 5H"
+            label={t("subscription.last5h")}
             usage={sub.metered.last5h}
             testId={`usage-sub-${sub.provider}-5h`}
           />
           <MeteredLine
-            label="LAST 7 DAYS"
+            label={t("subscription.last7d")}
             usage={sub.metered.last7d}
             testId={`usage-sub-${sub.provider}-7d`}
           />
           {sub.metered.budgetUsdWeek !== null && (
             <GaugeRow
-              label="WEEKLY BUDGET"
+              label={t("subscription.weeklyBudget")}
               readout={`${formatCostUsd(sub.metered.last7d.costUsd) ?? "—"} / ${
                 formatCostUsd(sub.metered.budgetUsdWeek) ?? "—"
               }`}
@@ -327,6 +351,8 @@ function CodexLiveBody({
   live: CodexLiveQuota;
   nowMs: number;
 }) {
+  const locale = useLocale();
+  const t = useTranslations("Usage");
   const capturedMs =
     sub.capturedAt === null ? null : new Date(sub.capturedAt).getTime();
   const ageMs =
@@ -344,8 +370,8 @@ function CodexLiveBody({
         <div className="mt-[12px]" data-testid="usage-sub-codex-credits">
           <Mono size={11} tone="muted">
             {credits.unlimited
-              ? "Credits: unlimited"
-              : `Credits: ${credits.balance ?? "—"}`}
+              ? t("subscription.creditsUnlimited")
+              : t("subscription.credits", { balance: credits.balance ?? "—" })}
           </Mono>
         </div>
       )}
@@ -357,8 +383,10 @@ function CodexLiveBody({
           data-testid="usage-sub-codex-captured"
         >
           {stale && <StaleMark />}
-          Live · polled {formatRelativeAge(ageMs)} ago · codex app-server
-          {stale ? " — stale" : ""}
+          {t("subscription.polledCodex", {
+            age: formatRelative(nowMs - ageMs, { locale, now: nowMs }),
+          })}
+          {stale ? ` ${t("subscription.stale")}` : ""}
         </p>
       )}
 
@@ -379,6 +407,7 @@ function CodexBucketRow({
   bucket: CodexQuotaBucket;
   nowMs: number;
 }) {
+  const copy = useWindowCopy();
   const name = (bucket.limitName ?? bucket.limitId).toUpperCase();
   const testId = `usage-sub-codex-bucket-${bucket.limitId}`;
 
@@ -394,7 +423,7 @@ function CodexBucketRow({
   return (
     <>
       <GaugeRow
-        label={`${name} · ${windowLabel(bucket.windowDurationMins)}`}
+        label={`${name} · ${windowLabel(bucket.windowDurationMins, copy)}`}
         readout={`${Math.round(bucket.usedPercent)}%`}
         percent={bucket.usedPercent}
         dimmed={remainingMs !== null && remainingMs <= 0}
@@ -405,7 +434,7 @@ function CodexBucketRow({
       {secondary && (
         <>
           <GaugeRow
-            label={`${name} · ${windowLabel(secondary.windowDurationMins)}`}
+            label={`${name} · ${windowLabel(secondary.windowDurationMins, copy)}`}
             readout={`${Math.round(secondary.usedPercent)}%`}
             percent={secondary.usedPercent}
             dimmed={secondaryRemainingMs !== null && secondaryRemainingMs <= 0}
@@ -431,6 +460,8 @@ function CodexBucketRow({
  * calendar dates, not Arij's local ones.
  */
 function CodexHistoryStrip({ live }: { live: CodexLiveQuota }) {
+  const locale = useLocale();
+  const t = useTranslations("Usage");
   const days = live.dailyUsage.slice(-30);
   if (days.length === 0 && live.lifetimeTokens === null) return null;
 
@@ -440,7 +471,7 @@ function CodexHistoryStrip({ live }: { live: CodexLiveQuota }) {
     <div className="mt-[14px] border-t-[1.5px] border-border-soft pt-[10px]">
       <span data-testid="usage-sub-codex-history-label">
         <FieldKicker size={10.5} stratum="card">
-          ALL DEVICES · PROVIDER-REPORTED
+          {t("subscription.allDevices")}
         </FieldKicker>
       </span>
 
@@ -461,7 +492,10 @@ function CodexHistoryStrip({ live }: { live: CodexLiveQuota }) {
                   background: "var(--agent)",
                   opacity: day.tokens > 0 ? 0.75 : 0.25,
                 }}
-                title={`${day.date} · ${formatTokens(day.tokens) ?? "—"} tokens`}
+                title={t("subscription.historyDay", {
+                  date: day.date,
+                  tokens: formatTokens(day.tokens) ?? "—",
+                })}
               />
             ))}
           </div>
@@ -469,10 +503,10 @@ function CodexHistoryStrip({ live }: { live: CodexLiveQuota }) {
               than at the tracked-mono 9.5/10.5 allowance. */}
           <div className="mt-[6px] flex justify-between">
             <Mono size={11} tone="muted">
-              {formatDayLabel(days[0].date)}
+              {formatDayLabel(days[0].date, locale)}
             </Mono>
             <Mono size={11} tone="muted">
-              {formatDayLabel(days[days.length - 1].date)}
+              {formatDayLabel(days[days.length - 1].date, locale)}
             </Mono>
           </div>
         </>
@@ -481,7 +515,7 @@ function CodexHistoryStrip({ live }: { live: CodexLiveQuota }) {
       {live.lifetimeTokens !== null && (
         <div className="mt-[6px]" data-testid="usage-sub-codex-lifetime">
           <Mono size={11} tone="muted">
-            Lifetime: {formatTokens(live.lifetimeTokens) ?? "—"} tokens
+            {t("subscription.lifetime", { tokens: formatTokens(live.lifetimeTokens) ?? "—" })}
           </Mono>
         </div>
       )}
@@ -502,14 +536,15 @@ function ResetLine({
   remainingMs: number | null;
   testId: string;
 }) {
+  const t = useTranslations("Usage");
   return (
     <div className="mt-[5px]" data-testid={`${testId}-reset`}>
       <Mono size={11} tone="muted">
         {remainingMs === null
-          ? "reset time unknown"
+          ? t("subscription.resetUnknown")
           : remainingMs <= 0
-            ? "window expired — data stale"
-            : `resets in ${formatCountdown(remainingMs)}`}
+            ? t("subscription.windowExpired")
+            : t("subscription.resetsIn", { countdown: formatCountdown(remainingMs) })}
       </Mono>
     </div>
   );
@@ -523,14 +558,16 @@ function ProviderReportedBody({
   sub: SubscriptionStatus;
   nowMs: number;
 }) {
+  const locale = useLocale();
+  const t = useTranslations("Usage");
+  const copy = useWindowCopy();
   if (sub.capturedAt === null) {
     return (
       <p
         className="mt-[10px] text-[12.5px] text-muted-foreground"
         data-testid="usage-sub-codex-empty"
       >
-        No provider snapshot found. Codex records rate-limit data when a
-        session runs — none is recorded on this machine yet.
+        {t("subscription.codexEmpty")}
       </p>
     );
   }
@@ -549,16 +586,16 @@ function ProviderReportedBody({
         className="mt-[10px] text-[11px] text-meta"
         data-testid="usage-sub-codex-live-fallback"
       >
-        Live quota unavailable — showing last snapshot.
+        {t("subscription.liveUnavailableSnapshot")}
       </p>
       <SnapshotWindow
-        label={windowLabel(sub.primary?.windowMinutes ?? null)}
+        label={windowLabel(sub.primary?.windowMinutes ?? null, copy)}
         snapshot={sub.primary}
         nowMs={nowMs}
         testId="usage-sub-codex-primary"
       />
       <SnapshotWindow
-        label={windowLabel(sub.secondary?.windowMinutes ?? null)}
+        label={windowLabel(sub.secondary?.windowMinutes ?? null, copy)}
         snapshot={sub.secondary}
         nowMs={nowMs}
         testId="usage-sub-codex-secondary"
@@ -569,8 +606,10 @@ function ProviderReportedBody({
         data-testid="usage-sub-codex-captured"
       >
         {stale && <StaleMark />}
-        Captured {formatRelativeAge(ageMs)} ago · ~/.codex/sessions
-        {stale ? " — stale" : ""}
+        {t("subscription.captured", {
+          age: formatRelative(nowMs - ageMs, { locale, now: nowMs }),
+        })}
+        {stale ? ` ${t("subscription.stale")}` : ""}
       </p>
     </>
   );
@@ -629,6 +668,7 @@ function MeteredBody({
   sub: SubscriptionStatus;
   metered: NonNullable<SubscriptionStatus["metered"]>;
 }) {
+  const t = useTranslations("Usage");
   const budget = metered.budgetUsdWeek;
   const percent = metered.budgetUsedPercent;
   const over = percent !== null && percent > 100;
@@ -639,22 +679,22 @@ function MeteredBody({
         className="mt-[10px] text-[11px] text-meta"
         data-testid="usage-sub-claude-live-fallback"
       >
-        Live quota unavailable — showing metered data.
+        {t("subscription.liveUnavailableMetered")}
       </p>
       <MeteredLine
-        label="LAST 5H"
+        label={t("subscription.last5h")}
         usage={metered.last5h}
         testId={`usage-sub-${sub.provider}-5h`}
       />
       <MeteredLine
-        label="LAST 7 DAYS"
+        label={t("subscription.last7d")}
         usage={metered.last7d}
         testId={`usage-sub-${sub.provider}-7d`}
       />
 
       {budget !== null && (
         <GaugeRow
-          label="WEEKLY BUDGET"
+          label={t("subscription.weeklyBudget")}
           readout={`${formatCostUsd(metered.last7d.costUsd) ?? "—"} / ${
             formatCostUsd(budget) ?? "—"
           }`}
@@ -668,7 +708,7 @@ function MeteredBody({
         className="mt-[12px] text-[11px] text-meta"
         data-testid="usage-sub-claude-disclaimer"
       >
-        Sessions recorded by Arij only — not the account&apos;s full quota.
+        {t("subscription.meteredDisclaimer")}
       </p>
     </>
   );
@@ -683,6 +723,7 @@ function MeteredLine({
   usage: WindowUsage;
   testId: string;
 }) {
+  const t = useTranslations("Usage");
   const tokens =
     usage.inputTokens !== null && usage.outputTokens !== null
       ? formatTokens(usage.inputTokens + usage.outputTokens)
@@ -695,8 +736,11 @@ function MeteredLine({
       </FieldKicker>
       <div className="mt-[3px]" data-testid={testId}>
         <Mono size={12.5}>
-          {usage.sessions} session{usage.sessions === 1 ? "" : "s"} ·{" "}
-          {tokens ?? "—"} tokens · {formatCostUsd(usage.costUsd) ?? "—"}
+          {t("subscription.meteredLine", {
+            sessions: usage.sessions,
+            tokens: tokens ?? "—",
+            cost: formatCostUsd(usage.costUsd) ?? "—",
+          })}
         </Mono>
       </div>
     </div>

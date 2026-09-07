@@ -1,6 +1,7 @@
 "use client";
 
 import { useLayoutEffect, useRef } from "react";
+import { useTranslations } from "next-intl";
 
 import { BandHeader, Mono, StrataBand } from "@/components/piscine";
 import {
@@ -37,6 +38,7 @@ export interface PersonaBandProps {
 }
 
 export function PersonaBand({ value, onChange, disabled }: PersonaBandProps) {
+  const t = useTranslations("AgentsWorkshop");
   const ref = useRef<HTMLTextAreaElement | null>(null);
 
   // A DOM measurement, not state: nothing re-renders because of this.
@@ -55,8 +57,8 @@ export function PersonaBand({ value, onChange, disabled }: PersonaBandProps) {
       <BandHeader
         stratum="feed"
         labelSize={12}
-        label="Persona"
-        meta="injectée en tête de chaque prompt de cet agent — vide = rien"
+        label={t("persona.label")}
+        meta={t("persona.meta")}
       />
       <textarea
         ref={ref}
@@ -67,7 +69,7 @@ export function PersonaBand({ value, onChange, disabled }: PersonaBandProps) {
         // the field has to stop the user at the same limit instead of
         // letting them paste text that can only fail to save.
         maxLength={PERSONA_PROMPT_MAX_CHARS}
-        aria-label="Persona"
+        aria-label={t("persona.aria")}
         disabled={disabled}
         style={{ minHeight: MIN_HEIGHT, maxHeight: MAX_HEIGHT }}
         // `outline-none` is only safe next to a replacement: without the ring
@@ -77,7 +79,10 @@ export function PersonaBand({ value, onChange, disabled }: PersonaBandProps) {
       />
       {value.length > COUNTER_THRESHOLD ? (
         <Mono size={10} tone="muted">
-          {`${value.length} / ${PERSONA_PROMPT_MAX_CHARS}`}
+          {t("persona.counter", {
+            count: value.length,
+            max: PERSONA_PROMPT_MAX_CHARS,
+          })}
         </Mono>
       ) : null}
     </StrataBand>

@@ -11,7 +11,7 @@ import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-import { relativeAge } from "@/components/desk/AttentionRow";
+import { formatRelative } from "@/lib/i18n/format";
 import { YourTurnBand } from "@/components/desk/YourTurnBand";
 import { deriveProjects } from "@/lib/control-desk/aggregate";
 import type {
@@ -96,13 +96,13 @@ describe("empty stratum", () => {
     renderBand();
     expect(screen.getByText("Your turn")).toBeInTheDocument();
     expect(screen.queryByTestId("desk-your-turn-rows")).not.toBeInTheDocument();
-    expect(screen.queryByText(/parcourir/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/browse/)).not.toBeInTheDocument();
   });
 
   it("shows the counter and the keyboard hint as soon as something blocks", () => {
     renderBand({ awaitingReply: [asks()], failed: [failure()] });
     expect(screen.getByText("2")).toBeInTheDocument();
-    expect(screen.getByText("↹ parcourir · ⏎ répondre")).toBeInTheDocument();
+    expect(screen.getByText("↹ browse · ⏎ reply")).toBeInTheDocument();
   });
 });
 
@@ -126,7 +126,7 @@ describe("ASKS YOU", () => {
     const send = screen.getByRole("button", { name: "Send" });
     expect(send).toBeDisabled();
 
-    fireEvent.change(screen.getByPlaceholderText("Répondre à l'agent…"), {
+    fireEvent.change(screen.getByPlaceholderText("Reply to the agent…"), {
       target: { value: "Supprime-le" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
@@ -136,7 +136,7 @@ describe("ASKS YOU", () => {
 
   it("submits on Enter from the reply field", async () => {
     const { onReply } = renderBand({ awaitingReply: [asks()] });
-    const field = screen.getByPlaceholderText("Répondre à l'agent…");
+    const field = screen.getByPlaceholderText("Reply to the agent…");
     fireEvent.change(field, { target: { value: "Garde-le" } });
     fireEvent.keyDown(field, { key: "Enter" });
     await waitFor(() => expect(onReply).toHaveBeenCalledTimes(1));
@@ -144,7 +144,7 @@ describe("ASKS YOU", () => {
 
   it("ignores Enter while an IME candidate window is open", () => {
     const { onReply } = renderBand({ awaitingReply: [asks()] });
-    const field = screen.getByPlaceholderText("Répondre à l'agent…");
+    const field = screen.getByPlaceholderText("Reply to the agent…");
     fireEvent.change(field, { target: { value: "こんにちは" } });
     fireEvent.compositionStart(field);
     fireEvent.keyDown(field, { key: "Enter" });
@@ -153,7 +153,7 @@ describe("ASKS YOU", () => {
 
   it("routes the typed answer to a builder through Send to dev", () => {
     const { onSendToDev } = renderBand({ awaitingReply: [asks()] });
-    fireEvent.change(screen.getByPlaceholderText("Répondre à l'agent…"), {
+    fireEvent.change(screen.getByPlaceholderText("Reply to the agent…"), {
       target: { value: "Fais-le" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Send to dev" }));
@@ -169,7 +169,7 @@ describe("ASKS YOU", () => {
     row.focus();
     fireEvent.keyDown(row, { key: "Enter" });
     expect(document.activeElement).toBe(
-      screen.getByPlaceholderText("Répondre à l'agent…"),
+      screen.getByPlaceholderText("Reply to the agent…"),
     );
   });
 });
@@ -204,13 +204,17 @@ describe("FAILED", () => {
   });
 
   it("formats the age in the frame's units", () => {
+    // The failure row's stamp is the shared `formatRelative`, counted in
+    // seconds while fresh; the row prints an em dash for an unreadable one.
     const now = new Date("2026-08-28T12:00:00.000Z");
-    expect(relativeAge("2026-08-28T11:59:30.000Z", now)).toBe("30s ago");
-    expect(relativeAge("2026-08-28T11:39:00.000Z", now)).toBe("21m ago");
-    expect(relativeAge("2026-08-28T09:00:00.000Z", now)).toBe("3h ago");
+    const age = (at: string | null) =>
+      formatRelative(at, { locale: "en", now, precision: "second" });
+    expect(age("2026-08-28T11:59:30.000Z")).toBe("30s ago");
+    expect(age("2026-08-28T11:39:00.000Z")).toBe("21m ago");
+    expect(age("2026-08-28T09:00:00.000Z")).toBe("3h ago");
     // SQLite CURRENT_TIMESTAMP has no zone marker and is UTC.
-    expect(relativeAge("2026-08-28 11:39:00", now)).toBe("21m ago");
-    expect(relativeAge(null, now)).toBe("—");
+    expect(age("2026-08-28 11:39:00")).toBe("21m ago");
+    expect(age(null)).toBe("");
   });
 });
 
@@ -219,7 +223,7 @@ describe("CONFLICT", () => {
     renderBand({ conflicts: [conflict()] });
     expect(screen.getByText("epic/ldg-71")).toBeInTheDocument();
     expect(screen.getByTestId("desk-conflict-row")).toHaveTextContent(
-      "Conflit avec main",
+      "Conflict with main",
     );
   });
 
@@ -237,7 +241,7 @@ describe("CONFLICT", () => {
       screen.queryByRole("button", { name: "Resolve with agent" }),
     ).not.toBeInTheDocument();
     expect(screen.getByTestId("desk-conflict-row")).toHaveTextContent(
-      "Marqueurs de conflit commités",
+      "Committed conflict markers",
     );
     // The way out is still visible.
     expect(screen.getByRole("button", { name: "Diff" })).toBeInTheDocument();
@@ -346,7 +350,7 @@ describe("band sizing", () => {
   it("counts the hidden rows in the overflow line", () => {
     renderBand({ awaitingReply: manyAsks(6) });
     stubLayout(3 * ROW_HEIGHT);
-    expect(screen.getByTestId("desk-your-turn-overflow")).toHaveTextContent("+3 de plus");
+    expect(screen.getByTestId("desk-your-turn-overflow")).toHaveTextContent("+3 more");
   });
 
   it("counts overflow across all three families, not just one", () => {
@@ -358,7 +362,7 @@ describe("band sizing", () => {
       conflicts: [conflict({ epicId: "c1" })],
     });
     stubLayout(3 * ROW_HEIGHT);
-    expect(screen.getByTestId("desk-your-turn-overflow")).toHaveTextContent("+1 de plus");
+    expect(screen.getByTestId("desk-your-turn-overflow")).toHaveTextContent("+1 more");
   });
 });
 
@@ -378,9 +382,9 @@ describe("dismiss", () => {
       onDismiss: vi.fn(),
     });
     expect(screen.getAllByTestId("desk-dismiss")).toHaveLength(3);
-    expect(screen.getByRole("button", { name: "Écarter cette question" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Écarter cet échec" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Écarter ce conflit" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Dismiss this question" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Dismiss this failure" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Dismiss this conflict" })).toBeInTheDocument();
   });
 
   it("stays hidden when the host wires no dismissal store", () => {
@@ -389,8 +393,8 @@ describe("dismiss", () => {
   });
 
   it.each([
-    ["asks", "Écarter cette question", "e1", "2026-08-28T09:00:00"],
-    ["conflict", "Écarter ce conflit", "e3", "2026-08-28T08:00:00"],
+    ["asks", "Dismiss this question", "e1", "2026-08-28T09:00:00"],
+    ["conflict", "Dismiss this conflict", "e3", "2026-08-28T08:00:00"],
   ])("reports the %s signal's own timestamp", (kind, label, epicId, signalAt) => {
     const onDismiss = vi.fn();
     renderBand({
@@ -406,7 +410,7 @@ describe("dismiss", () => {
     const onDismiss = vi.fn();
     const item = failure({ failedAt: "2026-08-28T07:30:00" });
     renderBand({ failed: [item], onDismiss });
-    fireEvent.click(screen.getByRole("button", { name: "Écarter cet échec" }));
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss this failure" }));
     expect(onDismiss).toHaveBeenCalledWith("failed", {
       epicId: item.epicId,
       signalAt: "2026-08-28T07:30:00",
@@ -418,7 +422,7 @@ describe("dismiss", () => {
     const onDismiss = vi.fn();
     renderBand({ awaitingReply: [asks()], onDismiss });
 
-    const button = screen.getByRole("button", { name: "Écarter cette question" });
+    const button = screen.getByRole("button", { name: "Dismiss this question" });
     button.focus();
     expect(button).toHaveFocus();
     await user.keyboard("{Enter}");
@@ -434,7 +438,7 @@ describe("dismiss", () => {
       pendingIds: new Set(["e1"]),
       onDismiss: vi.fn(),
     });
-    expect(screen.getByRole("button", { name: "Écarter cette question" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Dismiss this question" })).toBeDisabled();
   });
 });
 
@@ -470,14 +474,14 @@ describe("YourTurnBand overflow marker", () => {
   it("counts the rows past the fold on a short viewport", () => {
     // 30vh of 950px ≈ 285px ≈ 3 rows of 96px. 6 rows ⇒ 3 hidden.
     renderRows(6, 3 * ROW_HEIGHT);
-    expect(screen.getByTestId("desk-your-turn-overflow")).toHaveTextContent("+3 de plus");
+    expect(screen.getByTestId("desk-your-turn-overflow")).toHaveTextContent("+3 more");
   });
 
   it("says +2, not +3, on the taller viewport where a fourth row fits", () => {
     // The measured regression: at 1440x1300 the band grows to ~390px and shows
     // a fourth row, but the old fixed VISIBLE_ROWS = 3 still claimed "+3".
     renderRows(6, 4 * ROW_HEIGHT);
-    expect(screen.getByTestId("desk-your-turn-overflow")).toHaveTextContent("+2 de plus");
+    expect(screen.getByTestId("desk-your-turn-overflow")).toHaveTextContent("+2 more");
   });
 
   it("stays silent when every row is on screen", () => {

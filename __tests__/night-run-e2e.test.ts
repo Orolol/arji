@@ -242,14 +242,29 @@ const { AGENT_ASKED_QUESTION_REASON } = await import(
   "@/lib/workflow/agent-question"
 );
 const {
+  NIGHT_RUN_STATUS_LABEL_KEYS,
   formatNightRunCounts,
   formatNightRunCost,
   nightRunAbortKind,
 } = await import("@/components/night/night-run-format");
+const { translatorFor } = await import("@/lib/i18n/translator");
+const { catalogueValue } = await import("@/lib/i18n/catalogue");
+
+// The headline formatter composes; the phrases come resolved from the caller,
+// exactly as the summary dialog and the sessions list supply them.
+const tNight = translatorFor("en", "NightRuns");
+const countsCopy = {
+  bucket: (count: number, label: string) =>
+    tNight("counts.bucket", { count, label }),
+  statusLabel: (status: TicketExecutionStatus) =>
+    catalogueValue("en", NIGHT_RUN_STATUS_LABEL_KEYS[status]),
+  none: tNight("counts.none"),
+};
 import type {
   NightRunDetail,
   NightRunListEntry,
 } from "@/lib/night/constants";
+import type { TicketExecutionStatus } from "@/lib/dependencies/scheduler";
 
 let counter = 0;
 
@@ -738,7 +753,7 @@ describe("night run e2e — clean diamond", () => {
     });
 
     // Client formatter renders the same headline as the server title.
-    expect(`Night run finished: ${formatNightRunCounts(detail.counts)}`).toBe(
+    expect(`Night run finished: ${formatNightRunCounts(detail.counts, countsCopy)}`).toBe(
       summaries[0].title
     );
   });
@@ -1079,7 +1094,7 @@ describe("night run e2e — cost cap", () => {
     );
     expect(summaries[0].status).toBe("failed");
     expect(
-      `Night run finished: ${formatNightRunCounts(detail.counts)} — ${formatNightRunCost(
+      `Night run finished: ${formatNightRunCounts(detail.counts, countsCopy)} — ${formatNightRunCost(
         detail.totalCostUsd,
         detail.costIsPartial
       )} — cost cap reached`
@@ -1342,7 +1357,7 @@ describe("night run e2e — user stop", () => {
     const summaries = nightNotifications(projectId);
     expect(summaries).toHaveLength(1);
     expect(summaries[0].title).toBe(
-      `Night run finished: ${formatNightRunCounts(detail.counts)} — ${formatNightRunCost(detail.totalCostUsd, detail.costIsPartial)} — stopped by you`
+      `Night run finished: ${formatNightRunCounts(detail.counts, countsCopy)} — ${formatNightRunCost(detail.totalCostUsd, detail.costIsPartial)} — stopped by you`
     );
     const hooks = nightWebhookCalls();
     expect(hooks).toHaveLength(1);

@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { BandHeader, Mono, StrataBand } from "@/components/piscine";
 
 import type { SessionDiff } from "./types";
@@ -23,6 +25,7 @@ export function WorktreeCard({
   worktreePath,
   diff,
 }: WorktreeCardProps) {
+  const t = useTranslations("SessionLive");
   if (!branchName && !worktreePath) return null;
 
   // The rail is ~468px wide; show the tail of the path and keep the whole of
@@ -38,7 +41,12 @@ export function WorktreeCard({
 
   return (
     <StrataBand stratum="land" density="rail" gap={7}>
-      <BandHeader label="Worktree" stratum="land" labelSize={12} standalone />
+      <BandHeader
+        label={t("worktree.label")}
+        stratum="land"
+        labelSize={12}
+        standalone
+      />
 
       {branchName && (
         <span className="self-start rounded-full bg-card px-[9px] py-[5px]">
@@ -51,20 +59,24 @@ export function WorktreeCard({
       {shortPath && (
         <span title={worktreePath ?? undefined}>
           <Mono size={10.5} tone="land-mid" clamp={1}>
-            {`${shortPath} · isolé`}
+            {t("worktree.path", { path: shortPath })}
           </Mono>
         </span>
       )}
 
       {/* Never `main@—`: with no merge base the line simply is not drawn, and
-          with no behind count the "à jour" claim is not made. */}
+          with no behind count the "up to date" claim is not made. */}
       {showMergeBase && (
         <Mono size={10.5} tone="land-mid">
-          {"merge base "}
+          {t("worktree.mergeBaseLabel")}
           <span className="text-foreground">
             {`${baseBranch}@${mergeBase!.slice(0, 6)}`}
           </span>
-          {behind === null ? "" : behind === 0 ? " · à jour" : ` · ${behind} derrière`}
+          {behind === null
+            ? ""
+            : behind === 0
+              ? t("worktree.upToDate")
+              : t("worktree.behind", { count: behind })}
         </Mono>
       )}
     </StrataBand>

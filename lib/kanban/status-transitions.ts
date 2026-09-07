@@ -21,26 +21,28 @@
  * status control instead of being offered blindly.
  */
 
+import type { TranslationKey } from "@/lib/i18n/catalogue";
+
 import {
   KANBAN_COLUMNS,
-  COLUMN_LABELS,
+  COLUMN_LABEL_KEYS,
   type KanbanStatus,
 } from "@/lib/types/kanban";
 import { isAllowedTransition } from "@/lib/workflow/engine";
 
 export interface TicketStatusOption {
   status: KanbanStatus;
-  label: string;
+  labelKey: TranslationKey;
   /** True for the ticket's current column (never selectable). */
   isCurrent: boolean;
   /** Selectable in the status control. */
   enabled: boolean;
   /**
    * Why the option is not selectable: null when enabled, "Current status"
-   * semantics are expressed via `isCurrent`, and a human-readable reason
+   * semantics are expressed via `isCurrent`, and a catalogue key for the reason
    * for every disabled non-current option.
    */
-  disabledReason: string | null;
+  disabledReasonKey: TranslationKey | null;
 }
 
 export interface TicketStatusContext {
@@ -51,12 +53,12 @@ export interface TicketStatusContext {
   hasRunningSession?: boolean;
 }
 
-export const REASON_MERGE_REQUIRED =
-  "Done requires a merge — use the Merge action.";
-export const REASON_RELEASED_SYSTEM_ONLY =
-  "Tickets reach Released automatically when a release is created.";
-export const REASON_SESSION_RUNNING =
-  "An agent session is running or queued for this ticket.";
+export const REASON_MERGE_REQUIRED_KEY =
+  "Kanban.transitionReasons.mergeRequired";
+export const REASON_RELEASED_SYSTEM_ONLY_KEY =
+  "Kanban.transitionReasons.releasedSystemOnly";
+export const REASON_SESSION_RUNNING_KEY =
+  "Kanban.transitionReasons.sessionRunning";
 
 /**
  * The option list for the ticket status control, in board column order.
@@ -73,15 +75,15 @@ export function ticketStatusOptions(
   const sessionLocked = current === "in_progress" && !!ctx.hasRunningSession;
 
   return KANBAN_COLUMNS.map((status): TicketStatusOption => {
-    const label = COLUMN_LABELS[status] ?? status;
+    const labelKey = COLUMN_LABEL_KEYS[status];
 
     if (status === current) {
       return {
         status,
-        label,
+        labelKey,
         isCurrent: true,
         enabled: false,
-        disabledReason: null,
+        disabledReasonKey: null,
       };
     }
 
@@ -91,20 +93,20 @@ export function ticketStatusOptions(
     if (status === "released") {
       return {
         status,
-        label,
+        labelKey,
         isCurrent: false,
         enabled: false,
-        disabledReason: REASON_RELEASED_SYSTEM_ONLY,
+        disabledReasonKey: REASON_RELEASED_SYSTEM_ONLY_KEY,
       };
     }
 
     if (!isAllowedTransition(from, status)) {
       return {
         status,
-        label,
+        labelKey,
         isCurrent: false,
         enabled: false,
-        disabledReason: `No direct transition from ${COLUMN_LABELS[from] ?? from}`,
+        disabledReasonKey: "Kanban.transitionReasons.noDirect",
       };
     }
 
@@ -114,24 +116,24 @@ export function ticketStatusOptions(
     if (status === "done") {
       return {
         status,
-        label,
+        labelKey,
         isCurrent: false,
         enabled: false,
-        disabledReason: REASON_MERGE_REQUIRED,
+        disabledReasonKey: REASON_MERGE_REQUIRED_KEY,
       };
     }
 
     if (sessionLocked) {
       return {
         status,
-        label,
+        labelKey,
         isCurrent: false,
         enabled: false,
-        disabledReason: REASON_SESSION_RUNNING,
+        disabledReasonKey: REASON_SESSION_RUNNING_KEY,
       };
     }
 
-    return { status, label, isCurrent: false, enabled: true, disabledReason: null };
+    return { status, labelKey, isCurrent: false, enabled: true, disabledReasonKey: null };
   });
 }
 

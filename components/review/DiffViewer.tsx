@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { useDiff } from "@/hooks/useDiff";
 import { useReviewComments } from "@/hooks/useReviewComments";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -44,6 +46,7 @@ export function DiffViewer({
     resolveAll,
     refresh: refreshComments,
   } = useReviewComments(projectId, epicId);
+  const t = useTranslations("Review");
 
   // Open review comments (typically agent-submitted findings) whose file:line
   // has no matching line in the rendered diff — they must stay visible so the
@@ -68,7 +71,7 @@ export function DiffViewer({
     return (
       <div className="flex items-center justify-center py-12">
         <Loader2 className="h-5 w-5 animate-spin text-muted-foreground mr-2" />
-        <span className="text-sm text-muted-foreground">Loading diff...</span>
+        <span className="text-sm text-muted-foreground">{t("diff.loading")}</span>
       </div>
     );
   }
@@ -79,7 +82,7 @@ export function DiffViewer({
         <p className="text-sm text-destructive">{diffError}</p>
         <Button variant="outline" size="sm" onClick={handleRefresh}>
           <RefreshCw className="h-3 w-3 mr-1" />
-          Retry
+          {t("diff.retry")}
         </Button>
       </div>
     );
@@ -89,9 +92,7 @@ export function DiffViewer({
     return (
       <div className="py-8 text-center space-y-3">
         <FileCode className="h-8 w-8 mx-auto text-muted-foreground/50" />
-        <p className="text-sm text-muted-foreground">
-          No changes detected.
-        </p>
+        <p className="text-sm text-muted-foreground">{t("emptyDiff.title")}</p>
 
         {/* Diagnostics when diff is empty */}
         {metadata && (
@@ -99,31 +100,36 @@ export function DiffViewer({
             <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
               <GitBranch className="h-3 w-3" />
               <span className="font-mono">{metadata.branchName}</span>
-              <span>vs</span>
+              <span>{t("emptyDiff.versus")}</span>
               <span className="font-mono">{metadata.baseBranch}</span>
             </div>
 
             {metadata.ahead > 0 && (
               <p className="text-xs text-amber-500 flex items-center justify-center gap-1">
                 <AlertTriangle className="h-3 w-3" />
-                Branch is {metadata.ahead} commit{metadata.ahead !== 1 ? "s" : ""} ahead of {metadata.baseBranch}
-                {metadata.behind > 0 && `, ${metadata.behind} behind`}.
-                The branch may have been merged already.
+                {metadata.behind > 0
+                  ? t("emptyDiff.aheadAndBehind", {
+                      count: metadata.ahead,
+                      base: metadata.baseBranch,
+                      behind: metadata.behind,
+                    })
+                  : t("emptyDiff.ahead", {
+                      count: metadata.ahead,
+                      base: metadata.baseBranch,
+                    })}
               </p>
             )}
 
             {metadata.ahead === 0 && !metadata.hasUncommittedChanges && (
               <p className="text-xs text-muted-foreground">
-                The branch has not diverged from {metadata.baseBranch}.
-                The agent may not have committed its changes yet, or the build may still be running.
+                {t("emptyDiff.notDiverged", { base: metadata.baseBranch })}
               </p>
             )}
 
             {metadata.hasUncommittedChanges && (
               <p className="text-xs text-amber-500 flex items-center justify-center gap-1">
                 <AlertTriangle className="h-3 w-3" />
-                There are uncommitted changes in the worktree.
-                The agent may have been interrupted before committing.
+                {t("emptyDiff.uncommitted")}
               </p>
             )}
           </div>
@@ -131,7 +137,7 @@ export function DiffViewer({
 
         <Button variant="outline" size="sm" onClick={handleRefresh}>
           <RefreshCw className="h-3 w-3 mr-1" />
-          Refresh
+          {t("diff.refresh")}
         </Button>
 
         {/* Even without a diff, open findings block approval — keep them visible. */}
@@ -154,7 +160,7 @@ export function DiffViewer({
       <div className="flex items-center gap-3 flex-wrap">
         <Badge variant="outline" className="gap-1 text-xs">
           <FileCode className="h-3 w-3" />
-          {files.length} file{files.length !== 1 ? "s" : ""}
+          {t("summary.files", { count: files.length })}
         </Badge>
         <Badge variant="outline" className="gap-1 text-xs text-green-500">
           +{totalAdditions}
@@ -165,19 +171,19 @@ export function DiffViewer({
         {openCount > 0 && (
           <Badge variant="outline" className="gap-1 text-xs text-blue-500 border-blue-500/30">
             <MessageSquare className="h-3 w-3" />
-            {openCount} open comment{openCount !== 1 ? "s" : ""}
+            {t("summary.openComments", { count: openCount })}
           </Badge>
         )}
         {metadata && metadata.ahead > 0 && (
           <Badge variant="outline" className="gap-1 text-xs text-muted-foreground">
             <GitBranch className="h-3 w-3" />
-            {metadata.ahead} commit{metadata.ahead !== 1 ? "s" : ""} ahead
+            {t("summary.commitsAhead", { count: metadata.ahead })}
           </Badge>
         )}
         <div className="flex-1" />
         <Button variant="ghost" size="sm" onClick={handleRefresh} className="h-7 text-xs">
           <RefreshCw className={`h-3 w-3 mr-1 ${diffLoading ? "animate-spin" : ""}`} />
-          Refresh
+          {t("diff.refresh")}
         </Button>
       </div>
 

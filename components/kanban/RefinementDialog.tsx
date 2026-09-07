@@ -2,6 +2,7 @@
 
 /** Configure one refinement pass without trapping users behind another run. */
 import { useId, useState } from "react";
+import { useTranslations } from "next-intl";
 import { NamedAgentSelect } from "@/components/shared/NamedAgentSelect";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -35,6 +36,7 @@ export function RefinementDialog({
   starting: boolean;
   onStart: (options: RefinementOptions) => void;
 }) {
+  const t = useTranslations("Kanban");
   const id = useId();
   const [namedAgentId, setNamedAgentId] = useState<string | null>(null);
   const [instructions, setInstructions] = useState("");
@@ -52,14 +54,14 @@ export function RefinementDialog({
     >
       <DialogContent className="max-h-[90dvh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Configure board refinement</DialogTitle>
+          <DialogTitle>{t("refinementDialog.title")}</DialogTitle>
           <DialogDescription>
-            Choose what the agent may change in Backlog and To do for this pass.
+            {t("refinementDialog.description")}
           </DialogDescription>
         </DialogHeader>
         <div className="min-w-0 space-y-2">
           <label htmlFor={`${id}-agent`} className="text-sm font-medium">
-            Agent
+            {t("refinementDialog.agentLabel")}
           </label>
           <NamedAgentSelect
             id={`${id}-agent`}
@@ -67,18 +69,19 @@ export function RefinementDialog({
             onChange={(value) => setNamedAgentId(value || null)}
             disabled={busy}
             allowClear
-            clearLabel="Use refinement default"
+            clearLabel={t("refinementDialog.agentClearLabel")}
             dispatchRole="maintenance"
             className="w-full min-w-0"
             aria-describedby={`${id}-agent-help`}
           />
           <p id={`${id}-agent-help`} className="text-xs text-muted-foreground">
-            Uses the project or workspace refinement default unless you select
-            an agent. Claude Code or Codex is required.
+            {t("refinementDialog.agentHint")}
           </p>
         </div>
         <fieldset disabled={busy} className="space-y-2">
-          <legend className="mb-2 text-sm font-medium">Actions</legend>
+          <legend className="mb-2 text-sm font-medium">
+            {t("refinementDialog.actionsLegend")}
+          </legend>
           {REFINEMENT_ACTIONS.map((action) => (
             <label
               key={action.id}
@@ -103,7 +106,7 @@ export function RefinementDialog({
         </fieldset>
         <div className="space-y-2">
           <label htmlFor={`${id}-instructions`} className="text-sm font-medium">
-            Additional instructions (optional)
+            {t("refinementDialog.instructionsLabel")}
           </label>
           <Textarea
             id={`${id}-instructions`}
@@ -112,18 +115,24 @@ export function RefinementDialog({
             disabled={busy}
             maxLength={REFINEMENT_INSTRUCTIONS_MAX_CHARS}
             rows={3}
-            placeholder="For example: prioritize onboarding and combine duplicate search tickets."
+            placeholder={t("refinementDialog.instructionsPlaceholder")}
             aria-describedby={`${id}-instructions-help`}
           />
           <p id={`${id}-instructions-help`} className="text-xs text-muted-foreground">
-            {instructions.length} / {REFINEMENT_INSTRUCTIONS_MAX_CHARS} characters.
-            Instructions apply only to checked actions.
+            {/* Both counts are passed as strings: they are a character budget
+                printed verbatim, not a grouped numeral. */}
+            {t("refinementDialog.instructionsHint", {
+              used: String(instructions.length),
+              max: String(REFINEMENT_INSTRUCTIONS_MAX_CHARS),
+            })}
           </p>
         </div>
         <p role="status" className="text-sm text-muted-foreground">
           {running
-            ? "A refinement pass is already running. You can close this dialog."
-            : actions.length === 0 ? "Select at least one action." : ""}
+            ? t("refinementDialog.alreadyRunning")
+            : actions.length === 0
+              ? t("refinementDialog.selectAction")
+              : ""}
         </p>
         <DialogFooter>
           <Button
@@ -131,7 +140,7 @@ export function RefinementDialog({
             disabled={starting}
             onClick={() => onOpenChange(false)}
           >
-            Cancel
+            {t("cancel")}
           </Button>
           <Button
             disabled={busy || actions.length === 0}
@@ -141,7 +150,9 @@ export function RefinementDialog({
               actions,
             })}
           >
-            {starting ? "Starting…" : "Start refinement"}
+            {starting
+              ? t("refinementDialog.starting")
+              : t("refinementDialog.start")}
           </Button>
         </DialogFooter>
       </DialogContent>

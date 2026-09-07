@@ -7,7 +7,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  QA_UNVERIFIABLE_TEXT,
   checkStatusLabel,
   checkTypeLabel,
   compareFindings,
@@ -27,7 +26,9 @@ import {
   type QaSessionRow,
   type QaVerdictEpic,
   type QaVerdictSessionRow,
+  type QaVerdictCopy,
 } from "@/lib/qa/aggregate";
+import { translatorFor } from "@/lib/i18n/translator";
 import { REVIEW_CHECKLISTS } from "@/lib/claude/prompt-sections";
 import type { QaRun } from "@/lib/qa/types";
 
@@ -222,9 +223,27 @@ function verdictRow(
   };
 }
 
+/**
+ * The verdict sentences as the QA route composes them — resolved from the real
+ * `en` catalogue through the same `translatorFor` the route uses. Asserting a
+ * hand-written copy of the strings here would pass while the catalogue said
+ * something else entirely; this cannot.
+ */
+const t = translatorFor("en", "Qa");
+const VERDICT_COPY: QaVerdictCopy = {
+  unverifiable: t("verdicts.unverifiable"),
+  changesRequested: (count) => t("verdicts.changesRequested", { count }),
+  cleanNoFindings: t("verdicts.cleanNoFindings"),
+  cleanWithFindings: (count) => t("verdicts.cleanWithFindings", { count }),
+  noStructuredVerdict: t("verdicts.noStructuredVerdict"),
+  outcomeLanded: t("verdicts.outcomeLanded"),
+  outcomeReady: t("verdicts.outcomeReady"),
+  outcomeYourTurn: t("verdicts.outcomeYourTurn"),
+};
+
 describe("deriveVerdicts", () => {
   it("says 'review clean · 0 findings' for an approval that filed nothing", () => {
-    const [row] = deriveVerdicts([verdictRow()], EPICS, new Set());
+    const [row] = deriveVerdicts([verdictRow()], EPICS, new Set(), VERDICT_COPY);
     expect(row.verdictText).toBe("review clean · 0 findings");
     expect(row.kind).toBe("clean");
     expect(row.outcome).toBe("→ landed");
@@ -235,8 +254,9 @@ describe("deriveVerdicts", () => {
       [verdictRow({ reviewVerdict: "approved_with_minor_issues", findingsFiled: 2 })],
       EPICS,
       new Set(),
+      VERDICT_COPY,
     );
-    expect(row.verdictText).toBe("clean après review · 2 findings filed");
+    expect(row.verdictText).toBe("clean after review · 2 findings filed");
     expect(row.kind).toBe("clean");
   });
 
@@ -245,6 +265,7 @@ describe("deriveVerdicts", () => {
       [verdictRow({ epicId: "e2", reviewVerdict: "changes_requested", findingsFiled: 1 })],
       EPICS,
       new Set(),
+      VERDICT_COPY,
     );
     expect(row.verdictText).toBe("changes requested · 1 finding");
     expect(row.kind).toBe("attention");
@@ -256,8 +277,9 @@ describe("deriveVerdicts", () => {
       [verdictRow({ epicId: "e3", reviewVerdict: null })],
       EPICS,
       new Set(["e3"]),
+      VERDICT_COPY,
     );
-    expect(row.verdictText).toBe(QA_UNVERIFIABLE_TEXT);
+    expect(row.verdictText).toBe("review unverifiable · findings never received");
     expect(row.kind).toBe("attention");
     expect(row.outcome).toBe("→ your turn");
   });
@@ -267,8 +289,9 @@ describe("deriveVerdicts", () => {
       [verdictRow({ reviewVerdict: null })],
       EPICS,
       new Set(),
+      VERDICT_COPY,
     );
-    expect(row.verdictText).toBe("review sans verdict structuré");
+    expect(row.verdictText).toBe("review with no structured verdict");
     expect(row.kind).toBe("clean");
   });
 
@@ -277,24 +300,24 @@ describe("deriveVerdicts", () => {
       verdictRow({ sessionId: "old", at: "2026-08-01T00:00:00.000Z", findingsFiled: 9 }),
       verdictRow({ sessionId: "new", at: "2026-08-30T00:00:00.000Z" }),
     ];
-    const derived = deriveVerdicts(rows, EPICS, new Set());
+    const derived = deriveVerdicts(rows, EPICS, new Set(), VERDICT_COPY);
     expect(derived).toHaveLength(1);
     expect(derived[0].verdictText).toBe("review clean · 0 findings");
 
     const many = Array.from({ length: 9 }, (_, index) =>
       verdictRow({ sessionId: `s${index}`, epicId: `e${index}` }),
     );
-    expect(deriveVerdicts(many, EPICS, new Set())).toHaveLength(6);
+    expect(deriveVerdicts(many, EPICS, new Set(), VERDICT_COPY)).toHaveLength(6);
   });
 });
 
 describe("outcomeArrow", () => {
   it("names the destination stratum, verbatim", () => {
-    expect(outcomeArrow("done")).toBe("→ landed");
-    expect(outcomeArrow("released")).toBe("→ landed");
-    expect(outcomeArrow("to_merge")).toBe("→ ready");
-    expect(outcomeArrow("review")).toBe("→ your turn");
-    expect(outcomeArrow("")).toBe("→ your turn");
+    expect(outcomeArrow("done", VERDICT_COPY)).toBe("→ landed");
+    expect(outcomeArrow("released", VERDICT_COPY)).toBe("→ landed");
+    expect(outcomeArrow("to_merge", VERDICT_COPY)).toBe("→ ready");
+    expect(outcomeArrow("review", VERDICT_COPY)).toBe("→ your turn");
+    expect(outcomeArrow("", VERDICT_COPY)).toBe("→ your turn");
   });
 });
 

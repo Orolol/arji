@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import {
   AvatarSquare,
   BreathingDot,
@@ -56,6 +58,7 @@ export function AgentRosterCard({
   statsStatus,
   onSelect,
 }: AgentRosterCardProps) {
+  const t = useTranslations("AgentsWorkshop");
   // THE EM-DASH-NOT-ZERO INVARIANT. `stats?.runsToday ?? 0` alone cannot hold
   // it: the fallback fires both when the agent genuinely ran nothing and when
   // the aggregate never arrived, and printing "0 runs today" for a request
@@ -108,12 +111,15 @@ export function AgentRosterCard({
                   tracking={0.06}
                   className="shrink-0"
                 >
-                  unsaved
+                  {t("roster.unsaved")}
                 </Mono>
               ) : null}
             </span>
             <Mono size={10.5} tone="muted" clamp={1}>
-              {`${agent.provider} · ${agent.model || "CLI default"}`}
+              {t("roster.providerLine", {
+                provider: agent.provider,
+                model: agent.model || t("common.cliDefault"),
+              })}
             </Mono>
           </span>
           {/* No dot at all when nothing runs — never a grey placeholder here,
@@ -121,7 +127,7 @@ export function AgentRosterCard({
               rather than leaving the previous poll's dot breathing. */}
           {live > 0 ? (
             <span
-              title={`${live} session${live === 1 ? "" : "s"} live`}
+              title={t("roster.liveSessions", { count: live })}
               className="flex shrink-0 items-center"
             >
               <BreathingDot size={7} tone="live" />
@@ -135,13 +141,13 @@ export function AgentRosterCard({
             <Mono size={10.5} weight={700} tone="live-deep">
               {runs}
             </Mono>{" "}
-            runs today
+            {t("roster.runsToday")}
           </span>
           <span>
             <Mono size={10.5} weight={700} tone="ink">
               {clean}
             </Mono>{" "}
-            clean
+            {t("roster.clean")}
           </span>
           <span>
             <Mono size={10.5} weight={700} tone="ink">

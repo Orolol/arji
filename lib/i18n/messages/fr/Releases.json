@@ -1,0 +1,17 @@
+{
+  "next": {
+    "backToDraft": "← revenir au brouillon",
+    "changelogCompose": "CHANGELOG — GÉNÉRÉ À LA CRÉATION"
+  },
+  "summary": {
+    "compose": "{count, plural, one {# ticket} other {# tickets}} · tag v{version} sur release/v{version}",
+    "tagAndBranch": "{count, plural, one {# ticket} other {# tickets}} · tag {tag} sur {branch}",
+    "branchOnly": "{count, plural, one {# ticket} other {# tickets}} · sur {branch}"
+  },
+  "changelogAgent": {
+    "link": "agent du changelog"
+  },
+  "history": {
+    "viewChangelog": "voir le changelog →"
+  }
+}

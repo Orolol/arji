@@ -1,5 +1,6 @@
 "use client";
 
+import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { MentionTextarea } from "@/components/documents/MentionTextarea";
@@ -8,7 +9,7 @@ import { TicketCommentContent } from "@/components/verify/TicketCommentContent";
 import { Send, User, Bot, Loader2, Hammer } from "lucide-react";
 import type { TicketComment } from "@/hooks/useTicketComments";
 import { useFeedAutoScroll } from "@/hooks/useFeedAutoScroll";
-import { formatTime } from "@/lib/utils/format-date";
+import { formatDateTime } from "@/lib/i18n/format";
 
 interface CommentThreadProps {
   projectId: string;
@@ -32,6 +33,8 @@ export function CommentThread({
   sendToDevDisabled,
   sendToDevLoading,
 }: CommentThreadProps) {
+  const locale = useLocale();
+  const t = useTranslations("Story");
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -47,7 +50,7 @@ export function CommentThread({
       await onAddComment(input.trim());
       setInput("");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to add comment");
+      setError(e instanceof Error ? e.message : t("comments.addError"));
     } finally {
       setSending(false);
     }
@@ -58,7 +61,7 @@ export function CommentThread({
       {/* Header */}
       <div className="shrink-0 px-4 py-2 border-b border-border">
         <h3 className="text-sm font-medium">
-          Comments ({comments.length})
+          {t("comments.heading", { count: comments.length })}
         </h3>
       </div>
 
@@ -76,7 +79,7 @@ export function CommentThread({
             </div>
           ) : comments.length === 0 ? (
             <p className="text-center text-sm text-muted-foreground py-8">
-              No comments yet. Start the conversation.
+              {t("comments.empty")}
             </p>
           ) : (
             comments.map((comment) => (
@@ -95,10 +98,12 @@ export function CommentThread({
                     <User className="h-3.5 w-3.5 text-muted-foreground" />
                   )}
                   <span className="text-xs font-medium">
-                    {comment.author === "agent" ? "Agent" : "You"}
+                    {comment.author === "agent"
+                      ? t("comments.authorAgent")
+                      : t("comments.authorYou")}
                   </span>
                   <span className="text-xs text-muted-foreground">
-                    {formatTime(comment.createdAt)}
+                    {formatDateTime(comment.createdAt, { locale, style: "dayTime" })}
                   </span>
                 </div>
                 <div className="text-sm">
@@ -124,7 +129,7 @@ export function CommentThread({
                 handleSubmit();
               }
             }}
-            placeholder="Add a comment..."
+            placeholder={t("comments.placeholder")}
             rows={3}
             className="min-h-24 resize-none"
           />
@@ -146,7 +151,7 @@ export function CommentThread({
                 variant="outline"
                 onClick={onSendToDev}
                 disabled={sendToDevDisabled || sendToDevLoading}
-                title="Send to dev"
+                title={t("comments.sendToDev")}
                 data-testid="send-to-dev-button"
               >
                 {sendToDevLoading ? (

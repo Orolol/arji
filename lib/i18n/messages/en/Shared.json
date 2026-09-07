@@ -1,0 +1,133 @@
+{
+  "cancel": "Cancel",
+  "agentActions": {
+    "running": "Agent running",
+    "pipelineTitle": "Dispatched by an autonomous pipeline run — stopping this session stops the pipeline",
+    "segregationNotice": "Review by {reviewer} (builder was {builder})",
+    "sendToDev": "Send to Dev",
+    "agentReview": "Agent Review",
+    "gradeCriteria": "Grade Criteria",
+    "merge": "Merge",
+    "approve": "Approve",
+    "runReview": "Run Review ({count})",
+    "epic": {
+      "lockedWithSession": "Another agent is already running for this epic (#{session}).",
+      "locked": "Another agent is already running for this epic.",
+      "devDialogTitle": "Send Epic to Dev",
+      "reviewDialogTitle": "Epic Agent Review",
+      "reviewDialogDescription": "Select the review types to run on this epic. Each selected type dispatches a separate agent."
+    },
+    "story": {
+      "lockedWithSession": "Another agent is already running for this task (#{session}).",
+      "locked": "Another agent is already running for this task.",
+      "devDialogTitle": "Send to Dev",
+      "reviewDialogTitle": "Agent Review",
+      "reviewDialogDescription": "Select the review types to run. Each selected type dispatches a separate agent."
+    },
+    "grading": {
+      "title": "Acceptance Criteria Grading",
+      "description": "Evaluate each story criterion against concrete evidence. Grading does not approve or move the ticket.",
+      "confirm": "Run Grading"
+    }
+  },
+  "dispatchDialog": {
+    "agentLabel": "Agent:"
+  },
+  "sendToDev": {
+    "descriptionFix": "Explain what needs to be fixed. This comment is required.",
+    "descriptionOptional": "Optionally add a comment for the agent before dispatching.",
+    "placeholderFix": "Describe what needs to be fixed...",
+    "placeholderOptional": "Optional instructions for the agent...",
+    "dispatch": "Dispatch Agent"
+  },
+  "arijActions": {
+    "title": "Arij actions"
+  },
+  "imageAttachments": {
+    "remove": "Remove {fileName}"
+  },
+  "imageLightbox": {
+    "close": "Close image"
+  },
+  "namedAgentSelect": {
+    "loading": "Loading...",
+    "empty": "No agents configured",
+    "placeholder": "Select agent",
+    "noAgent": "No agent"
+  },
+  "agentSelectPill": {
+    "defaultAgent": "Default agent",
+    "loading": "Loading…",
+    "directApi": "Direct API",
+    "namedAgents": "Named Agents",
+    "persistentCli": "Persistent CLI",
+    "cliProviders": "CLI Providers",
+    "cliProvider": "{label} (CLI)"
+  },
+  "permanentDelete": {
+    "warning": "This action cannot be undone."
+  },
+  "pipelineDispatch": {
+    "label": "Run full pipeline (build → review → auto-fix)",
+    "hint": "After the build, Arij runs a code review and dispatches fix agents until the review is clean. Stopping the running session stops the pipeline.",
+    "unresolved": "Couldn't read the configured default. The server's <code>pipeline_enabled</code> setting applies unless you tick or untick the box."
+  },
+  "promptEstimate": {
+    "loading": "Estimating prompt tokens...",
+    "unavailable": "Prompt estimate unavailable",
+    "skipped": "No agent session will be dispatched",
+    "label": "Estimated Prompt:",
+    "total": "~{tokens} tokens",
+    "acrossSessions": "across {count, plural, one {# session} other {# sessions}}",
+    "budget": "Budget: {tokens}",
+    "perSession": "Per session:",
+    "compliance": "Compliance",
+    "breakdown": {
+      "spec": "Spec:",
+      "memory": "Memory:",
+      "ticket": "Ticket / Stories:",
+      "comments": "Comments:",
+      "findings": "Findings:",
+      "documents": "Documents:",
+      "system": "System:",
+      "other": "Other / Instr:"
+    },
+    "budgetWarning": {
+      "title": "Prompt token budget warning",
+      "body": "Estimated prompt (~{total} tokens) exceeds the configured budget ({budget} tokens).",
+      "largest": "Largest section is <strong>{label}</strong> (~{tokens} tokens, {percentage}%)."
+    }
+  },
+  "reviewTypes": {
+    "featureReview": {
+      "label": "Feature Review",
+      "description": "Verifies feature completeness against acceptance criteria using all available tools"
+    },
+    "security": {
+      "label": "Security",
+      "description": "OWASP top 10, input validation, auth/authz, secrets exposure"
+    },
+    "codeReview": {
+      "label": "Code Review",
+      "description": "Readability, DRY, error handling, performance, naming"
+    },
+    "compliance": {
+      "label": "Compliance / Accessibility",
+      "description": "WCAG accessibility, i18n readiness, license compliance"
+    }
+  },
+  "sessionPicker": {
+    "resume": "Resume:",
+    "loading": "Loading...",
+    "startFresh": "Start fresh",
+    "startFreshItem": "Start fresh (no resume)",
+    "session": "Session {id}"
+  },
+  "ticketType": {
+    "badge": "Bug",
+    "meta": "BUG"
+  },
+  "close": "Close",
+  "switchToLight": "Switch to light mode",
+  "switchToDark": "Switch to dark mode"
+}

@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { BandHeader, Mono, StrataBand } from "@/components/piscine";
 
 import { SettingTextarea } from "./SettingField";
@@ -17,24 +19,33 @@ export interface GlobalPromptBandProps {
 }
 
 export function GlobalPromptBand({ draft }: GlobalPromptBandProps) {
+  const t = useTranslations("Settings");
+
   return (
-    <SettingsSection testId="global-prompt-settings" heading="Global prompt">
+    <SettingsSection
+      testId="global-prompt-settings"
+      heading={t("globalPrompt.heading")}
+    >
       <StrataBand stratum="feed">
-        <BandHeader stratum="feed" label="Prompt global" standalone />
+        <BandHeader
+          stratum="feed"
+          label={t("globalPrompt.label")}
+          standalone
+        />
         <SettingTextarea
           id="global-prompt"
           data-testid="global-prompt"
-          aria-label="Global Prompt"
+          aria-label={t("globalPrompt.ariaLabel")}
           chrome="ground"
           rows={10}
-          placeholder="Enter global instructions for Claude Code..."
+          placeholder={t("globalPrompt.placeholder")}
           value={draft.text(GLOBAL_PROMPT_SETTING_KEY)}
           onChange={(event) =>
             draft.set(GLOBAL_PROMPT_SETTING_KEY, event.target.value)
           }
         />
         <Mono size={10.5} tone="feed-deep" as="div">
-          injecté en tête de chaque session, tous projets confondus
+          {t("globalPrompt.note")}
         </Mono>
       </StrataBand>
     </SettingsSection>

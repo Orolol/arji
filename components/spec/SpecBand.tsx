@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useLocale, useTranslations } from "next-intl";
 
 import {
   BandHeader,
@@ -84,8 +85,17 @@ export function SpecBand({
     return () => clearInterval(interval);
   }, []);
 
-  const words = loaded ? formatCount(countWords(spec)) : EM_DASH;
-  const saveState = formatSaveState({ dirty, savedAt }, now);
+  const locale = useLocale();
+  const t = useTranslations("Spec");
+  const words = loaded ? formatCount(countWords(spec), locale) : EM_DASH;
+  const saveState = formatSaveState(
+    { dirty, savedAt },
+    {
+      locale,
+      now,
+      copy: { unsaved: t("footer.unsaved"), saved: (age) => t("footer.saved", { age }) },
+    },
+  );
 
   function handleCardKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
@@ -101,17 +111,22 @@ export function SpecBand({
       className={`px-[20px] py-[16px] ${className ?? ""}`}
     >
       {/* The band label reads SPEC; the document still needs a real heading. */}
-      <h3 className="sr-only">Specification</h3>
+      <h3 className="sr-only">{t("band.heading")}</h3>
 
       <div className="flex flex-none items-center gap-[12px]">
-        <BandHeader stratum="feed" label="Spec" labelSize={12} align="center" />
+        <BandHeader
+          stratum="feed"
+          label={t("band.label")}
+          labelSize={12}
+          align="center"
+        />
         {/*
           The helper is a sibling rather than BandHeader's `meta` slot: `meta`
           renders Space Mono, and the frame draws this line in Instrument Sans
           11.5 on the linden deep.
         */}
         <span className="min-w-0 truncate text-[11.5px] text-strata-feed-deep">
-          injectée dans chaque prompt d&apos;agent
+          {t("band.helper")}
         </span>
         {/*
           Two --action fills share this row: the active segment and the
@@ -126,8 +141,8 @@ export function SpecBand({
             value={tab}
             onChange={onTabChange}
             options={[
-              { value: "edit", label: "Écrire" },
-              { value: "preview", label: "Prévisualiser" },
+              { value: "edit", label: t("band.tabs.edit") },
+              { value: "preview", label: t("band.tabs.preview") },
             ]}
             // Inactive labels take the host stratum's deep tone on a coloured
             // ground, not --muted-foreground.
@@ -161,7 +176,7 @@ export function SpecBand({
 
           <div className="mt-auto flex flex-none items-center gap-[10px]">
             <Mono size={10.5} tone="muted">
-              {`markdown · ${words} mots · ${saveState}`}
+              {t("footer.line", { words, state: saveState })}
             </Mono>
             <PillButton
               variant="filled"
@@ -170,9 +185,9 @@ export function SpecBand({
               onClick={() => void onSave()}
               disabled={saving || updateRunning}
               pending={saving}
-              pendingLabel="Enregistrement…"
+              pendingLabel={t("band.savePending")}
             >
-              Enregistrer
+              {t("band.save")}
             </PillButton>
           </div>
         </SurfaceCard>

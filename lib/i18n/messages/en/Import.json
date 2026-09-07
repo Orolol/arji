@@ -1,0 +1,31 @@
+{
+  "folder": {
+    "help": "Enter the full path to your existing project folder. Claude Code will analyze its structure and generate epics and user stories.",
+    "pathPlaceholder": "/path/to/your/project",
+    "analyze": "Analyze"
+  },
+  "github": {
+    "help": "Paste a GitHub repository URL. Arij clones it into its own workspace, then Claude Code analyzes the codebase and generates epics and user stories.",
+    "urlPlaceholder": "https://github.com/owner/repo",
+    "urlLabel": "GitHub repository URL",
+    "import": "Import",
+    "invalid": "Not a GitHub repository. Use https://github.com/owner/repo, git@github.com:owner/repo.git, or owner/repo.",
+    "willClone": "Will clone {repo}",
+    "tokenHint": "Private repositories use the GitHub token from Settings."
+  },
+  "preview": {
+    "project": "Project",
+    "epics": "Epics ({count})",
+    "importing": "Importing...",
+    "alreadyImported": "Already imported",
+    "validate": "Validate & Import",
+    "cancel": "Cancel"
+  },
+  "progress": {
+    "cloning": "Cloning {repo}...",
+    "cloningUnnamedRepo": "repository",
+    "cloningDetail": "Fetching the full history from GitHub",
+    "analyzing": "Analyzing project...",
+    "analyzingDetail": "Claude Code is scanning the codebase and generating epics"
+  }
+}

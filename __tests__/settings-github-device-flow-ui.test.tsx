@@ -1,5 +1,5 @@
 /**
- * Settings → Intégrations — "Se connecter avec GitHub" (OAuth Device Flow).
+ * Settings → Integrations — "Sign in with GitHub" (OAuth Device Flow).
  *
  * The routes have their own suite (`github-device-flow-routes.test.ts`); this
  * one covers what the BROWSER adds: starting a flow, showing the code, polling
@@ -151,7 +151,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("Settings → Intégrations — connexion GitHub par Device Flow", () => {
+describe("Settings → Integrations — GitHub sign-in through the Device Flow", () => {
   it("connects end to end without a token ever being pasted", async () => {
     pollQueue = [PENDING, SUCCESS];
     await renderIntegrations();
@@ -171,7 +171,7 @@ describe("Settings → Intégrations — connexion GitHub par Device Flow", () =
 
     await advance(1000); // success
     expect(screen.getByTestId("github-connected")).toHaveTextContent(
-      "Connecté en tant que octocat",
+      "Connected as octocat",
     );
 
     // The whole point of the epic: nothing was typed into the PAT field.
@@ -233,7 +233,7 @@ describe("Settings → Intégrations — connexion GitHub par Device Flow", () =
     expect(failure).toHaveTextContent("This GitHub sign-in expired. Start it again.");
     expect(screen.queryByTestId("github-device-code")).not.toBeInTheDocument();
 
-    // Réessayer really restarts: a second `start` call, a fresh code panel.
+    // "Try again" really restarts: a second `start` call, a fresh code panel.
     pollQueue = [PENDING];
     fireEvent.click(screen.getByTestId("github-flow-retry"));
     await settle();
@@ -315,7 +315,7 @@ describe("Settings → Intégrations — connexion GitHub par Device Flow", () =
     await advance(1000);
     expect(pollBodies).toHaveLength(1);
 
-    fireEvent.click(screen.getByRole("button", { name: "Annuler" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     await advance(5000);
 
     expect(pollBodies).toHaveLength(1);
@@ -329,7 +329,7 @@ describe("Settings → Intégrations — connexion GitHub par Device Flow", () =
     fireEvent.click(screen.getByTestId("github-connect"));
     await settle();
 
-    fireEvent.click(screen.getByRole("button", { name: "Annuler" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     await settle();
 
     // Stopping the timers only stops THIS tab from asking. The server still
@@ -382,7 +382,7 @@ describe("Settings → Intégrations — connexion GitHub par Device Flow", () =
   });
 });
 
-describe("Settings → Intégrations — état connecté et déconnexion", () => {
+describe("Settings → Integrations — the connected state and disconnecting", () => {
   it("names the account from github_oauth_meta on load", async () => {
     settingsData = {
       github_pat: { hasToken: true },
@@ -396,7 +396,7 @@ describe("Settings → Intégrations — état connecté et déconnexion", () =>
     await renderIntegrations();
 
     const panel = screen.getByTestId("github-connected");
-    expect(panel).toHaveTextContent("Connecté en tant que octocat");
+    expect(panel).toHaveTextContent("Connected as octocat");
     expect(panel).toHaveTextContent("repo, read:user");
     expect(screen.queryByTestId("github-connect")).not.toBeInTheDocument();
   });
@@ -410,13 +410,13 @@ describe("Settings → Intégrations — état connecté et déconnexion", () =>
 
     // Falls back to the tokenless indicator rather than half-rendering a
     // connection card from a hand-edited row.
-    expect(screen.queryByText(/Connecté en tant que/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Connected as/)).not.toBeInTheDocument();
     expect(screen.getByTestId("github-connected")).toHaveTextContent(
       "A GitHub token is already saved for this workspace.",
     );
   });
 
-  it("clears both keys on Déconnecter and returns to the unconfigured state", async () => {
+  it("clears both keys on Disconnect and returns to the unconfigured state", async () => {
     settingsData = {
       github_pat: { hasToken: true },
       github_oauth_meta: {
@@ -429,23 +429,23 @@ describe("Settings → Intégrations — état connecté et déconnexion", () =>
     await renderIntegrations();
 
     expect(screen.getByTestId("github-connected")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Déconnecter" }));
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
     await settle();
 
     expect(patchCalls).toEqual([{ github_pat: "", github_oauth_meta: null }]);
     expect(screen.getByTestId("github-connect")).toBeInTheDocument();
     expect(screen.queryByTestId("github-connected")).not.toBeInTheDocument();
-    expect(screen.queryByText(/Connecté en tant que/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Connected as/)).not.toBeInTheDocument();
   });
 
-  it("offers Déconnecter for a token saved before this epic, with no meta", async () => {
+  it("offers Disconnect for a token saved before this epic, with no meta", async () => {
     settingsData = { github_pat: { hasToken: true } };
     await renderIntegrations();
 
     expect(screen.getByTestId("github-connected")).toHaveTextContent(
       "A GitHub token is already saved for this workspace.",
     );
-    expect(screen.getByRole("button", { name: "Déconnecter" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Disconnect" })).toBeInTheDocument();
   });
 
   it("keeps a disconnect failure visible instead of faking a clean state", async () => {
@@ -464,7 +464,7 @@ describe("Settings → Intégrations — état connecté et déconnexion", () =>
     );
 
     expect(screen.getByTestId("github-connected")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Déconnecter" }));
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
     await settle();
 
     expect(screen.getByText("Save failed: permission denied")).toBeInTheDocument();
@@ -472,7 +472,7 @@ describe("Settings → Intégrations — état connecté et déconnexion", () =>
   });
 });
 
-describe("Settings → Intégrations — le PAT manuel reste le repli", () => {
+describe("Settings → Integrations — the manual PAT stays the fallback", () => {
   it("records tokenSource manual alongside the token", async () => {
     await renderIntegrations();
 
@@ -489,7 +489,7 @@ describe("Settings → Intégrations — le PAT manuel reste le repli", () => {
       tokenSource: "manual",
     });
     expect(screen.getByTestId("github-connected")).toHaveTextContent(
-      "Connecté en tant que octocat",
+      "Connected as octocat",
     );
   });
 
@@ -522,6 +522,6 @@ describe("Settings → Intégrations — le PAT manuel reste le repli", () => {
       github_pat: "ghp_unverifiable",
       github_oauth_meta: null,
     });
-    expect(screen.queryByText(/Connecté en tant que/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Connected as/)).not.toBeInTheDocument();
   });
 });

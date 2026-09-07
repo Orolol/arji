@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from "react";
 import { Layers, Moon, Square } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { Mono, PillButton } from "@/components/piscine";
 import { usePolling } from "@/hooks/usePolling";
@@ -50,6 +51,7 @@ export interface WaveRunChipsProps {
 }
 
 export function WaveRunChips({ projectId }: WaveRunChipsProps) {
+  const t = useTranslations("Desk");
   const [batches, setBatches] = useState<WaveBatch[]>([]);
   /** Night run ids the user already asked to stop (local echo). */
   const [stopped, setStopped] = useState<string[]>([]);
@@ -92,15 +94,19 @@ export function WaveRunChips({ projectId }: WaveRunChipsProps) {
             data-testid={`desk-wave-${batch.batchId}`}
             data-night={isNight ? "true" : undefined}
             className="flex shrink-0 items-center gap-1"
-            title={
-              isNight
-                ? "Night run: dependency waves, each epic chained through the autonomous pipeline"
-                : "DAG batch build: dependency waves run in order"
-            }
+            title={isNight ? t("waves.nightTitle") : t("waves.batchTitle")}
           >
             <WaveIcon size={11} aria-hidden="true" className="text-strata-live-deep" />
             <Mono size={10.5} tone="live-deep" uppercase tracking={0.06}>
-              {`${isNight ? "Night wave" : "Wave"} ${Math.max(batch.currentWave, 1)}/${batch.totalWaves}`}
+              {isNight
+                ? t("waves.nightWave", {
+                    current: Math.max(batch.currentWave, 1),
+                    total: batch.totalWaves,
+                  })
+                : t("waves.wave", {
+                    current: Math.max(batch.currentWave, 1),
+                    total: batch.totalWaves,
+                  })}
             </Mono>
           </span>
         );
@@ -115,9 +121,11 @@ export function WaveRunChips({ projectId }: WaveRunChipsProps) {
           data-testid="desk-night-stop"
           disabled={stopped.includes(nightBatch.batchId)}
           onClick={() => void handleStop(nightBatch.batchId)}
-          title="Stop the night run: no new epic is launched. Epics already running finish their pipeline."
+          title={t("waves.stopTitle")}
         >
-          {stopped.includes(nightBatch.batchId) ? "Stopping…" : "Stop night run"}
+          {stopped.includes(nightBatch.batchId)
+            ? t("waves.stopping")
+            : t("waves.stopNightRun")}
         </PillButton>
       ) : null}
     </div>

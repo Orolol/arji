@@ -1,8 +1,10 @@
 "use client";
 
 import * as React from "react";
+import { useTranslations } from "next-intl";
 
 import { SegmentedControl } from "@/components/piscine";
+import type { TranslationKey } from "@/lib/i18n/catalogue";
 import { cn } from "@/lib/utils";
 
 /**
@@ -33,10 +35,15 @@ export type ChatPane = "conversations" | "thread" | "context";
 /** The default pane: the thread is what the page is FOR. */
 export const DEFAULT_CHAT_PANE: ChatPane = "thread";
 
-const OPTIONS: { value: ChatPane; label: string }[] = [
-  { value: "conversations", label: "Conversations" },
-  { value: "thread", label: "Fil" },
-  { value: "context", label: "Contexte" },
+/**
+ * A MODULE-SCOPE COPY TABLE, so it holds catalogue KEY REFERENCES and the
+ * switcher resolves them at render with the namespace-less translator
+ * (`lib/i18n/catalogue.ts`, pattern 3).
+ */
+const OPTIONS: { value: ChatPane; labelKey: TranslationKey }[] = [
+  { value: "conversations", labelKey: "Chat.panes.conversations" },
+  { value: "thread", labelKey: "Chat.panes.thread" },
+  { value: "context", labelKey: "Chat.panes.context" },
 ];
 
 /**
@@ -62,17 +69,23 @@ export function ChatPaneSwitcher({
   onChange,
   className,
 }: ChatPaneSwitcherProps) {
+  const t = useTranslations();
+  const options = OPTIONS.map(({ value, labelKey }) => ({
+    value,
+    label: t(labelKey),
+  }));
+
   return (
     <div
       data-testid="chat-pane-switcher"
       className={cn("shrink-0 lg:hidden", className)}
     >
       <SegmentedControl
-        options={OPTIONS}
+        options={options}
         value={pane}
         onChange={onChange}
         size="sm"
-        aria-label="Panneau du chat"
+        aria-label={t("Chat.panes.label")}
       />
     </div>
   );

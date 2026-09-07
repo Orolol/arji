@@ -100,7 +100,7 @@ function session(
 }
 
 async function payload(): Promise<QaPayload> {
-  const res = await GET();
+  const res = await GET(new Request("http://localhost/api/qa/findings"));
   const body = await res.json();
   return body.data as QaPayload;
 }
@@ -152,7 +152,7 @@ describe("GET /api/qa/findings — checks", () => {
     const blob = "x".repeat(400_000);
     report("r1", "p1", { reportContent: blob, promptUsed: blob });
 
-    const res = await GET();
+    const res = await GET(new Request("http://localhost/api/qa/findings"));
     const text = await res.text();
 
     expect(text).not.toContain(blob.slice(0, 5_000));

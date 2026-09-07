@@ -1,7 +1,7 @@
 /**
  * ScanProjectDialog — the user-selection step before importing scanned
- * documents: unchecked-by-default checkboxes, "Tout sélectionner", the
- * no-selection no-op, and « déjà importé » marking with no re-import.
+ * documents: unchecked-by-default checkboxes, "Select all", the
+ * no-selection no-op, and "already imported" marking with no re-import.
  *
  * Real components throughout; only fetch is stubbed.
  */
@@ -81,12 +81,12 @@ function renderDialog(onImported = vi.fn()) {
   render(<ScanProjectDialog projectId="proj-1" onImported={onImported} />);
   // The dialog manages its own open state — the trigger opens it, which
   // kicks off the scan and the existing-documents lookup.
-  fireEvent.click(screen.getByRole("button", { name: /Scanner le projet/ }));
+  fireEvent.click(screen.getByRole("button", { name: /Scan the project/ }));
   return { onImported };
 }
 
 function checkboxFor(relativePath: string): HTMLElement {
-  return screen.getByLabelText(`Sélectionner ${relativePath}`);
+  return screen.getByLabelText(`Select ${relativePath}`);
 }
 function importCalls(fetchMock: Mock): string[][] {
   return (fetchMock.mock.calls as unknown[][])
@@ -107,15 +107,15 @@ describe("ScanProjectDialog — selection before import", () => {
     renderDialog();
 
     await waitFor(() =>
-      expect(screen.getByLabelText("Sélectionner docs/README.md")).not.toBeDisabled()
+      expect(screen.getByLabelText("Select docs/README.md")).not.toBeDisabled()
     );
 
     for (const file of SCAN_FILES) {
       expect(checkboxFor(file.relativePath)).not.toBeChecked();
     }
-    expect(screen.getByLabelText("Tout sélectionner")).not.toBeChecked();
+    expect(screen.getByLabelText("Select all")).not.toBeChecked();
 
-    const button = screen.getByRole("button", { name: /Importer la sélection/ });
+    const button = screen.getByRole("button", { name: /Import selection/ });
     expect(button).toBeDisabled();
 
     // A click on the disabled button must not reach the import endpoint.
@@ -128,22 +128,22 @@ describe("ScanProjectDialog — selection before import", () => {
     renderDialog();
 
     await waitFor(() =>
-      expect(screen.getByText("déjà importé")).toBeInTheDocument()
+      expect(screen.getByText("already imported")).toBeInTheDocument()
     );
 
     const already = checkboxFor("notes/Old.md");
     expect(already).toBeDisabled();
     // Case-insensitive: the existing doc is "Old.md", the scanned file "Old.md".
-    expect(screen.getByText("déjà importé")).toBeInTheDocument();
+    expect(screen.getByText("already imported")).toBeInTheDocument();
 
-    // "Tout sélectionner" must not sweep the already-imported file in.
-    fireEvent.click(screen.getByLabelText("Tout sélectionner"));
+    // "Select all" must not sweep the already-imported file in.
+    fireEvent.click(screen.getByLabelText("Select all"));
     expect(checkboxFor("docs/README.md")).toBeChecked();
     expect(checkboxFor("docs/spec.pdf")).toBeChecked();
     expect(already).not.toBeChecked();
   });
 
-  it("selects all importable files, imports exactly the selection, then flips rows to déjà importé", async () => {
+  it("selects all importable files, imports exactly the selection, then flips rows to already imported", async () => {
     const fetchMock = mockFetch({
       importResponse: {
         ok: true,
@@ -163,14 +163,14 @@ describe("ScanProjectDialog — selection before import", () => {
     const { onImported } = renderDialog();
 
     await waitFor(() =>
-      expect(screen.getByLabelText("Sélectionner docs/README.md")).not.toBeDisabled()
+      expect(screen.getByLabelText("Select docs/README.md")).not.toBeDisabled()
     );
 
-    fireEvent.click(screen.getByLabelText("Tout sélectionner"));
+    fireEvent.click(screen.getByLabelText("Select all"));
     expect(checkboxFor("notes/Old.md")).not.toBeChecked();
 
     const button = screen.getByRole("button", {
-      name: /Importer la sélection \(2\)/,
+      name: /Import selection \(2\)/,
     });
     fireEvent.click(button);
 
@@ -181,16 +181,16 @@ describe("ScanProjectDialog — selection before import", () => {
 
     // Selection resets; imported rows become non-importable.
     await waitFor(() =>
-      expect(screen.getAllByText("déjà importé")).toHaveLength(2)
+      expect(screen.getAllByText("already imported")).toHaveLength(2)
     );
     expect(checkboxFor("docs/README.md")).toBeDisabled();
     // The skipped file stays importable for a corrected retry.
     expect(checkboxFor("docs/spec.pdf")).not.toBeDisabled();
     expect(checkboxFor("docs/spec.pdf")).not.toBeChecked();
     expect(
-      screen.getByRole("button", { name: /Importer la sélection/ })
+      screen.getByRole("button", { name: /Import selection/ })
     ).toBeDisabled();
-    expect(screen.getByText(/1 document importé/)).toBeInTheDocument();
+    expect(screen.getByText(/1 document imported/)).toBeInTheDocument();
     expect(
       screen.getByText(/docs\/spec\.pdf — Échec de la conversion/)
     ).toBeInTheDocument();
@@ -207,7 +207,7 @@ describe("ScanProjectDialog — rescan idempotency", () => {
       existingDocsQueue: [
         [{ originalFilename: "Old.md" }],
         // Between the two scans, README.md was imported (upload route,
-        // another session…): the second scan must mark it « déjà importé »
+        // another session…): the second scan must mark it "already imported"
         // instead of offering it again.
         [
           { originalFilename: "Old.md" },
@@ -218,10 +218,10 @@ describe("ScanProjectDialog — rescan idempotency", () => {
     renderDialog();
 
     await waitFor(() =>
-      expect(screen.getByLabelText("Sélectionner docs/README.md")).not.toBeDisabled()
+      expect(screen.getByLabelText("Select docs/README.md")).not.toBeDisabled()
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Relancer le scan" }));
+    fireEvent.click(screen.getByRole("button", { name: "Rescan" }));
 
     // Both the scan and the existing-documents lookup run again — the mark
     // must reflect imports that landed elsewhere in between.
@@ -232,12 +232,12 @@ describe("ScanProjectDialog — rescan idempotency", () => {
       expect(documentLookups).toHaveLength(2);
     });
     await waitFor(() =>
-      expect(screen.getAllByText("déjà importé")).toHaveLength(2)
+      expect(screen.getAllByText("already imported")).toHaveLength(2)
     );
     expect(checkboxFor("docs/README.md")).toBeDisabled();
     expect(checkboxFor("notes/Old.md")).toBeDisabled();
     expect(
-      screen.getByRole("button", { name: /Importer la sélection/ })
+      screen.getByRole("button", { name: /Import selection/ })
     ).toBeDisabled();
 
     // Idempotent: a rescan alone never triggers an import, so no duplicate
@@ -257,12 +257,12 @@ describe("ScanProjectDialog — rescan idempotency", () => {
 
     await waitFor(() =>
       expect(
-        screen.getByText(/ne correspond à aucun fichier du dépôt/)
+        screen.getByText(/matches no file in the repository/)
       ).toBeInTheDocument()
     );
     // The signal names the orphaned document and states it stays accessible…
     expect(screen.getByText("archived-spec.pdf")).toBeInTheDocument();
-    expect(screen.getByText(/reste accessible/)).toBeInTheDocument();
+    expect(screen.getByText(/stays available in Arij/)).toBeInTheDocument();
     // …while Old.md still matches notes/Old.md in the scan and is NOT
     // signalled — it only appears once, as the scanned row's name.
     expect(screen.getAllByText("Old.md")).toHaveLength(1);

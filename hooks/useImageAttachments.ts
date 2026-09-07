@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { useCallback, useRef, useState } from "react";
 import {
   IMAGE_UPLOAD_ACCEPT,
@@ -43,6 +45,7 @@ export function useImageAttachments({
   projectId,
   disabled = false,
 }: UseImageAttachmentsOptions) {
+  const tErrors = useTranslations("ClientErrors");
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   // Counted rather than a flag: paste and drop stay live during a transfer, so
   // batches overlap as soon as the user pastes twice without waiting.
@@ -89,7 +92,7 @@ export function useImageAttachments({
           .catch(() => ({} as { data?: PendingAttachment; error?: string }));
 
         if (!res.ok || !json?.data) {
-          return { error: `${file.name}: ${json?.error || "upload failed"}` };
+          return { error: `${file.name}: ${json?.error || tErrors("uploadFailed")}` };
         }
 
         const data = json.data;
@@ -103,10 +106,10 @@ export function useImageAttachments({
           },
         };
       } catch {
-        return { error: `${file.name}: upload failed` };
+        return { error: tErrors("uploadNamed", { name: file.name }) };
       }
     },
-    [projectId]
+    [projectId, tErrors]
   );
 
   const uploadAccepted = useCallback(

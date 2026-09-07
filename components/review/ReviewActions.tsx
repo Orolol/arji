@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -46,6 +47,7 @@ export function ReviewActions({
   const [sendingBack, setSendingBack] = useState(false);
   const [merging, setMerging] = useState(false);
   const [resolvingAll, setResolvingAll] = useState(false);
+  const t = useTranslations("Review");
 
   const actionsLocked = dispatching || isRunning;
   const canBackToDev = ["review", "to_merge", "in_progress", "todo", "backlog"].includes(epicStatus);
@@ -54,7 +56,13 @@ export function ReviewActions({
   async function handleBackToDev() {
     setSendingBack(true);
     try {
-      // Build the rework comment from open review comments
+      // Build the rework comment from open review comments.
+      //
+      // NOT COPY, and deliberately absent from the catalogue: this markdown is
+      // the prompt an agent reads on the next iteration, and it is persisted on
+      // the ticket. Agent-facing and persisted text is pinned to English at its
+      // own site rather than following the interface locale
+      // (lib/i18n/catalogue.ts, exclusion 5).
       const openComments = comments.filter((c) => c.status === "open");
       const parts: string[] = [];
 
@@ -116,7 +124,7 @@ export function ReviewActions({
         {openCount > 0 && (
           <Badge variant="outline" className="gap-1 text-xs text-blue-500 border-blue-500/30">
             <MessageSquare className="h-3 w-3" />
-            {openCount} open
+            {t("actions.open", { count: openCount })}
           </Badge>
         )}
 
@@ -135,7 +143,7 @@ export function ReviewActions({
             ) : (
               <CheckCheck className="h-3 w-3 mr-1" />
             )}
-            Resolve All
+            {t("actions.resolveAll")}
           </Button>
         )}
 
@@ -151,7 +159,7 @@ export function ReviewActions({
             className="h-7 text-xs"
           >
             <Hammer className="h-3 w-3 mr-1" />
-            Back to Dev
+            {t("actions.backToDev")}
           </Button>
         )}
 
@@ -167,7 +175,7 @@ export function ReviewActions({
             ) : (
               <GitMerge className="h-3 w-3 mr-1" />
             )}
-            Merge
+            {t("actions.merge")}
           </Button>
         )}
       </div>
@@ -176,10 +184,9 @@ export function ReviewActions({
       <Dialog open={backToDevOpen} onOpenChange={setBackToDevOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Send Back to Dev</DialogTitle>
+            <DialogTitle>{t("backToDevDialog.title")}</DialogTitle>
             <DialogDescription>
-              {openCount} open review comment{openCount !== 1 ? "s" : ""} will be
-              formatted and sent to the agent as context for the next iteration.
+              {t("backToDevDialog.description", { count: openCount })}
             </DialogDescription>
           </DialogHeader>
 
@@ -199,14 +206,14 @@ export function ReviewActions({
           <Textarea
             value={additionalComment}
             onChange={(e) => setAdditionalComment(e.target.value)}
-            placeholder="Additional instructions (optional)..."
+            placeholder={t("backToDevDialog.placeholder")}
             rows={3}
             className="text-sm"
           />
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setBackToDevOpen(false)}>
-              Cancel
+              {t("backToDevDialog.cancel")}
             </Button>
             <Button
               onClick={handleBackToDev}
@@ -217,7 +224,7 @@ export function ReviewActions({
               ) : (
                 <Hammer className="h-4 w-4 mr-1" />
               )}
-              Send to Dev
+              {t("backToDevDialog.send")}
             </Button>
           </DialogFooter>
         </DialogContent>

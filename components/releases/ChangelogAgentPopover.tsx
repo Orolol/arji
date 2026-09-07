@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 
 import { FieldKicker, QuietLink } from "@/components/piscine";
 import { NamedAgentSelect } from "@/components/shared/NamedAgentSelect";
@@ -23,7 +24,7 @@ export interface ChangelogAgentPopoverProps {
 }
 
 /**
- * The frame's `régénérer` link, renamed to `agent du changelog`.
+ * The frame's `régénérer` link, renamed to `changelog agent`.
  *
  * There is no regeneration endpoint: the changelog agent runs exactly once,
  * inside `POST /releases`. A link labelled "régénérer" would have to fire
@@ -43,6 +44,7 @@ export function ChangelogAgentPopover({
   resumeSessionId,
   onResumeSessionChange,
 }: ChangelogAgentPopoverProps) {
+  const t = useTranslations("Releases");
   const [open, setOpen] = useState(false);
 
   return (
@@ -54,7 +56,7 @@ export function ChangelogAgentPopover({
             size={11.5}
             onClick={() => setOpen((prev) => !prev)}
           >
-            agent du changelog
+            {t("changelogAgent.link")}
           </QuietLink>
         </span>
       </PopoverAnchor>
@@ -63,7 +65,7 @@ export function ChangelogAgentPopover({
         className="flex w-[320px] flex-col gap-[10px] rounded-[12px] border-[1.5px] border-border bg-card p-[14px] shadow-none"
       >
         <FieldKicker stratum="card" size={10}>
-          CHANGELOG AGENT
+          {t("changelogAgent.kicker")}
         </FieldKicker>
         <NamedAgentSelect
           value={namedAgentId}
@@ -76,7 +78,7 @@ export function ChangelogAgentPopover({
           }}
           dispatchRole="release"
           className="h-[34px] w-full rounded-[10px] text-[13px]"
-          aria-label="Changelog agent"
+          aria-label={t("changelogAgent.selectLabel")}
         />
         <SessionPicker
           projectId={projectId}

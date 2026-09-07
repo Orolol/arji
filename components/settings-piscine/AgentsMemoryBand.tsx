@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { BandHeader, Mono, StrataBand } from "@/components/piscine";
 
 import { SettingRow } from "./SettingRow";
@@ -29,16 +31,20 @@ export interface AgentsMemoryBandProps {
 }
 
 export function AgentsMemoryBand({ draft }: AgentsMemoryBandProps) {
+  const t = useTranslations("Settings");
+
   return (
-    <SettingsSection testId="agents-memory-settings" heading="Agents and memory">
+    <SettingsSection
+      testId="agents-memory-settings"
+      heading={t("agentsMemory.heading")}
+    >
       <StrataBand stratum="live">
         <BandHeader
           stratum="live"
-          label="Agents & mémoire"
+          label={t("agentsMemory.label")}
           meta={
             <span className="font-sans text-[11.5px] leading-normal">
-              ce qu&apos;une session d&apos;agent reçoit, et ce qu&apos;elle
-              laisse derrière elle
+              {t("agentsMemory.meta")}
             </span>
           }
         />
@@ -48,20 +54,17 @@ export function AgentsMemoryBand({ draft }: AgentsMemoryBandProps) {
             <SettingToggle
               on={draft.flag(MCP_TOOLS_ENABLED_SETTING_KEY)}
               onChange={(next) => draft.set(MCP_TOOLS_ENABLED_SETTING_KEY, next)}
-              label="Outils MCP Arij"
+              label={t("agentsMemory.mcpTools")}
               testId="mcp-tools-toggle"
             />
           }
           off={!draft.flag(MCP_TOOLS_ENABLED_SETTING_KEY)}
-          label="Outils MCP Arij"
-          suffix="· on par défaut"
+          label={t("agentsMemory.mcpTools")}
+          suffix={t("agentsMemory.mcpToolsSuffix")}
           suffixTone="live-mid"
         />
         <Mono size={10.5} tone="live-mid" as="div">
-          lire son ticket, commenter, changer le statut, poser une question
-          bloquante, déposer un finding — sans conventions en prose. Off : les
-          nouvelles sessions démarrent sans le canal, les sessions en cours ne
-          bougent pas.
+          {t("agentsMemory.mcpToolsNote")}
         </Mono>
 
         <SettingRow
@@ -69,17 +72,15 @@ export function AgentsMemoryBand({ draft }: AgentsMemoryBandProps) {
             <SettingToggle
               on={draft.flag(MEMORY_AUTO_DISTILL_SETTING_KEY)}
               onChange={(next) => draft.set(MEMORY_AUTO_DISTILL_SETTING_KEY, next)}
-              label="Distiller la mémoire après un build réussi"
+              label={t("agentsMemory.memoryDistill")}
               testId="memory-auto-distill-toggle"
             />
           }
           off={!draft.flag(MEMORY_AUTO_DISTILL_SETTING_KEY)}
-          label="Distiller la mémoire après un build réussi"
+          label={t("agentsMemory.memoryDistill")}
         />
         <Mono size={10.5} tone="live-mid" as="div">
-          un agent de distillation fusionne les nouvelles conventions dans la
-          mémoire du projet, injectée ensuite dans chaque prompt. Off par
-          défaut.
+          {t("agentsMemory.memoryDistillNote")}
         </Mono>
 
         <SettingRow
@@ -87,17 +88,15 @@ export function AgentsMemoryBand({ draft }: AgentsMemoryBandProps) {
             <SettingToggle
               on={draft.flag(SPEC_AUTO_REWRITE_SETTING_KEY)}
               onChange={(next) => draft.set(SPEC_AUTO_REWRITE_SETTING_KEY, next)}
-              label="Réécrire la spec après chaque release"
+              label={t("agentsMemory.specRewrite")}
               testId="spec-auto-rewrite-toggle"
             />
           }
           off={!draft.flag(SPEC_AUTO_REWRITE_SETTING_KEY)}
-          label="Réécrire la spec après chaque release"
+          label={t("agentsMemory.specRewrite")}
         />
         <Mono size={10.5} tone="live-mid" as="div">
-          à la publication d&apos;une release, un agent en plan-mode réécrit la
-          spécification pour coller à ce qui a réellement été livré. Sautée
-          pendant une mise à jour manuelle. Off par défaut.
+          {t("agentsMemory.specRewriteNote")}
         </Mono>
       </StrataBand>
     </SettingsSection>

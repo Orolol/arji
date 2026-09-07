@@ -16,29 +16,29 @@ test("filters tickets by project and exact state and sorts from headers", async 
     await page.goto(`/tickets?project=${project.id}`);
     const rows = page.getByTestId("tickets-row");
     await expect(rows).toHaveCount(3);
-    await page.getByRole("button", { name: /^État :/ }).click();
+    await page.getByRole("button", { name: /^State:/ }).click();
     await page.getByRole("menuitem", { name: "To Do", exact: true }).click();
     await expect(rows).toHaveCount(2);
-    const titleHeader = page.getByRole("columnheader", { name: "Titre" });
+    const titleHeader = page.getByRole("columnheader", { name: "Title" });
     await titleHeader.getByRole("button").click();
     await expect(rows.first()).toContainText("Alpha registry ticket");
     await expect(titleHeader).toHaveAttribute("aria-sort", "ascending");
     await titleHeader.getByRole("button").press("Enter");
     await expect(rows.first()).toContainText("Zulu registry ticket");
     await expect(titleHeader).toHaveAttribute("aria-sort", "descending");
-    await page.getByRole("button", { name: /^Projet :/ }).click();
+    await page.getByRole("button", { name: /^Project:/ }).click();
     await page.getByRole("menuitem", { name: "Other registry project", exact: true }).click();
     await expect(rows).toHaveCount(1);
     await expect(rows.first()).toContainText("Other registry ticket");
-    await page.getByRole("button", { name: /^État :/ }).click();
+    await page.getByRole("button", { name: /^State:/ }).click();
     await page.getByRole("menuitem", { name: "Review", exact: true }).click();
     await expect(rows).toHaveCount(0);
-    await page.getByRole("button", { name: /^Projet :/ }).click();
-    await page.getByRole("menuitem", { name: "Tous les projets", exact: true }).click();
+    await page.getByRole("button", { name: /^Project:/ }).click();
+    await page.getByRole("menuitem", { name: "All projects", exact: true }).click();
     await expect(rows).toHaveCount(1);
     await expect(rows.first()).toContainText("Review registry ticket");
-    await page.getByRole("button", { name: /^État :/ }).click();
-    await page.getByRole("menuitem", { name: "Tous les états", exact: true }).click();
+    await page.getByRole("button", { name: /^State:/ }).click();
+    await page.getByRole("menuitem", { name: "All states", exact: true }).click();
     await expect(rows).toHaveCount(4);
     await expect(page.getByRole("menu")).toHaveCount(0);
     await page.screenshot({ path: testInfo.outputPath("tickets-registry-filters.png"), fullPage: true });
@@ -66,7 +66,7 @@ test("filtering keeps shipped prerequisites satisfied and real blockers readable
     edge.run(`${project.id}-edge2`, project.id, project.id, `${project.id}-blocked`, `${project.id}-review`);
   });
   await page.goto(`/tickets?project=${project.id}`);
-  await page.getByRole("button", { name: /^État :/ }).click();
+  await page.getByRole("button", { name: /^State:/ }).click();
   await page.getByRole("menuitem", { name: "To Do", exact: true }).click();
   const rows = page.getByTestId("tickets-row");
   await expect(rows).toHaveCount(2);
@@ -103,13 +103,13 @@ test("keeps the filters in the URL across a reload and browser history", async (
     await expect(rows.first()).toContainText("Scoped registry ticket");
 
     // Selecting another project moves the parameter with it, synchronously.
-    await page.getByRole("button", { name: /^Projet :/ }).click();
+    await page.getByRole("button", { name: /^Project:/ }).click();
     await page.getByRole("menuitem", { name: "Other URL project", exact: true }).click();
     await expect(page).toHaveURL(`/tickets?project=${otherId}`);
     await expect(rows.first()).toContainText("Other URL ticket");
 
     // A sort and a state pill join it rather than replacing it.
-    await page.getByRole("columnheader", { name: "Titre" }).getByRole("button").click();
+    await page.getByRole("columnheader", { name: "Title" }).getByRole("button").click();
     await expect(page).toHaveURL(`/tickets?project=${otherId}&sort=titre`);
     await page.getByTestId("tickets-filter-done").click();
     await expect(page).toHaveURL(`/tickets?project=${otherId}&state=done&sort=titre`);
@@ -118,8 +118,8 @@ test("keeps the filters in the URL across a reload and browser history", async (
     // THE RELOAD the ticket is about: the screen comes back as it was left.
     await page.reload();
     await expect(page.getByTestId("tickets-filter-done")).toHaveAttribute("data-active", "true");
-    await expect(page.getByRole("button", { name: /^Projet :/ })).toContainText("Other URL project");
-    await expect(page.getByRole("button", { name: /^sort:/ })).toContainText("titre ↑");
+    await expect(page.getByRole("button", { name: /^Project:/ })).toContainText("Other URL project");
+    await expect(page.getByRole("button", { name: /^sort:/ })).toContainText("title ↑");
     await expect(rows).toHaveCount(0);
 
     // Back walks the filters one gesture at a time; Forward replays them.

@@ -1,16 +1,18 @@
 "use client";
 
+import { useLocale, useTranslations } from "next-intl";
 import * as React from "react";
 import { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
 import { BandHeader, Mono, QuietLink, Stamp, StrataBand } from "@/components/piscine";
-import { timeAgo } from "@/lib/utils/format-date";
+import { formatRelative } from "@/lib/i18n/format";
 
 import {
   displayVersion,
   parseEpicIds,
   releaseState,
+  RELEASE_STATE_KEYS,
   type ReleaseEpic,
   type ReleaseRow,
 } from "./derive";
@@ -37,6 +39,9 @@ export function ReleaseHistory({
   loading,
   onInspect,
 }: ReleaseHistoryProps) {
+  const locale = useLocale();
+  const t = useTranslations("Releases");
+  const all = useTranslations();
   // One at a time: a history card with four open rows is a list, not a history.
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
@@ -46,11 +51,16 @@ export function ReleaseHistory({
       gap={8}
       className="min-h-0 min-w-0 flex-1 shrink px-[16px] py-[14px]"
     >
-      <BandHeader stratum="neutral" labelSize={12} standalone label="History" />
+      <BandHeader
+        stratum="neutral"
+        labelSize={12}
+        standalone
+        label={t("history.label")}
+      />
 
       {loading ? null : releases.length === 0 ? (
         <Mono size={11} tone="muted">
-          No releases yet
+          {t("history.empty")}
         </Mono>
       ) : (
         <div
@@ -94,17 +104,20 @@ export function ReleaseHistory({
                     {displayVersion(release.version)}
                   </Mono>
                   <Mono size={10.5} tone="muted" clamp={1}>
-                    {`${ticketIds.length} ticket${ticketIds.length === 1 ? "" : "s"} · ${timeAgo(release.createdAt)}`}
+                    {t("history.rowMeta", {
+                      count: ticketIds.length,
+                      age: formatRelative(release.createdAt, { locale }),
+                    })}
                   </Mono>
                   {hasStamps ? (
                     <span className="ml-auto flex shrink-0 items-center gap-[10px]">
                       {release.gitTag !== null ? (
-                        <Stamp tone="land">TAG</Stamp>
+                        <Stamp tone="land">{t("history.tag")}</Stamp>
                       ) : null}
                       {state === "published" ? (
-                        <Stamp tone="next">GH RELEASE</Stamp>
+                        <Stamp tone="next">{t("history.githubRelease")}</Stamp>
                       ) : state === "draft" ? (
-                        <Stamp tone="next">GH DRAFT</Stamp>
+                        <Stamp tone="next">{t("history.githubDraft")}</Stamp>
                       ) : null}
                     </span>
                   ) : null}
@@ -119,7 +132,7 @@ export function ReleaseHistory({
                   >
                     {ticketIds.length === 0 ? (
                       <Mono size={11} tone="muted">
-                        no tickets recorded
+                        {t("history.noTickets")}
                       </Mono>
                     ) : (
                       ticketIds.map((id) => {
@@ -138,7 +151,7 @@ export function ReleaseHistory({
                       size={11.5}
                       onClick={() => onInspect(release.id)}
                     >
-                      voir le changelog →
+                      {t("history.viewChangelog")}
                     </QuietLink>
                   </div>
                 ) : null}

@@ -1,0 +1,75 @@
+{
+  "header": {
+    "title": "Git Sync",
+    "subtitle": "Repository state and assisted conflict resolution.",
+    "refresh": "Refresh"
+  },
+  "fields": {
+    "remote": "Remote",
+    "branch": "Branch",
+    "autoResolve": "Auto-resolve pull conflicts with agent"
+  },
+  "status": {
+    "ahead": "Ahead",
+    "behind": "Behind",
+    "remoteBranch": "Remote branch",
+    "lastFetch": "Last fetch",
+    "commits": "{count, plural, one {# commit} other {# commits}}",
+    "yes": "yes",
+    "no": "no",
+    "synced": "Synced {age}",
+    "neverSynced": "Never synced",
+    "fetchError": "Could not fetch from remote: {error}",
+    "lastFetchHint": "Last successful fetch from the remote",
+    "readFailed": "Failed to fetch git status"
+  },
+  "actions": {
+    "pull": "Pull",
+    "push": "Push"
+  },
+  "pull": {
+    "agentStarted": "Conflicts detected. Resolution agent started (session {sessionId}).",
+    "agentStartedToast": "Conflict resolution agent started",
+    "conflicts": "Merge conflicts detected",
+    "failed": "Pull failed",
+    "done": "Pull completed successfully.",
+    "doneToast": "Pull completed successfully"
+  },
+  "push": {
+    "failed": "Push failed",
+    "done": "Push completed successfully.",
+    "doneToast": "Push completed successfully"
+  },
+  "remoteMissing": {
+    "toast": "No git remote configured",
+    "error": "No git remote is configured for this repository.",
+    "titleBoth": "No remote to sync with",
+    "titleFetch": "No remote to pull from",
+    "titlePush": "No remote to push to",
+    "bodyBoth": "This repository has no remote named <mono>{remote}</mono>, so there is nothing to pull from or push to yet.",
+    "bodyFetch": "Remote <mono>{remote}</mono> can push, but has no fetch URL, so Pull is unavailable.",
+    "bodyPush": "Remote <mono>{remote}</mono> has no push URL, so Push is unavailable.",
+    "available": "Remotes available for this operation:",
+    "use": "Use {remote}",
+    "configureHint": "Configure the remote from the repository, then refresh:"
+  },
+  "conflicts": {
+    "title": "Manual Conflict Review",
+    "noDiff": "No diff output available."
+  },
+  "worktrees": {
+    "title": "Agent worktrees",
+    "loading": "Reading worktrees…",
+    "empty": "No agent worktrees right now.",
+    "detached": "(detached)",
+    "running": "running",
+    "idle": "idle",
+    "orphan": "orphan",
+    "prune": "Clean orphan worktrees",
+    "pruneCount": "Clean orphan worktrees ({count})"
+  },
+  "arji": {
+    "title": "arji.json sync",
+    "body": "The board is also a versioned file. Importing it overwrites the local database — run it from the sync action in the project header."
+  }
+}

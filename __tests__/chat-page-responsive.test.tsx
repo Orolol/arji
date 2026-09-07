@@ -241,7 +241,7 @@ describe("chat page — the three panes on a narrow viewport", () => {
     // must not gain a second control row (see ChatPageView's header comment).
     expect(classTokens(switcher)).toContain("lg:hidden");
 
-    for (const label of ["Conversations", "Fil", "Contexte"]) {
+    for (const label of ["Conversations", "Thread", "Context"]) {
       expect(
         screen.getByRole("button", { name: label }),
       ).toBeInTheDocument();
@@ -308,7 +308,7 @@ describe("chat page — the three panes on a narrow viewport", () => {
     // `--tw-outline-style: none`, and `outline-2` resolves its style from that
     // variable. jsdom cannot see the ring, so this pins the token that draws
     // it; `e2e/chat-mobile-layout.spec.ts` is where the keyboard path runs.
-    for (const label of ["Conversations", "Fil", "Contexte"]) {
+    for (const label of ["Conversations", "Thread", "Context"]) {
       expect(
         classTokens(screen.getByRole("button", { name: label })),
         `the ${label} segment has no focus-visible outline style`,
@@ -325,12 +325,12 @@ describe("chat page — the three panes on a narrow viewport", () => {
     expect(isShowing(screen.getByTestId("chat-thread-pane"))).toBe(false);
     expect(isShowing(screen.getByTestId("chat-context"))).toBe(false);
 
-    await user.click(screen.getByRole("button", { name: "Contexte" }));
+    await user.click(screen.getByRole("button", { name: "Context" }));
     expect(isShowing(screen.getByTestId("chat-context"))).toBe(true);
     expect(isShowing(screen.getByTestId("chat-roster"))).toBe(false);
     expect(isShowing(screen.getByTestId("chat-thread-pane"))).toBe(false);
 
-    await user.click(screen.getByRole("button", { name: "Fil" }));
+    await user.click(screen.getByRole("button", { name: "Thread" }));
     expect(isShowing(screen.getByTestId("chat-thread-pane"))).toBe(true);
   });
 

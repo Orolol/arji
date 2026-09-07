@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { useState, useCallback, useEffect } from "react";
 
 interface GitStatus {
@@ -25,6 +27,7 @@ export function useGitStatus(
   branchName: string | null,
   githubConfigured: boolean
 ): GitStatus {
+  const tErrors = useTranslations("ClientErrors");
   const [ahead, setAhead] = useState(0);
   const [behind, setBehind] = useState(0);
   const [lastFetchedAt, setLastFetchedAt] = useState<number | null>(null);
@@ -47,7 +50,7 @@ export function useGitStatus(
       const data = await res.json();
 
       if (!res.ok) {
-        setError(data.error || "Failed to fetch status");
+        setError(data.error || tErrors("failedToFetchStatus"));
         return;
       }
 
@@ -56,11 +59,11 @@ export function useGitStatus(
       setLastFetchedAt(data.data?.lastFetchedAt ?? null);
       setLastFetchError(data.data?.lastFetchError ?? null);
     } catch {
-      setError("Failed to fetch git status");
+      setError(tErrors("failedToFetchGitStatus"));
     } finally {
       setLoading(false);
     }
-  }, [projectId, branchName, githubConfigured]);
+  }, [projectId, branchName, githubConfigured, tErrors]);
 
   const push = useCallback(async () => {
     if (!branchName || !githubConfigured) return;
@@ -78,18 +81,18 @@ export function useGitStatus(
       const data = await res.json();
 
       if (!res.ok) {
-        setError(data.error || "Push failed");
+        setError(data.error || tErrors("pushFailed"));
         return;
       }
 
       // Refresh status after push
       await refresh();
     } catch {
-      setError("Push failed");
+      setError(tErrors("pushFailed"));
     } finally {
       setPushing(false);
     }
-  }, [projectId, branchName, githubConfigured, refresh]);
+  }, [projectId, branchName, githubConfigured, refresh, tErrors]);
 
   // Auto-fetch on mount when conditions are met
   useEffect(() => {

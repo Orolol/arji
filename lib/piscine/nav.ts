@@ -8,8 +8,15 @@
  *   Work      pool blue  (next)  Tickets · Spec & Memory · QA · QA checks ·
  *                                Releases
  *   Agents    turquoise  (live)  Named agents · Sessions · Usage
- *   Réglages  linden     (feed)  Workspace & Full Auto · Night runs ·
- *                                Notifications · Intégrations
+ *   Settings  linden     (feed)  Workspace & Full Auto · Night runs ·
+ *                                Notifications · Integrations
+ *
+ * NO COPY IN THIS FILE. Labels are catalogue KEY REFERENCES (`labelKey`),
+ * resolved where they are drawn with the namespace-less translator —
+ * `useTranslations()` in the bar, `t(entry.labelKey)` — per the pattern in
+ * `lib/i18n/catalogue.ts`. This table is evaluated at import time and read
+ * by pure logic and tests that never render text, which is exactly why it
+ * cannot hold a `t()` call and must not hold a string.
  *
  * "Now" and "Chat" are NEVER categories, and nothing here describes them —
  * but the bar DRAWS them as direct destination pills in the centred island:
@@ -58,6 +65,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+import type { TranslationKey } from "@/lib/i18n/catalogue";
+
 import type { Stratum } from "./tokens";
 
 export type NavCategoryId = "work" | "agents" | "settings";
@@ -65,7 +74,8 @@ export type NavCategoryId = "work" | "agents" | "settings";
 export interface NavEntry {
   /** Stable key. Also the id the top bar looks up a live status under. */
   id: string;
-  label: string;
+  /** Catalogue key of the visible label — `t(entry.labelKey)` at render. */
+  labelKey: TranslationKey;
   icon: LucideIcon;
   /**
    * The route this entry MEANS. For a per-project entry this is the template
@@ -81,7 +91,8 @@ export interface NavEntry {
 
 export interface NavCategory {
   id: NavCategoryId;
-  label: string;
+  /** Catalogue key of the bubble's label — `t(category.labelKey)` at render. */
+  labelKey: TranslationKey;
   icon: LucideIcon;
   /** Which strata ground the bubble and its menu reuse. */
   stratum: Extract<Stratum, "next" | "live" | "feed">;
@@ -89,7 +100,7 @@ export interface NavCategory {
   /**
    * The menu's right-hand context panel. `morning` = the CE MATIN digest,
    * `live` = the EN CE MOMENT agent list, `null` = no panel (the menu card is
-   * then a single narrow column, as Réglages is drawn).
+   * then a single narrow column, as Settings is drawn).
    */
   panel: "morning" | "live" | null;
 }
@@ -97,22 +108,22 @@ export interface NavCategory {
 export const NAV_CATEGORIES: readonly NavCategory[] = [
   {
     id: "work",
-    label: "Work",
+    labelKey: "Nav.categories.work",
     icon: Layers,
     stratum: "next",
     panel: "morning",
     entries: [
       // 12a — the exhaustive ticket registry. It is also where "New" leads.
-      { id: "tickets", label: "Tickets", icon: Rows3, href: "/tickets" },
+      { id: "tickets", labelKey: "Nav.entries.tickets", icon: Rows3, href: "/tickets" },
       {
         id: "spec",
-        label: "Spec & Memory",
+        labelKey: "Nav.entries.spec",
         icon: FileText,
         href: "/projects/:projectId/spec",
         forProject: (projectId) => `/projects/${projectId}/spec`,
       },
       // 11b — cross-project QA: the REVIEW layer (findings, verdicts, rubric).
-      { id: "qa", label: "QA", icon: ShieldCheck, href: "/qa" },
+      { id: "qa", labelKey: "Nav.entries.qa", icon: ShieldCheck, href: "/qa" },
       // The exploratory QA-CHECK agent and its report history — tech checks,
       // E2E passes, failure digests. A different surface from the entry above,
       // not an older version of it: 11b arbitrates what reviewers filed against
@@ -125,14 +136,14 @@ export const NAV_CATEGORIES: readonly NavCategory[] = [
       // findings" action are only here.
       {
         id: "qa-checks",
-        label: "QA checks",
+        labelKey: "Nav.entries.qaChecks",
         icon: FlaskConical,
         href: "/projects/:projectId/qa",
         forProject: (projectId) => `/projects/${projectId}/qa`,
       },
       {
         id: "releases",
-        label: "Releases",
+        labelKey: "Nav.entries.releases",
         icon: Tag,
         href: "/projects/:projectId/releases",
         forProject: (projectId) => `/projects/${projectId}/releases`,
@@ -141,25 +152,25 @@ export const NAV_CATEGORIES: readonly NavCategory[] = [
   },
   {
     id: "agents",
-    label: "Agents",
+    labelKey: "Nav.categories.agents",
     icon: Bot,
     stratum: "live",
     panel: "live",
     entries: [
-      { id: "named-agents", label: "Named agents", icon: Bot, href: "/agents" },
+      { id: "named-agents", labelKey: "Nav.entries.namedAgents", icon: Bot, href: "/agents" },
       {
         id: "sessions",
-        label: "Sessions",
+        labelKey: "Nav.entries.sessions",
         icon: Activity,
         href: "/projects/:projectId/sessions",
         forProject: (projectId) => `/projects/${projectId}/sessions`,
       },
-      { id: "usage", label: "Usage", icon: Gauge, href: "/usage" },
+      { id: "usage", labelKey: "Nav.entries.usage", icon: Gauge, href: "/usage" },
     ],
   },
   {
     id: "settings",
-    label: "Réglages",
+    labelKey: "Nav.categories.settings",
     icon: SlidersHorizontal,
     stratum: "feed",
     panel: null,
@@ -169,20 +180,20 @@ export const NAV_CATEGORIES: readonly NavCategory[] = [
       // land on the settings page, which is why they are not `planned`.
       {
         id: "workspace",
-        label: "Workspace & Full Auto",
+        labelKey: "Nav.entries.workspace",
         icon: SlidersHorizontal,
         href: "/settings",
       },
-      { id: "night-runs", label: "Night runs", icon: Moon, href: "/settings#night-runs" },
+      { id: "night-runs", labelKey: "Nav.entries.nightRuns", icon: Moon, href: "/settings#night-runs" },
       {
         id: "notifications",
-        label: "Notifications",
+        labelKey: "Nav.entries.notifications",
         icon: Bell,
         href: "/settings#notifications",
       },
       {
         id: "integrations",
-        label: "Intégrations",
+        labelKey: "Nav.entries.integrations",
         icon: Github,
         href: "/settings/integrations",
       },
@@ -226,7 +237,7 @@ function pathOf(href: string): string {
  *
  * A prefix match on the path, so `/agents/limits` keeps "Named agents" lit and
  * `/projects/p1/sessions/s9` keeps "Sessions" lit. Query strings never
- * participate: the four Réglages entries share `/settings`, so only the first
+ * participate: the four Settings entries share `/settings`, so only the first
  * of them (the one whose href carries no query) is ever marked active — which
  * is the truth until 11c ships real sections.
  */

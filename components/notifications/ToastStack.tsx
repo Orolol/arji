@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
+import { useTranslations } from "next-intl";
 import { CheckCircle2, TriangleAlert, X } from "lucide-react";
 import { SurfaceCard } from "@/components/piscine/SurfaceCard";
 
@@ -34,8 +35,6 @@ export type RaiseToast = (
 
 export const TOAST_DURATION_MS = 8000;
 export const MAX_TOASTS = 4;
-/** Where an action-less link lands, when the caller names nothing better. */
-export const TOAST_DEFAULT_ACTION_LABEL = "Open session";
 
 const subscribe = () => () => {};
 const clientSnapshot = () => true;
@@ -47,10 +46,11 @@ export function ToastStack({ items, onDismiss, testId }: {
   onDismiss: (id: string) => void;
   testId?: string;
 }) {
+  const t = useTranslations("Notifications");
   const mounted = useSyncExternalStore(subscribe, clientSnapshot, serverSnapshot);
   if (!mounted) return null;
   return createPortal(
-    <section aria-label="Notifications" className="pointer-events-none fixed right-4 top-[76px] z-[100] flex max-h-[calc(100dvh-92px)] w-[380px] max-w-[calc(100vw-32px)] flex-col gap-3 overflow-y-auto">
+    <section aria-label={t("stack.label")} className="pointer-events-none fixed right-4 top-[76px] z-[100] flex max-h-[calc(100dvh-92px)] w-[380px] max-w-[calc(100vw-32px)] flex-col gap-3 overflow-y-auto">
       {items.slice(-MAX_TOASTS).map((item) => (
         <Toast key={item.id} item={item} onDismiss={onDismiss} testId={testId} />
       ))}
@@ -64,6 +64,7 @@ function Toast({ item, onDismiss, testId }: {
   onDismiss: (id: string) => void;
   testId?: string;
 }) {
+  const t = useTranslations("Notifications");
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
   // Errors remain until dismissed. Reading or following a link pauses expiry.
@@ -92,11 +93,21 @@ function Toast({ item, onDismiss, testId }: {
         <p>{item.message}</p>
         {item.href ? (
           <a href={item.href} className="mt-2 inline-block font-semibold underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-ring">
-            {item.actionLabel || TOAST_DEFAULT_ACTION_LABEL}
+            {/* Where an action-less link lands, when the caller names
+                nothing better. */}
+            {item.actionLabel || t("stack.defaultAction")}
           </a>
         ) : null}
       </div>
-      <button type="button" aria-label="Fermer la notification" onClick={() => onDismiss(item.id)} className="flex size-7 shrink-0 items-center justify-center rounded-full hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring">
+      {/*
+        This label was the last French string in the interface, and it carried
+        no accent — so neither the epic's own accent grep nor a French-word
+        scan found it. It surfaced only because a sweep read the file. Its
+        French is seeded in `fr/Notifications.json`, and the three unit tests
+        plus `e2e/desk-toasts.spec.ts` that pinned the old bytes were updated
+        with it.
+      */}
+      <button type="button" aria-label={t("stack.dismiss")} onClick={() => onDismiss(item.id)} className="flex size-7 shrink-0 items-center justify-center rounded-full hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring">
         <X size={15} aria-hidden="true" />
       </button>
     </SurfaceCard>

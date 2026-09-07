@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { BandHeader, StrataBand } from "@/components/piscine";
 import type { DeskProject } from "@/lib/control-desk/types";
 import type { QaVerdict } from "@/lib/qa/types";
@@ -28,13 +30,15 @@ export function VerdictsBand({
   onOpenTicket,
   className,
 }: VerdictsBandProps) {
+  const t = useTranslations("Qa");
+
   return (
     <StrataBand stratum="land" density="full" gap={9} className={className}>
       <BandHeader
-        label="Verdicts récents"
+        label={t("verdicts.label")}
         stratum="land"
         labelSize={13}
-        meta="7 jours"
+        meta={t("verdicts.meta")}
       />
       {verdicts.map((verdict) => (
         <VerdictRow

@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { ToastStack, type ToastItem } from "@/components/notifications/ToastStack";
@@ -55,6 +56,7 @@ import { useProjectEvents } from "@/hooks/useProjectEvents";
  */
 
 export default function ProjectDeskPage() {
+  const t = useTranslations("Desk");
   const params = useParams();
   const searchParams = useSearchParams();
   const projectId = params.projectId as string;
@@ -140,8 +142,8 @@ export default function ProjectDeskPage() {
    */
   const handleRefinementFinished = useCallback(() => {
     setRefreshTrigger((t) => t + 1);
-    addToast("success", "Board refinement finished — see the notification for the summary");
-  }, [addToast]);
+    addToast("success", t("projectDesk.refinementFinished"));
+  }, [addToast, t]);
 
   // ?deleted=story|epic — the notice the deleted ticket's own page hands over.
   //
@@ -153,9 +155,9 @@ export default function ProjectDeskPage() {
   if (deletedParam !== handledDeleted) {
     setHandledDeleted(deletedParam);
     if (deletedParam === "story") {
-      setDeletedNotice("User story deleted permanently");
+      setDeletedNotice(t("projectDesk.storyDeleted"));
     } else if (deletedParam === "epic") {
-      setDeletedNotice("Epic deleted permanently");
+      setDeletedNotice(t("projectDesk.epicDeleted"));
     }
   }
 
@@ -303,11 +305,17 @@ export default function ProjectDeskPage() {
           if (cancelled || !d.data) return;
           const s = d.data;
           if (s.status === "completed") {
-            addToast("success", `Agent #${prevId.slice(0, 6)} completed`);
+            addToast(
+              "success",
+              t("projectDesk.sessionCompleted", { id: prevId.slice(0, 6) })
+            );
           } else if (s.status === "failed") {
             addToast(
               "error",
-              `Agent #${prevId.slice(0, 6)} failed: ${s.error || "Unknown error"}`
+              t("projectDesk.sessionFailed", {
+                id: prevId.slice(0, 6),
+                error: s.error || t("projectDesk.unknownError"),
+              })
             );
           }
         })
@@ -317,7 +325,7 @@ export default function ProjectDeskPage() {
     return () => {
       cancelled = true;
     };
-  }, [completedSessionIds, projectId, addToast]);
+  }, [completedSessionIds, projectId, addToast, t]);
 
   async function handleBuild() {
     if (batch.allSelected.size === 0) return;
@@ -346,25 +354,27 @@ export default function ProjectDeskPage() {
             href:
               data.data.sessionUrl ||
               `/projects/${projectId}/sessions/${data.data.activeSessionId}`,
-            label: "Open active session",
+            label: t("projectDesk.openActiveSession"),
           });
         } else {
-          addToast("error", data.error || "Failed to launch build");
+          addToast("error", data.error || t("projectDesk.buildFailed"));
         }
       } else {
         addToast(
           "success",
           teamMode
-            ? `Launched team build session coordinating ${batch.allSelected.size} epics`
+            ? t("projectDesk.teamBuildLaunched", {
+                count: batch.allSelected.size,
+              })
             : data.data.orchestrationMode === "dag"
-              ? `Launched wave 1/${data.data.waves} — later waves start as dependencies finish`
-              : `Launched ${data.data.count} build session${data.data.count > 1 ? "s" : ""}`
+              ? t("projectDesk.waveBuildLaunched", { waves: data.data.waves })
+              : t("projectDesk.buildLaunched", { count: data.data.count })
         );
         batch.clear();
         setRefreshTrigger((t) => t + 1);
       }
     } catch {
-      addToast("error", "Failed to launch build");
+      addToast("error", t("projectDesk.buildFailed"));
     }
 
     setBuilding(false);
@@ -395,11 +405,11 @@ export default function ProjectDeskPage() {
     }
 
     if (launched > 0) {
-      addToast("success", `Launched review for ${launched} epic${launched > 1 ? "s" : ""}`);
+      addToast("success", t("projectDesk.reviewLaunched", { count: launched }));
       batch.clear();
-      setRefreshTrigger((t) => t + 1);
+      setRefreshTrigger((n) => n + 1);
     } else {
-      addToast("error", "Failed to launch any reviews");
+      addToast("error", t("projectDesk.reviewLaunchFailed"));
     }
     setReviewing(false);
   }
@@ -437,16 +447,16 @@ export default function ProjectDeskPage() {
     }
 
     if (merged > 0) {
-      addToast("success", `Merged ${merged} epic${merged > 1 ? "s" : ""}`);
+      addToast("success", t("projectDesk.mergedCount", { count: merged }));
     }
     if (agentLaunched > 0) {
       addToast(
         "success",
-        `Launched merge-fix agent for ${agentLaunched} epic${agentLaunched > 1 ? "s" : ""}`
+        t("projectDesk.mergeFixAgentCount", { count: agentLaunched })
       );
     }
     if (failed > 0) {
-      addToast("error", `${failed} merge${failed > 1 ? "s" : ""} failed`);
+      addToast("error", t("projectDesk.mergesFailed", { count: failed }));
     }
     batch.clear();
     setRefreshTrigger((t) => t + 1);
@@ -488,15 +498,12 @@ export default function ProjectDeskPage() {
                 onError={(message) => addToast("error", message)}
                 onNotice={(message) => addToast("success", message)}
                 onStarted={() =>
-                  addToast(
-                    "success",
-                    "Agent Refinement started — re-passing Backlog and To do"
-                  )
+                  addToast("success", t("projectDesk.refinementStarted"))
                 }
                 onFinished={handleRefinementFinished}
               />
               <span className="ml-auto truncate text-[12.5px] text-muted-foreground">
-                ⌘-clic sur un ticket pour le sélectionner
+                {t("projectDesk.selectHint")}
               </span>
             </div>
 
@@ -504,10 +511,12 @@ export default function ProjectDeskPage() {
             {totalSelected > 0 && (
               <div className="flex min-h-[48px] shrink-0 flex-wrap items-center gap-[10px] border-b border-border bg-card px-[22px] py-[8px]">
                 <span className="text-[13px] font-medium">
-                  {batch.userSelected.size} epic{batch.userSelected.size > 1 ? "s" : ""} selected
+                  {t("projectDesk.selectedCount", {
+                    count: batch.userSelected.size,
+                  })}
                   {autoCount > 0 && (
                     <span className="ml-[8px] font-normal text-agent">
-                      +{autoCount} required
+                      {t("projectDesk.autoIncluded", { count: autoCount })}
                     </span>
                   )}
                 </span>
@@ -528,9 +537,15 @@ export default function ProjectDeskPage() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="parallel">Parallel</SelectItem>
-                    <SelectItem value="sequential">Sequential</SelectItem>
-                    <SelectItem value="dag">Waves (DAG)</SelectItem>
+                    <SelectItem value="parallel">
+                      {t("projectDesk.modeParallel")}
+                    </SelectItem>
+                    <SelectItem value="sequential">
+                      {t("projectDesk.modeSequential")}
+                    </SelectItem>
+                    <SelectItem value="dag">
+                      {t("projectDesk.modeDag")}
+                    </SelectItem>
                   </SelectContent>
                 </Select>
 
@@ -544,14 +559,11 @@ export default function ProjectDeskPage() {
                           className="flex cursor-help items-center gap-1 text-[12.5px] text-meta"
                         >
                           <Layers className="h-3 w-3" />
-                          Waves
+                          {t("projectDesk.wavesHint")}
                         </span>
                       </TooltipTrigger>
                       <TooltipContent>
-                        Dependencies build first: epics run in dependency
-                        waves, each wave waiting for the previous one. A
-                        failed epic (or one that asks a question) skips its
-                        dependents.
+                        {t("projectDesk.wavesTooltip")}
                       </TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
@@ -576,11 +588,11 @@ export default function ProjectDeskPage() {
                             className="h-3.5 w-3.5 rounded border-border"
                           />
                           <Users className="h-3 w-3" />
-                          Team mode
+                          {t("projectDesk.teamMode")}
                         </label>
                       </TooltipTrigger>
                       <TooltipContent>
-                        {"Launch a single CC session that coordinates sub-agents for each epic"}
+                        {t("projectDesk.teamModeTooltip")}
                       </TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
@@ -600,11 +612,11 @@ export default function ProjectDeskPage() {
                             data-testid="auto-merge-agent-checkbox"
                           />
                           <Bot className="h-3 w-3" />
-                          Auto-fix
+                          {t("projectDesk.autoFix")}
                         </label>
                       </TooltipTrigger>
                       <TooltipContent>
-                        When a merge fails, automatically launch an agent to resolve conflicts
+                        {t("projectDesk.autoFixTooltip")}
                       </TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
@@ -624,7 +636,9 @@ export default function ProjectDeskPage() {
                     ) : (
                       <Hammer className="h-3 w-3 mr-1" />
                     )}
-                    {teamMode ? "Build as Team" : "Build all"}
+                    {teamMode
+                      ? t("projectDesk.buildAsTeam")
+                      : t("projectDesk.buildAll")}
                   </Button>
 
                   {/* Review all — appears when multiple selected */}
@@ -641,7 +655,7 @@ export default function ProjectDeskPage() {
                       ) : (
                         <Search className="h-3 w-3 mr-1" />
                       )}
-                      Review all
+                      {t("projectDesk.reviewAll")}
                     </Button>
                   )}
 
@@ -659,7 +673,7 @@ export default function ProjectDeskPage() {
                       ) : (
                         <GitMerge className="h-3 w-3 mr-1" />
                       )}
-                      Merge all
+                      {t("projectDesk.mergeAll")}
                     </Button>
                   )}
 
@@ -669,7 +683,7 @@ export default function ProjectDeskPage() {
                     onClick={batch.clear}
                     className="h-[29px] rounded-[7px] text-[12.5px] text-meta"
                   >
-                    Clear
+                    {t("projectDesk.clear")}
                   </Button>
                 </div>
               </div>
@@ -705,17 +719,17 @@ export default function ProjectDeskPage() {
               "error",
               message,
               sessionUrl
-                ? { href: sessionUrl, label: "Open active session" }
+                ? { href: sessionUrl, label: t("projectDesk.openActiveSession") }
                 : undefined
             )
           }
           onMerged={() => {
             setRefreshTrigger((t) => t + 1);
-            addToast("success", "Branch merged into main");
+            addToast("success", t("projectDesk.branchMerged"));
           }}
           onDeleted={() => {
             setRefreshTrigger((t) => t + 1);
-            addToast("success", "Epic deleted permanently");
+            addToast("success", t("projectDesk.epicDeleted"));
           }}
         />
       )}
@@ -728,7 +742,7 @@ export default function ProjectDeskPage() {
         onOpenChange={setEpicDialogOpen}
         onCreated={() => {
           setRefreshTrigger((t) => t + 1);
-          addToast("success", "Epic created");
+          addToast("success", t("projectDesk.epicCreated"));
         }}
       />
 
@@ -761,8 +775,11 @@ export default function ProjectDeskPage() {
           addToast(
             "success",
             status.enabled
-              ? `Full Auto Mode is on — ${status.candidates.build} to build, ${status.candidates.review} to review`
-              : "Full Auto Mode is off"
+              ? t("projectDesk.autoOn", {
+                  build: status.candidates.build,
+                  review: status.candidates.review,
+                })
+              : t("projectDesk.autoOff")
           );
           setRefreshTrigger((t) => t + 1);
         }}

@@ -61,7 +61,7 @@ export function expectSharedToastContract(
   //    the aria-hidden filter is lifted.
   fireEvent.click(
     within(toast).getByRole("button", {
-      name: "Fermer la notification",
+      name: "Dismiss notification",
       hidden: true,
     }),
   );

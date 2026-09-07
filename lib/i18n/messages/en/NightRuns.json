@@ -1,0 +1,84 @@
+{
+  "common": {
+    "nightRun": "Night run",
+    "close": "Close"
+  },
+  "dialog": {
+    "description": "Builds every epic in scope in dependency waves, each one chained through the autonomous build → review → fix pipeline.",
+    "cancel": "Cancel",
+    "start": "Start night run",
+    "started": "Night run started — wave 1/{waves}, {count, plural, one {# epic} other {# epics}}",
+    "startFailed": "Failed to start the night run"
+  },
+  "conflicts": {
+    "nightRunActive": "A night run is already going for this project — wait for it to finish.",
+    "batchActive": "A batch build is still running — let it finish before starting the night.",
+    "pipelineActiveOnEpic": "A pipeline run is already active on an epic in this scope."
+  },
+  "scope": {
+    "label": "Scope",
+    "loading": "Loading epics…",
+    "empty": "No To Do epics to run",
+    "emptyWithBacklog": "No To Do or Backlog epics to run",
+    "epics": "{count, plural, one {# epic} other {# epics}}",
+    "withPrerequisites": "{count, plural, one {# epic} other {# epics}} + {prerequisites, plural, one {# required prerequisite} other {# required prerequisites}}",
+    "moreIds": "{ids} +{count} more",
+    "note": "Scope is every To Do epic. Prerequisites are pulled in automatically; epics already Done or Released are left alone.",
+    "includeBacklog": "Include Backlog"
+  },
+  "options": {
+    "agent": "Agent",
+    "order": "Order",
+    "waves": "Waves (DAG)",
+    "onFailure": "On failure",
+    "failureHalt": "Halt — skip dependents, keep going",
+    "failureStop": "Stop — end the run after the wave",
+    "parallelAgents": "Parallel agents",
+    "costCap": "Cost cap (USD)",
+    "costCapHint": "Claude-reported costs only — other CLIs are not counted, so the run may spend more than the cap.",
+    "costCapPlaceholder": "Unlimited",
+    "circuitBreaker": "Circuit breaker",
+    "circuitBreakerHint": "Stop after this many consecutive epic failures (0 = off)."
+  },
+  "warning": {
+    "unattended": "Agents run <strong>unattended all night</strong>: they create worktrees and branches, commit code and spend API budget without anyone watching. Nothing gets approved or merged — every epic stops in Review for your sign-off in the morning."
+  },
+  "summary": {
+    "costNotReported": "cost not reported",
+    "running": "running",
+    "stopTitle": "Stop launching new epics. Epics already running finish their pipeline.",
+    "stopping": "Stopping…",
+    "stop": "Stop night run",
+    "loading": "Loading…",
+    "noData": "No data for this run.",
+    "loadingSummary": "Loading summary…",
+    "wave": "Wave {current}/{total}",
+    "onFailure": "On failure: {policy}",
+    "failureHalt": "halt",
+    "failureStop": "stop",
+    "costCaveat": "Some sessions reported no cost (only Claude Code returns one), so the total is a lower bound.",
+    "stopRequested": "Stopping — no new epic will be launched. The wave currently running is left to finish its pipelines.",
+    "interrupted": "Interrupted by a server restart — partial data. Sessions that were still running were marked orphaned at boot.",
+    "noEpics": "No epics were dispatched by this run.",
+    "openSessions": "Open sessions",
+    "reviewOnBoard": "Review on the board"
+  },
+  "status": {
+    "done": "to merge",
+    "asked": "paused",
+    "failed": "failed",
+    "skipped": "skipped",
+    "running": "running",
+    "pending": "pending"
+  },
+  "counts": {
+    "none": "no epics",
+    "bucket": "{count} {label}"
+  },
+  "abort": {
+    "stopped": "You stopped this run. Epics already running were left to finish; the rest were skipped.",
+    "stoppedAtWave": "You stopped this run (after wave {wave}). Epics already running were left to finish; the rest were skipped.",
+    "other": "Run stopped early: {reason}. Remaining epics were skipped.",
+    "otherAtWave": "Run stopped early: {reason} (after wave {wave}). Remaining epics were skipped."
+  }
+}

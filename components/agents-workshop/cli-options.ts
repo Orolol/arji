@@ -1,3 +1,4 @@
+import type { TranslationKey } from "@/lib/i18n/catalogue";
 import {
   getProviderOptionDefinitions,
   type NamedAgentCliOptions,
@@ -73,27 +74,37 @@ export function cliOptionControlKind(definition: {
 /** Sentinel for "no value chosen" — never stored, only used as a menu key. */
 export const CLI_DEFAULT_VALUE = "__default__";
 
-/** The leading segment / item label on every CLI option control. */
-export const CLI_DEFAULT_LABEL = "CLI default";
-
 /**
  * Kicker copy for one option group.
  *
- * The frame writes a French explanatory clause after two of the kickers and is
- * the higher-fidelity source for them, so the clause is kept — but as a SUFFIX
- * on the registry's own label rather than as a replacement for it. Written as
- * a replacement, "EFFORT — …" would also overwrite agy's "Reasoning effort",
+ * The frame writes an explanatory clause after two of the kickers and is the
+ * higher-fidelity source for them, so the clause is kept — but as a SUFFIX on
+ * the registry's own label rather than as a replacement for it. Written as a
+ * replacement, "EFFORT — …" would also overwrite agy's "Reasoning effort",
  * whose key is the same word. Every other definition is just its label,
  * uppercased, so an option added to the registry needs no edit here.
+ *
+ * A MODULE-SCOPE COPY TABLE, so it holds catalogue KEY REFERENCES and the band
+ * resolves them at render (`lib/i18n/catalogue.ts`, pattern 3). The kicker
+ * itself is composed from two catalogue strings, so it takes them ALREADY
+ * RESOLVED: every key literal then stays next to a real `useTranslations`
+ * binding, where both a reader and the coverage gate can see it.
  */
-const KICKER_SUFFIXES: Record<string, string> = {
-  effort: " — combien l'agent réfléchit par tour",
-  permission_mode: " — ce qu'il peut toucher sans demander",
+const KICKER_SUFFIX_KEYS: Record<string, { suffixKey: TranslationKey }> = {
+  effort: { suffixKey: "AgentsWorkshop.cliOptions.kickerSuffix.effort" },
+  permission_mode: {
+    suffixKey: "AgentsWorkshop.cliOptions.kickerSuffix.permissionMode",
+  },
 };
 
-export function cliOptionKicker(definition: {
-  key: string;
+/** The clause to append after this option's label, if it has one. */
+export function cliOptionKickerSuffixKey(key: string): TranslationKey | null {
+  return KICKER_SUFFIX_KEYS[key]?.suffixKey ?? null;
+}
+
+export function cliOptionKicker(copy: {
   label: string;
+  suffix: string;
 }): string {
-  return `${definition.label.toUpperCase()}${KICKER_SUFFIXES[definition.key] ?? ""}`;
+  return `${copy.label.toUpperCase()}${copy.suffix}`;
 }

@@ -1,9 +1,12 @@
+import type { UiLocale } from "@/lib/i18n/locales";
+import type { TranslationKey } from "@/lib/i18n/catalogue";
+
 /**
  * Pure derivations for the Releases desk (frame 8c).
  *
  * No React, no imports from `components/`: everything here is a plain function
  * over the API row shapes, so the screen's arithmetic is unit-testable without
- * a DOM. Formatting that already exists elsewhere in the repo (`timeAgo`) is
+ * a DOM. Formatting that already exists elsewhere in the repo (`formatRelative`) is
  * NOT re-implemented here — the screen imports it from `lib/utils/format-date`.
  */
 
@@ -46,6 +49,12 @@ export type ReleaseState = "published" | "draft" | "local";
  * publish — the two-field test is the only thing separating a pushed draft
  * from a published release.
  */
+export const RELEASE_STATE_KEYS = {
+  draft: "Releases.state.draft",
+  published: "Releases.state.published",
+  local: "Releases.state.local",
+} as const satisfies Record<ReleaseState, TranslationKey>;
+
 export function releaseState(release: ReleaseRow): ReleaseState {
   if (release.githubReleaseId !== null && release.pushedAt !== null) {
     return "published";
@@ -113,10 +122,10 @@ export function versionBumps(
 export function ticketExclusionReason(epic: {
   usCount?: number;
   usDone?: number;
-}): string | null {
+}, copy: (count: number) => string): string | null {
   const left = (epic.usCount ?? 0) - (epic.usDone ?? 0);
   if (left <= 0) return null;
-  return `${left} ${left === 1 ? "story" : "stories"} left`;
+  return copy(left);
 }
 
 /**
@@ -154,16 +163,9 @@ export function buildChangelogPreview(
   ].join("\n");
 }
 
-/**
- * `timeAgo` output → the stat-caption casing the frame draws: only the unit
- * word is uppercased, so "4d ago" reads "4d AGO" and not "4D AGO".
- * An unknown age is an em-dash, never a zero and never "just now".
- */
-export function upperAge(relative: string): string {
-  if (!relative) return "—";
-  if (relative === "just now") return "JUST NOW";
-  if (relative.endsWith(" ago")) return `${relative.slice(0, -4)} AGO`;
-  return relative;
+/** Caption casing is presentation, independent of translated wording. */
+export function upperAge(relative: string, locale: UiLocale): string {
+  return relative ? relative.toLocaleUpperCase(locale) : "—";
 }
 
 /**

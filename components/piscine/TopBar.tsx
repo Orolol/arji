@@ -11,6 +11,7 @@ import {
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import {
   ChevronDown,
   Inbox,
@@ -174,6 +175,7 @@ export function TopBar({ className }: TopBarProps) {
   const pathname = usePathname() ?? "";
   const router = useRouter();
 
+  const tBar = useTranslations("TopBar");
   const { allProjects, refresh: refreshProjects } = useProjects();
   const { unreadCount } = useInbox();
   const autoMode = useAutoModeArmed();
@@ -408,7 +410,7 @@ export function TopBar({ className }: TopBarProps) {
         <Link
           href="/"
           data-testid="top-bar-home"
-          aria-label="Now — control desk"
+          aria-label={tBar("home")}
           className={cn(
             "flex size-[34px] shrink-0 items-center justify-center rounded-full",
             "bg-action text-action-foreground no-underline outline-none",
@@ -439,7 +441,7 @@ export function TopBar({ className }: TopBarProps) {
 
           <Link
             href="/projects/new"
-            aria-label="New project"
+            aria-label={tBar("newProject")}
             data-testid="top-bar-add-project"
             className={cn(
               "flex size-[26px] shrink-0 items-center justify-center rounded-full",
@@ -495,7 +497,7 @@ export function TopBar({ className }: TopBarProps) {
           <DestinationPill
             href="/"
             testId="top-bar-bubble-now"
-            label="Now"
+            label={tBar("pills.now")}
             icon={Radar}
             active={onDesk}
             onFocus={close}
@@ -522,7 +524,7 @@ export function TopBar({ className }: TopBarProps) {
           <DestinationPill
             href="/chat"
             testId="top-bar-bubble-chat"
-            label="Chat"
+            label={tBar("pills.chat")}
             icon={MessageSquare}
             active={onChat}
             onFocus={close}
@@ -599,11 +601,11 @@ export function TopBar({ className }: TopBarProps) {
           onClick={() => setPaletteOpen(true)}
           aria-haspopup="dialog"
           aria-expanded={paletteOpen}
-          title="Rechercher — ⌘K"
+          title={tBar("search.title")}
           data-testid="top-bar-search"
         >
           <Mono size={11} className={ACTION_LABEL_CLASS}>
-            ⌘K
+            {tBar("search.shortcut")}
           </Mono>
         </PillButton>
 
@@ -616,7 +618,7 @@ export function TopBar({ className }: TopBarProps) {
           onClick={() => router.push("/inbox")}
           data-testid="top-bar-inbox"
         >
-          Inbox
+          {tBar("inbox")}
         </PillButton>
 
         {/*
@@ -631,8 +633,11 @@ export function TopBar({ className }: TopBarProps) {
           data-state={autoMode.loaded ? (autoOn ? "on" : "off") : "unknown"}
           title={
             autoMode.loaded
-              ? `Full Auto · ${armedCount}/${visibleProjects.length} projets`
-              : "Full Auto"
+              ? tBar("auto.titleArmed", {
+                  armed: String(armedCount),
+                  total: String(visibleProjects.length),
+                })
+              : tBar("auto.title")
           }
           className={cn(
             pillButtonVariants({ variant: "outline", outlineTone: "neutral", size: "md" }),
@@ -642,7 +647,7 @@ export function TopBar({ className }: TopBarProps) {
           )}
         >
           <InfinityIcon size={14} aria-hidden="true" />
-          <span className={ACTION_LABEL_CLASS}>Auto</span>
+          <span className={ACTION_LABEL_CLASS}>{tBar("auto.label")}</span>
         </Link>
 
         {/*
@@ -654,14 +659,14 @@ export function TopBar({ className }: TopBarProps) {
         <Link
           href="/tickets/new"
           data-testid="top-bar-new"
-          title="New ticket"
+          title={tBar("new.title")}
           className={cn(
             pillButtonVariants({ variant: "filled", size: "md" }),
             "no-underline",
           )}
         >
           <Plus size={13} aria-hidden="true" />
-          <span className={ACTION_LABEL_CLASS}>New</span>
+          <span className={ACTION_LABEL_CLASS}>{tBar("new.label")}</span>
         </Link>
       </div>
 
@@ -800,6 +805,7 @@ function CategoryBubble({
   onActivate: () => void;
 }) {
   const Icon = category.icon;
+  const t = useTranslations();
 
   return (
     <button
@@ -822,7 +828,7 @@ function CategoryBubble({
       )}
     >
       <Icon size={14} aria-hidden="true" />
-      <span className={ISLAND_LABEL_CLASS}>{category.label}</span>
+      <span className={ISLAND_LABEL_CLASS}>{t(category.labelKey)}</span>
       {live ? (
         <span data-testid={`top-bar-live-${category.id}`} className="flex">
           <BreathingDot size={6} />

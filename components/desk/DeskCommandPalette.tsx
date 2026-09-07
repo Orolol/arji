@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Search } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 /*
  * Leaf imports, NOT the `@/components/piscine` barrel: the barrel exports
@@ -68,6 +69,7 @@ export function DeskCommandPalette({
   onOpenTicket,
   onSelectProject,
 }: DeskCommandPaletteProps) {
+  const t = useTranslations("Desk");
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
 
@@ -101,7 +103,7 @@ export function DeskCommandPalette({
         key: `project:${project.id}`,
         kind: "project",
         label: project.name,
-        hint: "ouvrir le projet",
+        hint: t("palette.hintProject"),
         project,
         run: () => onSelectProject(project.id),
       });
@@ -112,7 +114,7 @@ export function DeskCommandPalette({
         key: `session:${session.sessionId}`,
         kind: "session",
         label: session.title,
-        hint: `${session.taskType} en cours`,
+        hint: t("palette.hintSession", { taskType: session.taskType }),
         project: projectsById.get(session.projectId),
         run: () => session.epicId && onOpenTicket(session.epicId, session.projectId),
       });
@@ -138,16 +140,22 @@ export function DeskCommandPalette({
     };
 
     for (const row of payload.yourTurn.awaitingReply) {
-      pushTicket(row.epicId, row.projectId, row.readableId, row.title, "votre tour");
+      pushTicket(row.epicId, row.projectId, row.readableId, row.title, t("palette.hintYourTurn"));
     }
     for (const row of payload.yourTurn.failed) {
-      pushTicket(row.epicId, row.projectId, row.readableId, row.title, "échec");
+      pushTicket(row.epicId, row.projectId, row.readableId, row.title, t("palette.hintFailed"));
     }
     for (const row of payload.yourTurn.conflicts) {
-      pushTicket(row.epicId, row.projectId, row.readableId, row.title, "conflit");
+      pushTicket(row.epicId, row.projectId, row.readableId, row.title, t("palette.hintConflict"));
     }
     for (const row of payload.readyToLand) {
-      pushTicket(row.epicId, row.projectId, row.readableId, row.title, "prêt à livrer");
+      pushTicket(
+        row.epicId,
+        row.projectId,
+        row.readableId,
+        row.title,
+        t("palette.hintReadyToLand"),
+      );
     }
     for (const group of payload.upNext) {
       for (const ticket of group.tickets) {
@@ -156,13 +164,13 @@ export function DeskCommandPalette({
           ticket.projectId,
           ticket.readableId,
           ticket.title,
-          "à venir",
+          t("palette.hintUpNext"),
         );
       }
     }
 
     return rows;
-  }, [payload, onOpenTicket, onSelectProject]);
+  }, [payload, onOpenTicket, onSelectProject, t]);
 
   const results = useMemo(
     () => entries.filter((entry) => fuzzyMatches(entry.label, query)).slice(0, 12),
@@ -180,7 +188,7 @@ export function DeskCommandPalette({
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="Rechercher"
+        aria-label={t("palette.dialogLabel")}
         onClick={(event) => event.stopPropagation()}
         // No shadow. `--shadow-overlay` is the system's ONLY shadow and it
         // belongs to the ticket overlay; the scrim behind this panel already
@@ -194,8 +202,8 @@ export function DeskCommandPalette({
             autoFocus
             type="text"
             value={query}
-            placeholder="Chercher un ticket, un projet, une session…"
-            aria-label="Chercher"
+            placeholder={t("palette.placeholder")}
+            aria-label={t("palette.inputLabel")}
             data-testid="desk-command-input"
             onChange={(event) => {
               setQuery(event.target.value);
@@ -243,7 +251,7 @@ export function DeskCommandPalette({
         <div className="flex max-h-[50vh] flex-col gap-1 overflow-y-auto">
           {results.length === 0 ? (
             <Mono size={11} tone="muted" className="px-2 py-3">
-              Rien ne correspond.
+              {t("palette.empty")}
             </Mono>
           ) : (
             results.map((entry, index) => (

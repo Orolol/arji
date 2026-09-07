@@ -72,6 +72,9 @@ export const SESSION_PROMPT_ELISION_LABEL = `prompt capped by Arij at ${
  * Counted in BYTES, not characters: bytes are what the cap is expressed in
  * and what the cut is measured against, and reporting characters here would
  * be a second, differently-derived number for the same elision.
+ *
+ * Persisted into the stored prompt and parsed back by `MARKER_ELIDED_BYTES`,
+ * so the numeral is pinned to "en-US" and never follows the interface locale.
  */
 export function promptElisionMarker(elidedBytes: number): string {
   return `[… ${elidedBytes.toLocaleString(

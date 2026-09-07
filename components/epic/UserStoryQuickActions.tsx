@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import {
   Tooltip,
@@ -19,6 +20,7 @@ interface UserStoryQuickActionsProps {
   story: UserStory;
   onRefresh: () => void;
   isLocked?: boolean;
+  /** Defaults to the catalogue's `actions.locked` when the caller omits it. */
   lockReason?: string;
 }
 
@@ -27,11 +29,13 @@ export function UserStoryQuickActions({
   story,
   onRefresh,
   isLocked = false,
-  lockReason = "Another agent is already running for this task.",
+  lockReason,
 }: UserStoryQuickActionsProps) {
+  const t = useTranslations("Epic");
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const actionsLocked = loading !== null || isLocked;
+  const lockedTooltip = lockReason ?? t("actions.locked");
 
   const canSendToDev = ["todo", "in_progress"].includes(story.status);
   const canReview = story.status === "review" || story.status === "done";
@@ -52,10 +56,11 @@ export function UserStoryQuickActions({
         }
       );
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.error) throw new Error(data.error || "Failed to send to dev");
+      if (!res.ok || data.error)
+        throw new Error(data.error || t("actions.sendToDevError"));
       onRefresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to send to dev");
+      setError(e instanceof Error ? e.message : t("actions.sendToDevError"));
     }
     setLoading(null);
   }
@@ -73,10 +78,11 @@ export function UserStoryQuickActions({
         }
       );
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.error) throw new Error(data.error || "Failed to dispatch review");
+      if (!res.ok || data.error)
+        throw new Error(data.error || t("actions.reviewError"));
       onRefresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to dispatch review");
+      setError(e instanceof Error ? e.message : t("actions.reviewError"));
     }
     setLoading(null);
   }
@@ -93,12 +99,13 @@ export function UserStoryQuickActions({
         }
       );
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.error) throw new Error(data.error || "Failed to approve");
+      if (!res.ok || data.error)
+        throw new Error(data.error || t("actions.approveError"));
       // Story approval closes the story only — the epic closes through its
       // own merge (to_merge → done).
       onRefresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to approve");
+      setError(e instanceof Error ? e.message : t("actions.approveError"));
     }
     setLoading(null);
   }
@@ -125,7 +132,7 @@ export function UserStoryQuickActions({
               variant="ghost"
               size="icon"
               className="h-6 w-6"
-              aria-label="Send to Dev"
+              aria-label={t("actions.sendToDev")}
               onClick={(e) => {
                 e.preventDefault();
                 handleSendToDev();
@@ -139,7 +146,9 @@ export function UserStoryQuickActions({
               )}
             </Button>
           </TooltipTrigger>
-          <TooltipContent>{isLocked ? lockReason : "Send to Dev"}</TooltipContent>
+          <TooltipContent>
+            {isLocked ? lockedTooltip : t("actions.sendToDev")}
+          </TooltipContent>
         </Tooltip>
       )}
 
@@ -150,7 +159,7 @@ export function UserStoryQuickActions({
               variant="ghost"
               size="icon"
               className="h-6 w-6"
-              aria-label="Code Review"
+              aria-label={t("actions.codeReview")}
               onClick={(e) => {
                 e.preventDefault();
                 handleReview();
@@ -164,7 +173,9 @@ export function UserStoryQuickActions({
               )}
             </Button>
           </TooltipTrigger>
-          <TooltipContent>{isLocked ? lockReason : "Code Review"}</TooltipContent>
+          <TooltipContent>
+            {isLocked ? lockedTooltip : t("actions.codeReview")}
+          </TooltipContent>
         </Tooltip>
       )}
 
@@ -175,7 +186,7 @@ export function UserStoryQuickActions({
               variant="ghost"
               size="icon"
               className="h-6 w-6 text-green-500 hover:text-green-600"
-              aria-label="Approve"
+              aria-label={t("actions.approve")}
               onClick={(e) => {
                 e.preventDefault();
                 handleApprove();
@@ -189,7 +200,9 @@ export function UserStoryQuickActions({
               )}
             </Button>
           </TooltipTrigger>
-          <TooltipContent>{isLocked ? lockReason : "Approve"}</TooltipContent>
+          <TooltipContent>
+            {isLocked ? lockedTooltip : t("actions.approve")}
+          </TooltipContent>
         </Tooltip>
       )}
       </div>

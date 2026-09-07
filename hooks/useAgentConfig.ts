@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { usePolling } from "@/hooks/usePolling";
@@ -173,6 +175,7 @@ export function useAgentAssignments(
   scope: "global" | "project",
   projectId?: string
 ) {
+  const tErrors = useTranslations("ClientErrors");
   const url = buildUrl("/agent-config/providers", scope, projectId);
   const { data, loading, refresh: load } = useKeyedList<ResolvedAgentAssignment>(url);
 
@@ -199,10 +202,10 @@ export function useAgentAssignments(
             ? json.error
             : res.ok
               ? undefined
-              : "Could not update this assignment.",
+              : tErrors("couldNotUpdateThisAssignment"),
       };
     },
-    [scope, projectId, load]
+    [scope, projectId, load, tErrors]
   );
 
   return { data, loading, refresh: load, assignAgent };

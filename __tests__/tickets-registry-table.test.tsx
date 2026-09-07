@@ -132,16 +132,16 @@ beforeEach(() => {
 });
 
 describe("the column header", () => {
-  it("renders the seven accented labels in source case", () => {
+  it("renders the seven labels in source case", () => {
     render(<TicketsRegistryView />);
     for (const label of [
       "Ticket",
-      "Titre",
-      "État",
+      "Title",
+      "State",
       "Stories",
-      "Priorité",
-      "Dernière activité",
-      "Coût",
+      "Priority",
+      "Last activity",
+      "Cost",
     ]) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
@@ -190,13 +190,13 @@ describe("group headers", () => {
     expect(screen.getByTestId("tickets-empty")).toBeEmptyDOMElement();
     expect(screen.queryAllByTestId("tickets-group-header")).toHaveLength(0);
     expect(screen.getByTestId("tickets-footer-status")).toHaveTextContent(
-      "0 tickets · 2 projets",
+      "0 tickets · 2 projects",
     );
   });
 });
 
 describe("truncation", () => {
-  it("caps DONE at three and offers tout montrer ↓", () => {
+  it("caps DONE at three and offers show all ↓", () => {
     const rows = Array.from({ length: 9 }, (_, index) =>
       row({ epicId: `d${index}`, group: "done", status: "done" }),
     );
@@ -204,20 +204,20 @@ describe("truncation", () => {
     render(<TicketsRegistryView />);
 
     expect(screen.getAllByTestId("tickets-row")).toHaveLength(3);
-    expect(screen.getByText("+ 6 autres done")).toBeInTheDocument();
+    expect(screen.getByText("+ 6 more done")).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("tickets-show-all"));
     expect(screen.getAllByTestId("tickets-row")).toHaveLength(9);
     expect(setWindow).toHaveBeenCalledWith("done", 9);
   });
 
-  it("only claims 'en backlog' when every hidden row really is one", () => {
+  it("only claims 'in backlog' when every hidden row really is one", () => {
     const backlog = Array.from({ length: 6 }, (_, index) =>
       row({ epicId: `b${index}`, group: "waiting", status: "backlog", isDraft: true }),
     );
     payload = makePayload(backlog);
     const { unmount } = render(<TicketsRegistryView />);
-    expect(screen.getByText("+ 2 autres en backlog")).toBeInTheDocument();
+    expect(screen.getByText("+ 2 more in backlog")).toBeInTheDocument();
     unmount();
 
     payload = makePayload([
@@ -225,7 +225,7 @@ describe("truncation", () => {
       row({ epicId: "mix", group: "waiting", status: "todo" }),
     ]);
     render(<TicketsRegistryView />);
-    expect(screen.getByText("+ 2 autres")).toBeInTheDocument();
+    expect(screen.getByText("+ 2 more")).toBeInTheDocument();
   });
 });
 
@@ -358,7 +358,7 @@ describe("the footer", () => {
   it("prints the totals and the 30-day cost", () => {
     render(<TicketsRegistryView />);
     expect(screen.getByTestId("tickets-footer-status")).toHaveTextContent(
-      "1 ticket · 2 projets",
+      "1 ticket · 2 projects",
     );
     expect(screen.getByText("$38.20")).toBeInTheDocument();
   });
@@ -369,7 +369,7 @@ describe("the footer", () => {
     });
     render(<TicketsRegistryView />);
     const footer = screen.getByTestId("tickets-footer-status").parentElement!;
-    expect(footer).toHaveTextContent("coût total 30j : —");
+    expect(footer).toHaveTextContent("30d total cost: —");
   });
 
   it("puts a route error in the status slot and keeps the last good rows", () => {
@@ -399,15 +399,15 @@ describe("project and exact workflow filters", () => {
       row({ epicId: "text", projectId: "p2", title: "Different", status: "review", type: "bug" }),
     ]);
     render(<TicketsRegistryView />);
-    await select(/^Projet :/, "Ledger");
-    await select(/^État :/, "Review");
+    await select(/^Project:/, "Ledger");
+    await select(/^State:/, "Review");
     fireEvent.change(screen.getByLabelText("Filter tickets"), { target: { value: "Needle" } });
     fireEvent.click(screen.getByTestId("tickets-filter-bug"));
     fireEvent.click(screen.getByTestId("tickets-filter-high"));
     expect(screen.getAllByTestId("tickets-row")).toHaveLength(1);
     expect(screen.getByTestId("tickets-row")).toHaveTextContent("ARJ-wanted");
-    await select(/^Projet :/, "Tous les projets");
-    await select(/^État :/, "Tous les états");
+    await select(/^Project:/, "All projects");
+    await select(/^State:/, "All states");
     fireEvent.change(screen.getByLabelText("Filter tickets"), { target: { value: "" } });
     fireEvent.click(screen.getByTestId("tickets-filter-bug"));
     fireEvent.click(screen.getByTestId("tickets-filter-high"));
@@ -424,7 +424,7 @@ describe("project and exact workflow filters", () => {
     ));
     render(<TicketsRegistryView />);
     fireEvent.click(screen.getByTestId("tickets-filter-active"));
-    await select(/^État :/, label);
+    await select(/^State:/, label);
     expect(screen.getAllByTestId("tickets-row")).toHaveLength(1);
     expect(screen.getByTestId("tickets-row")).toHaveTextContent(`ARJ-${status}`);
     fireEvent.click(screen.getByTestId("tickets-filter-all"));
@@ -438,7 +438,7 @@ describe("project and exact workflow filters", () => {
     installAppRouterUrl("/tickets?project=p1");
     render(<TicketsRegistryView />);
     expect(screen.getByTestId("tickets-row")).toHaveTextContent("ARJ-a");
-    await select(/^Projet :/, "Tous les projets");
+    await select(/^Project:/, "All projects");
     expect(screen.getAllByTestId("tickets-row")).toHaveLength(2);
     act(() => navigateTo("/tickets?project=p2"));
     expect(screen.getByTestId("tickets-row")).toHaveTextContent("ARJ-b");
@@ -448,8 +448,8 @@ describe("project and exact workflow filters", () => {
 
   it("renders an empty result when project and status do not intersect", async () => {
     render(<TicketsRegistryView />);
-    await select(/^Projet :/, "Ledger");
-    await select(/^État :/, "Released");
+    await select(/^Project:/, "Ledger");
+    await select(/^State:/, "Released");
     expect(screen.queryAllByTestId("tickets-row")).toHaveLength(0);
     expect(screen.getByTestId("tickets-footer-status")).toHaveTextContent("0 tickets");
   });
@@ -457,9 +457,9 @@ describe("project and exact workflow filters", () => {
 
 describe("sortable headers", () => {
   it.each([
-    ["Ticket", "asc", "a"], ["Titre", "asc", "a"], ["État", "asc", "a"],
-    ["Stories", "desc", "b"], ["Priorité", "desc", "b"],
-    ["Dernière activité", "asc", "a"], ["Coût", "desc", "b"],
+    ["Ticket", "asc", "a"], ["Title", "asc", "a"], ["State", "asc", "a"],
+    ["Stories", "desc", "b"], ["Priority", "desc", "b"],
+    ["Last activity", "asc", "a"], ["Cost", "desc", "b"],
   ])("sorts %s in both directions and exposes the direction", (label, direction, first) => {
     payload = makePayload([
       row({ epicId: "b", title: "Zulu", status: "review", usCount: 10, priority: 3, costUsd: 10, activityAt: "2026-09-05T10:00:00Z" }),
@@ -481,7 +481,7 @@ describe("sortable headers", () => {
     payload = makePayload([row({ epicId: "b", title: "Zulu" }), row({ epicId: "a", title: "Alpha" }), row({ epicId: "bug", type: "bug" })]);
     render(<TicketsRegistryView />);
     await user.click(screen.getByTestId("tickets-filter-high"));
-    const button = within(screen.getByRole("columnheader", { name: "Titre" })).getByRole("button");
+    const button = within(screen.getByRole("columnheader", { name: "Title" })).getByRole("button");
     button.focus();
     await user.keyboard("{Enter}");
     expect(screen.getAllByTestId("tickets-row")[0]).toHaveTextContent("ARJ-a");

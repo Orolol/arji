@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useTranslations } from "next-intl";
 
 import { CheckMark, Mono, SelectPill } from "@/components/piscine";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
@@ -47,10 +48,12 @@ export function FullAutoProjectRow({
   onSetAgent,
   agents,
 }: FullAutoProjectRowProps) {
+  const t = useTranslations("Desk");
   const { agents: namedAgents } = useNamedAgentsList();
 
   const labelFor = (id: string | null) =>
-    (id ? namedAgents.find((agent) => agent.id === id)?.name : null) ?? "Default";
+    (id ? namedAgents.find((agent) => agent.id === id)?.name : null) ??
+    t("fullAuto.defaultAgent");
 
   return (
     <div className="flex flex-col gap-1" data-testid={`full-auto-row-${project.id}`}>
@@ -70,7 +73,9 @@ export function FullAutoProjectRow({
           {project.name}
         </span>
         <Mono size={10.5} tone="muted">
-          {project.activeAgents > 0 ? `${project.activeAgents} live` : "—"}
+          {project.activeAgents > 0
+            ? t("fullAuto.live", { count: project.activeAgents })
+            : "—"}
         </Mono>
       </button>
 
@@ -83,7 +88,7 @@ export function FullAutoProjectRow({
             className="h-[26px] px-2 text-[11.5px]"
           >
             <DropdownMenuItem onSelect={() => void onSetAgent(project.id, "buildAgent", null)}>
-              Default
+              {t("fullAuto.defaultAgent")}
             </DropdownMenuItem>
             {namedAgents.map((agent) => (
               <DropdownMenuItem
@@ -102,7 +107,7 @@ export function FullAutoProjectRow({
             className="h-[26px] px-2 text-[11.5px]"
           >
             <DropdownMenuItem onSelect={() => void onSetAgent(project.id, "reviewAgent", null)}>
-              Default
+              {t("fullAuto.defaultAgent")}
             </DropdownMenuItem>
             {namedAgents.map((agent) => (
               <DropdownMenuItem

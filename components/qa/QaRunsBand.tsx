@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { BandHeader, StrataBand } from "@/components/piscine";
 import type { DeskProject } from "@/lib/control-desk/types";
 import type { QaQueuedRun, QaRun } from "@/lib/qa/types";
@@ -38,15 +40,16 @@ export function QaRunsBand({
   onStopRun,
   className,
 }: QaRunsBandProps) {
+  const t = useTranslations("Qa");
   const empty = runs.length === 0 && queued.length === 0;
 
   return (
     <StrataBand stratum="live" density="full" gap={10} className={className}>
       <BandHeader
-        label="QA runs"
+        label={t("runs.label")}
         stratum="live"
         labelSize={13}
-        meta={`${runs.length} live · ${queued.length} queued`}
+        meta={t("runs.meta", { live: runs.length, queued: queued.length })}
       />
 
       {empty ? null : (

@@ -1,0 +1,23 @@
+{
+  "comments": {
+    "heading": "Comments ({count})",
+    "empty": "No comments yet. Start the conversation.",
+    "authorAgent": "Agent",
+    "authorYou": "You",
+    "placeholder": "Add a comment...",
+    "sendToDev": "Send to dev",
+    "addError": "Failed to add comment"
+  },
+  "detail": {
+    "status": "Status",
+    "parentEpic": "Parent Epic",
+    "description": "Description",
+    "acceptanceCriteria": "Acceptance Criteria"
+  },
+  "status": {
+    "todo": "To Do",
+    "inProgress": "In Progress",
+    "review": "Review",
+    "done": "Done"
+  }
+}

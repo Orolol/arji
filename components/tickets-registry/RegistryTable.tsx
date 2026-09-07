@@ -1,8 +1,10 @@
 "use client";
 
 import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { Mono, QuietLink, StrataBand } from "@/components/piscine";
+import type { TranslationKey } from "@/lib/i18n/catalogue";
 import type { DeskProject } from "@/lib/control-desk/types";
 import { GROUP_PREVIEW, REGISTRY_GROUP_ORDER } from "@/lib/tickets-registry/aggregate";
 import type { RegistryGroup, RegistryRow as Row } from "@/lib/tickets-registry/types";
@@ -27,18 +29,32 @@ import { REGISTRY_GRID, RegistryRow } from "./RegistryRow";
  * has none, and inventing one would be fabricating.
  */
 
-/** Source copy is sentence case; CSS uppercases it, so screen readers and the
- * copy files keep the readable form (the `BandHeader` convention). */
-const COLUMNS: readonly [string, RegistrySort][] = [
-  ["Ticket", "ticket"], ["Titre", "titre"], ["État", "etat"],
-  ["Stories", "stories"], ["Priorité", "priorite"],
-  ["Dernière activité", "activite"], ["Coût", "cout"],
+/**
+ * The column header row, in order. Source copy is sentence case; CSS
+ * uppercases it, so screen readers and the copy files keep the readable form
+ * (the `BandHeader` convention) — and this being a module-scope table, it
+ * holds catalogue KEY REFERENCES resolved at render (`lib/i18n/catalogue.ts`,
+ * pattern 3). The same nine `Registry.columns.*` keys write the CSV header.
+ */
+const COLUMNS: readonly { labelKey: TranslationKey; sort: RegistrySort }[] = [
+  { labelKey: "Registry.columns.ticket", sort: "ticket" },
+  { labelKey: "Registry.columns.title", sort: "titre" },
+  { labelKey: "Registry.columns.state", sort: "etat" },
+  { labelKey: "Registry.columns.stories", sort: "stories" },
+  { labelKey: "Registry.columns.priority", sort: "priorite" },
+  { labelKey: "Registry.columns.activity", sort: "activite" },
+  { labelKey: "Registry.columns.cost", sort: "cout" },
 ];
 
-/** The truncation line's noun, when it can be stated truthfully. */
-function truncationSuffix(group: RegistryGroup, hiddenRows: readonly Row[]): string {
-  if (group === "done") return " done";
-  if (group === "released") return " released";
+/**
+ * The truncation line, with its noun when it can be stated truthfully.
+ *
+ * An explicit key, never a template built from the group: the key-coverage
+ * script and the typed `t` both have to see a string literal.
+ */
+function truncationKey(group: RegistryGroup, hiddenRows: readonly Row[]): TranslationKey {
+  if (group === "done") return "Registry.table.moreDone";
+  if (group === "released") return "Registry.table.moreReleased";
   // The frame writes "+ 6 autres en backlog", which is true of ITS data.
   // Asserting it unconditionally would be a lie, so it is only said when every
   // hidden row really is a backlog draft.
@@ -47,9 +63,9 @@ function truncationSuffix(group: RegistryGroup, hiddenRows: readonly Row[]): str
     hiddenRows.length > 0 &&
     hiddenRows.every((row) => row.status === "backlog")
   ) {
-    return " en backlog";
+    return "Registry.table.moreBacklog";
   }
-  return "";
+  return "Registry.table.more";
 }
 
 export interface RegistryTableProps {
@@ -91,6 +107,8 @@ export function RegistryTable({
   onExportCsv,
   className,
 }: RegistryTableProps) {
+  // Namespace-less: `COLUMNS` and the truncation map hold full dotted keys.
+  const t = useTranslations();
   const visibleGroups = REGISTRY_GROUP_ORDER.filter(
     (group) => rowsByGroup[group].length > 0,
   );
@@ -120,15 +138,15 @@ export function RegistryTable({
           "hidden shrink-0 border-b-[1.5px] border-border px-[18px] py-[9px] lg:grid",
         )}
       >
-        {COLUMNS.map(([label, key], index) => {
+        {COLUMNS.map(({ labelKey, sort: key }, index) => {
           const Icon = sort !== key ? ArrowUpDown : direction === "asc" ? ArrowUp : ArrowDown;
           return (
             <div key={key} role="columnheader" aria-sort={sort === key ? direction === "asc" ? "ascending" : "descending" : "none"}
               className={cn("min-w-0", index === COLUMNS.length - 1 && "justify-self-end text-right")}>
               <button type="button" onClick={() => onSortChange(key)}
-                title="Trier dans chaque groupe"
+                title={t("Registry.table.sortHint")}
                 className="flex items-center gap-1 cursor-pointer rounded-sm focus-visible:outline-2 focus-visible:outline-ring">
-                <Mono size={9.5} weight={700} tracking={0.08} uppercase tone={sort === key ? "ink" : "muted"}>{label}</Mono>
+                <Mono size={9.5} weight={700} tracking={0.08} uppercase tone={sort === key ? "ink" : "muted"}>{t(labelKey)}</Mono>
                 <Icon size={11} aria-hidden className="shrink-0 text-muted-foreground" />
               </button>
             </div>
@@ -184,7 +202,7 @@ export function RegistryTable({
                   )}
                 >
                   <Mono size={10.5} tone="muted">
-                    {`+ ${hidden} autres${truncationSuffix(group, hiddenRows)}`}
+                    {t(truncationKey(group, hiddenRows), { count: hidden })}
                   </Mono>
                   <QuietLink
                     tone="next"
@@ -193,7 +211,7 @@ export function RegistryTable({
                     testId="tickets-show-all"
                     className="font-semibold"
                   >
-                    tout montrer ↓
+                    {t("Registry.table.showAll")}
                   </QuietLink>
                 </div>
               ) : null}
@@ -214,14 +232,14 @@ export function RegistryTable({
           </Mono>
         </span>
         <Mono size={10.5} tone="muted">
-          {"coût total 30j : "}
+          {`${t("Registry.footer.cost30d")} `}
           <Mono size={10.5} weight={700} tone="ink">
             {cost30dUsd === null ? "—" : `$${cost30dUsd.toFixed(2)}`}
           </Mono>
         </Mono>
         <span
           className="ml-auto"
-          title={`Exporte les ${exportCount} tickets chargés`}
+          title={t("Registry.footer.exportHint", { count: exportCount })}
         >
           <QuietLink
             tone="next"
@@ -230,7 +248,7 @@ export function RegistryTable({
             testId="tickets-export-csv"
           >
             <ArrowDown size={12} aria-hidden />
-            Export CSV
+            {t("Registry.footer.exportCsv")}
           </QuietLink>
         </span>
       </div>

@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Bricolage_Grotesque, Instrument_Sans, Space_Mono } from "next/font/google";
 import "./globals.css";
+import { NextIntlClientProvider } from "next-intl";
+import { getLocale } from "next-intl/server";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { TopBar } from "@/components/piscine";
@@ -57,31 +59,45 @@ export const metadata: Metadata = {
   manifest: "/manifest.json",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  /* The locale `lib/i18n/request.ts` resolved for this request: the stored
+     `ui_locale` setting, else the browser language. `<html lang>` follows it
+     so assistive tech and hyphenation read the chrome in the language it is
+     actually drawn in. */
+  const locale = await getLocale();
+
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang={locale} suppressHydrationWarning>
       <body
         className={`${bricolage.variable} ${instrumentSans.variable} ${spaceMono.variable} antialiased`}
       >
-        <ThemeProvider>
-          <TooltipProvider>
-            {/*
-              Frame 13a: ONE global bar, on every route, above a single scroll
-              container. It replaces the left rail (retired) and, once the
-              retrofit pass strips them, the 60px header each screen still
-              draws for itself. `min-h-0` is what lets `main` scroll instead of
-              growing the column past the viewport.
-            */}
-            <div className="flex h-screen flex-col">
-              <TopBar />
-              <main className="flex-1 min-h-0 min-w-0 overflow-auto">{children}</main>
-            </div>
-          </TooltipProvider>
-        </ThemeProvider>
+        {/*
+          Rendered from a server component, so it inherits the request's
+          locale and messages from lib/i18n/request.ts — nothing is passed
+          by hand. Every `useTranslations` / `useLocale` below the bar reads
+          from here.
+        */}
+        <NextIntlClientProvider>
+          <ThemeProvider>
+            <TooltipProvider>
+              {/*
+                Frame 13a: ONE global bar, on every route, above a single scroll
+                container. It replaces the left rail (retired) and, once the
+                retrofit pass strips them, the 60px header each screen still
+                draws for itself. `min-h-0` is what lets `main` scroll instead of
+                growing the column past the viewport.
+              */}
+              <div className="flex h-screen flex-col">
+                <TopBar />
+                <main className="flex-1 min-h-0 min-w-0 overflow-auto">{children}</main>
+              </div>
+            </TooltipProvider>
+          </ThemeProvider>
+        </NextIntlClientProvider>
       </body>
     </html>
   );

@@ -54,6 +54,22 @@ jobs:
       - name: Type check
         run: npx tsc --noEmit
 
+      # The interface's copy is extracted to a catalogue, and this is what
+      # keeps it that way. Two directions, both fatal: a key the code
+      # references and `en` does not define would render its own dotted path
+      # to the user, and a key `en` defines that nothing references is dead
+      # copy a translator would still be asked to translate. It also fails
+      # when the GENERATED messages index is stale against the namespace
+      # files on disk.
+      #
+      # A FAILING GATE, not an advisory one — the spec notes that type
+      # checking, linting and builds are "expected verification steps but are
+      # not all enforced", and this check exists precisely so the extraction
+      # does not join that list. It runs on bare node with no build step, so
+      # it costs seconds.
+      - name: i18n key coverage
+        run: npm run i18n:check
+
       # ESLint runs against eslint-suppressions.json, which records the
       # violations that already existed when this gate was introduced. Every rule
       # stays at `error` for new code: a new violation is not in the baseline and

@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePolling } from "@/hooks/usePolling";
 import type {
@@ -28,6 +30,7 @@ export function useNightRuns(
   intervalMs: number = 5000,
   idleIntervalMs: number = 30000
 ) {
+  const tErrors = useTranslations("ClientErrors");
   const [runs, setRuns] = useState<NightRunListEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -38,16 +41,16 @@ export function useNightRuns(
       const json = await res.json().catch(() => null);
       if (!res.ok || !Array.isArray(json?.data)) {
         // Leave `runs` alone: a stale list beats a blank one.
-        setError(json?.error ?? "Could not load night runs");
+        setError(json?.error ?? tErrors("couldNotLoadNightRuns"));
       } else {
         setRuns(json.data as NightRunListEntry[]);
         setError(null);
       }
     } catch {
-      setError("Could not load night runs");
+      setError(tErrors("couldNotLoadNightRuns"));
     }
     setLoading(false);
-  }, [projectId]);
+  }, [projectId, tErrors]);
 
   /**
    * The one run currently executing. A run rebuilt from the database after a
@@ -109,6 +112,7 @@ export function useNightRunDetail(
   runId: string | null,
   intervalMs: number = 5000
 ) {
+  const tErrors = useTranslations("ClientErrors");
   const [settled, setSettled] = useState<SettledDetail | null>(null);
 
   const runUrl = runId
@@ -145,10 +149,10 @@ export function useNightRunDetail(
       setSettled(
         ok && json?.data
           ? { key, detail: json.data as NightRunDetail, error: null }
-          : { key, detail: null, error: json?.error ?? "Night run not found" }
+          : { key, detail: null, error: json?.error ?? tErrors("nightRunNotFound") }
       );
     },
-    []
+    [tErrors]
   );
 
   const applyFailure = useCallback((key: string) => {
@@ -156,9 +160,9 @@ export function useNightRunDetail(
     setSettled({
       key,
       detail: null,
-      error: "Failed to load the night run summary",
+      error: tErrors("failedToLoadTheNightRunSummary"),
     });
-  }, []);
+  }, [tErrors]);
 
   const load = useCallback(async () => {
     if (!runUrl) return;

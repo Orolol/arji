@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 import Link from "next/link";
 import {
   Circle,
@@ -26,12 +27,14 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { stopNightRun, useNightRunDetail } from "@/hooks/useNightRuns";
 import {
-  NIGHT_RUN_STATUS_LABELS,
+  NIGHT_RUN_STATUS_LABEL_KEYS,
   formatNightRunCost,
   formatNightRunCounts,
   formatNightRunDuration,
   nightRunAbortKind,
   nightRunAbortSentence,
+  type NightRunAbortCopy,
+  type NightRunCountsCopy,
 } from "@/components/night/night-run-format";
 import type { TicketExecutionStatus } from "@/lib/dependencies/scheduler";
 
@@ -81,6 +84,10 @@ export function NightRunSummaryDialog({
   open,
   onOpenChange,
 }: NightRunSummaryDialogProps) {
+  const t = useTranslations("NightRuns");
+  // The per-status table holds full dotted paths, so it resolves through the
+  // namespace-less translator.
+  const tKey = useTranslations();
   const { detail, loading, error, refresh } = useNightRunDetail(
     projectId,
     open ? runId : null
@@ -94,9 +101,23 @@ export function NightRunSummaryDialog({
     ? formatNightRunDuration(detail.startedAt, detail.endedAt)
     : null;
   const abortKind = nightRunAbortKind(detail?.abortReason);
+  const countsCopy: NightRunCountsCopy = {
+    bucket: (count, label) => t("counts.bucket", { count, label }),
+    statusLabel: (status) => tKey(NIGHT_RUN_STATUS_LABEL_KEYS[status]),
+    none: t("counts.none"),
+  };
+  const abortCopy: NightRunAbortCopy = {
+    stopped: (wave) =>
+      wave == null ? t("abort.stopped") : t("abort.stoppedAtWave", { wave }),
+    other: (reason, wave) =>
+      wave == null
+        ? t("abort.other", { reason })
+        : t("abort.otherAtWave", { reason, wave }),
+  };
   const abortSentence = nightRunAbortSentence(
     detail?.abortReason,
-    detail?.abortedAtWave
+    detail?.abortedAtWave,
+    abortCopy
   );
   const running = detail?.state === "running" && !detail.interrupted;
   // The server flag survives a dialog remount; the local one covers the gap
@@ -118,7 +139,7 @@ export function NightRunSummaryDialog({
       >
         <DialogHeader className="flex-row items-center gap-[10px] space-y-0 border-b border-border-soft px-[24px] py-[20px] text-left">
           <DialogTitle className="shrink-0 text-[16px] font-semibold leading-none">
-            Night run
+            {t("common.nightRun")}
           </DialogTitle>
           <span className="min-w-0 truncate font-mono text-[11.5px] text-meta">
             {runId}
@@ -128,13 +149,15 @@ export function NightRunSummaryDialog({
                 <span data-testid="night-summary-duration">{duration}</span>
                 {" · "}
                 <span data-testid="night-summary-cost">
-                  {cost ?? "cost not reported"}
+                  {cost ?? t("summary.costNotReported")}
                 </span>
               </>
             )}
           </span>
           {detail?.state === "running" && (
-            <span className="shrink-0 text-[11.5px] text-agent">running</span>
+            <span className="shrink-0 text-[11.5px] text-agent">
+              {t("summary.running")}
+            </span>
           )}
           {running && (
             <Button
@@ -145,10 +168,10 @@ export function NightRunSummaryDialog({
               data-testid="night-run-stop-button"
               disabled={stopPending}
               onClick={handleStop}
-              title="Stop launching new epics. Epics already running finish their pipeline."
+              title={t("summary.stopTitle")}
             >
               <Square className="h-3 w-3" />
-              {stopPending ? "Stopping…" : "Stop night run"}
+              {stopPending ? t("summary.stopping") : t("summary.stop")}
             </Button>
           )}
           <DialogClose
@@ -158,7 +181,7 @@ export function NightRunSummaryDialog({
             )}
           >
             <X className="h-4 w-4" />
-            <span className="sr-only">Close</span>
+            <span className="sr-only">{t("common.close")}</span>
           </DialogClose>
         </DialogHeader>
 
@@ -166,17 +189,17 @@ export function NightRunSummaryDialog({
             dialog; the tiles below are its visual form. */}
         <DialogDescription className="sr-only" data-testid="night-summary-counts">
           {detail
-            ? formatNightRunCounts(detail.counts)
+            ? formatNightRunCounts(detail.counts, countsCopy)
             : loading
-              ? "Loading…"
-              : "No data for this run."}
+              ? t("summary.loading")
+              : t("summary.noData")}
         </DialogDescription>
 
         <div className="flex flex-col gap-[20px] px-[24px] py-[22px]">
           {loading && !detail && (
             <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
-              Loading summary…
+              {t("summary.loadingSummary")}
             </div>
           )}
 
@@ -206,7 +229,7 @@ export function NightRunSummaryDialog({
                       {detail.counts?.[status] ?? 0}
                     </span>
                     <span className="text-[12px] text-muted-foreground">
-                      {NIGHT_RUN_STATUS_LABELS[status]}
+                      {tKey(NIGHT_RUN_STATUS_LABEL_KEYS[status])}
                     </span>
                   </div>
                 ))}
@@ -215,20 +238,25 @@ export function NightRunSummaryDialog({
               <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11.5px] text-meta">
                 {detail.totalWaves != null && (
                   <span data-testid="night-summary-waves">
-                    Wave {Math.max(detail.currentWave ?? 0, 1)}/
-                    {detail.totalWaves}
+                    {t("summary.wave", {
+                      current: Math.max(detail.currentWave ?? 0, 1),
+                      total: detail.totalWaves,
+                    })}
                   </span>
                 )}
                 {detail.failurePolicy && (
                   <span>
-                    On failure:{" "}
-                    {detail.failurePolicy === "stop" ? "stop" : "halt"}
+                    {t("summary.onFailure", {
+                      policy:
+                        detail.failurePolicy === "stop"
+                          ? t("summary.failureStop")
+                          : t("summary.failureHalt"),
+                    })}
                   </span>
                 )}
                 {detail.costIsPartial && (
                   <span data-testid="night-summary-cost-caveat">
-                    Some sessions reported no cost (only Claude Code returns
-                    one), so the total is a lower bound.
+                    {t("summary.costCaveat")}
                   </span>
                 )}
               </div>
@@ -238,8 +266,7 @@ export function NightRunSummaryDialog({
                   data-testid="night-summary-stopping"
                   className="rounded-[11px] border border-border-soft bg-band p-[12px] text-[12px] text-muted-foreground"
                 >
-                  Stopping — no new epic will be launched. The wave currently
-                  running is left to finish its pipelines.
+                  {t("summary.stopRequested")}
                 </div>
               )}
 
@@ -268,22 +295,22 @@ export function NightRunSummaryDialog({
                   data-testid="night-summary-interrupted"
                   className="rounded-[11px] border border-border-soft bg-band p-[12px] text-[12px] text-muted-foreground"
                 >
-                  Interrupted by a server restart — partial data. Sessions that
-                  were still running were marked orphaned at boot.
+                  {t("summary.interrupted")}
                 </div>
               )}
 
               <div className="flex max-h-[320px] flex-col overflow-y-auto">
                 {detail.epics.length === 0 ? (
                   <p className="text-[12.5px] text-muted-foreground">
-                    No epics were dispatched by this run.
+                    {t("summary.noEpics")}
                   </p>
                 ) : (
                   detail.epics.map((epic) => {
                     const Icon = STATUS_ICONS[epic.status] ?? Circle;
+                    const statusKey = NIGHT_RUN_STATUS_LABEL_KEYS[epic.status];
                     const subline = [
                       epic.readableId || epic.epicId,
-                      NIGHT_RUN_STATUS_LABELS[epic.status] ?? epic.status,
+                      statusKey ? tKey(statusKey) : epic.status,
                       epic.reason,
                       epic.costUsd != null && epic.costUsd > 0
                         ? `$${epic.costUsd.toFixed(2)}`
@@ -330,13 +357,17 @@ export function NightRunSummaryDialog({
               variant="outline"
               className="h-[31px] rounded-[8px] px-[12px] text-[13px]"
             >
-              <Link href={`/projects/${projectId}/sessions`}>Open sessions</Link>
+              <Link href={`/projects/${projectId}/sessions`}>
+                {t("summary.openSessions")}
+              </Link>
             </Button>
             <Button
               asChild
               className="h-[31px] rounded-[8px] px-[13px] text-[13px] font-medium"
             >
-              <Link href={`/projects/${projectId}`}>Review on the board</Link>
+              <Link href={`/projects/${projectId}`}>
+                {t("summary.reviewOnBoard")}
+              </Link>
             </Button>
           </DialogFooter>
         )}

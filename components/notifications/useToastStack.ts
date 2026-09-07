@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
+import { useTranslations } from "next-intl";
 
 import { AGENT_ALREADY_RUNNING_CODE } from "@/lib/agents/concurrency-shared";
 
@@ -79,6 +80,7 @@ export type ReportDispatchFailure = (
  * one case, and only that one, carries a deep link.
  */
 export function useDispatchFailureReporter(raise: RaiseToast): ReportDispatchFailure {
+  const t = useTranslations("Notifications");
   return useCallback<ReportDispatchFailure>(
     (res, body, fallback, ownerProjectId) => {
       if (
@@ -86,16 +88,18 @@ export function useDispatchFailureReporter(raise: RaiseToast): ReportDispatchFai
         body.code === AGENT_ALREADY_RUNNING_CODE &&
         body.data?.activeSessionId
       ) {
+        // `body.error` is the ROUTE's own message and stays as the server
+        // sent it; only the link's label is this surface's copy.
         raise("error", body.error ?? fallback, {
           href:
             body.data.sessionUrl ||
             `/projects/${ownerProjectId}/sessions/${body.data.activeSessionId}`,
-          label: "Open active session",
+          label: t("stack.activeSession"),
         });
         return;
       }
       raise("error", body.error || fallback);
     },
-    [raise],
+    [raise, t],
   );
 }

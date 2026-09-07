@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { TriangleAlert } from "lucide-react";
 
 import { pillButtonVariants } from "@/components/piscine";
@@ -27,6 +28,7 @@ import { cn } from "@/lib/utils";
  * `Suspense fallback={null}`.
  */
 export function FrictionsPill() {
+  const t = useTranslations("AgentsWorkshop");
   const projectId = useSearchParams().get("project")?.trim() || null;
   const [openCount, setOpenCount] = useState<number | null>(null);
 
@@ -67,7 +69,7 @@ export function FrictionsPill() {
       )}
     >
       <TriangleAlert size={12} aria-hidden="true" />
-      {`Frictions · ${openCount} open`}
+      {t("frictions.pill", { count: openCount })}
     </Link>
   );
 }

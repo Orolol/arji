@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { SegmentedControl } from "@/components/piscine";
 import { useProjects } from "@/hooks/useProjects";
 
@@ -22,6 +24,7 @@ export function ScopeSwitcher({
   scope,
   onScopeChange,
 }: ScopeSwitcherProps) {
+  const t = useTranslations("AgentsWorkshop");
   const { allProjects } = useProjects();
   if (!projectId) return null;
 
@@ -34,8 +37,8 @@ export function ScopeSwitcher({
       value={scope}
       onChange={onScopeChange}
       options={[
-        { value: "global", label: "Global" },
-        { value: "project", label: project?.name ?? "This project" },
+        { value: "global", label: t("scope.global") },
+        { value: "project", label: project?.name ?? t("scope.thisProject") },
       ]}
       className="w-fit"
     />

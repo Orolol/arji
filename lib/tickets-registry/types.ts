@@ -80,7 +80,7 @@ export interface RegistryRow {
   /** active — the chrono's origin. */
   startedAt: string | null;
   yourTurnKind: YourTurnKind | null;
-  /** waiting — `COLUMN_LABELS[status]`. */
+  /** waiting — `COLUMN_LABEL_KEYS[status]`. */
   queueLabel: string | null;
   /** waiting — execution rank from `deriveUpNext`, `null` when it has none. */
   queueRank: number | null;

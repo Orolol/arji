@@ -14,6 +14,7 @@
 
 import * as React from "react";
 import { StopCircle, X } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import {
   Chrono,
@@ -56,6 +57,8 @@ export function TicketOverlayHeader({
   onClose,
   titleId,
 }: TicketOverlayHeaderProps) {
+  const t = useTranslations("Ticket");
+
   return (
     <div
       data-testid="ticket-overlay-header"
@@ -89,14 +92,14 @@ export function TicketOverlayHeader({
           icon={StopCircle}
           onClick={onStop}
           pending={stopping}
-          pendingLabel="Stop…"
+          pendingLabel={t("header.stopping")}
           data-testid="ticket-overlay-stop"
         >
-          Stop
+          {t("header.stop")}
         </PillButton>
       ) : null}
 
-      <KbdHint>esc</KbdHint>
+      <KbdHint>{t("header.escHint")}</KbdHint>
 
       <PillButton
         variant="filled"
@@ -105,7 +108,7 @@ export function TicketOverlayHeader({
         onClick={onClose}
         data-testid="ticket-overlay-close"
       >
-        Close ticket
+        {t("header.close")}
       </PillButton>
     </div>
   );

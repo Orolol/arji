@@ -18,6 +18,7 @@
  */
 
 import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 
 import { FieldKicker, SurfaceCard } from "@/components/piscine";
 import {
@@ -32,6 +33,7 @@ export interface TicketScreenshotsProps {
 }
 
 export function TicketScreenshots({ images }: TicketScreenshotsProps) {
+  const t = useTranslations("Ticket");
   const [lightboxImage, setLightboxImage] = useState<LightboxImage | null>(
     null,
   );
@@ -58,7 +60,7 @@ export function TicketScreenshots({ images }: TicketScreenshotsProps) {
   return (
     <div className="flex flex-col gap-[10px]" data-testid="ticket-images">
       <FieldKicker stratum="card">
-        {images.length > 1 ? "Screenshots" : "Screenshot"}
+        {t("screenshots.kicker", { count: images.length })}
       </FieldKicker>
 
       <div className="flex flex-wrap gap-2">
@@ -71,7 +73,7 @@ export function TicketScreenshots({ images }: TicketScreenshotsProps) {
             onClick={() =>
               setLightboxImage({ url: image.url, alt: image.fileName })
             }
-            aria-label={`Open ${image.fileName}`}
+            aria-label={t("screenshots.open", { fileName: image.fileName })}
             className="border-0 bg-transparent p-0 outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring"
           >
             <SurfaceCard radius={10} interactive className="overflow-hidden">

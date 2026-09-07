@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -8,6 +9,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Download, Github, Loader2, RefreshCw } from "lucide-react";
 import { useGitHubConfig } from "@/hooks/useGitHubConfig";
 import type { GitHubConfigErrorCode } from "@/lib/github/client";
+import type { TranslationKey } from "@/lib/i18n/catalogue";
 import { cn } from "@/lib/utils";
 
 interface GitHubIssueRow {
@@ -34,20 +36,23 @@ const GRID = "grid-cols-[64px_1fr_180px_110px_120px]";
  * not set up for the project. Branching on the code -- rather than on the prose
  * message, or on a 500 that says nothing at all -- is what lets the page
  * explain the state instead of reporting a failure.
+ *
+ * A MODULE-SCOPE COPY TABLE, so it holds catalogue KEY REFERENCES and the page
+ * resolves them at render with the namespace-less translator
+ * (`lib/i18n/catalogue.ts`, pattern 3). The shape is load-bearing beyond the
+ * copy: `asConfigErrorCode` tests membership against it.
  */
 const CONFIG_EMPTY_STATE: Record<
   GitHubConfigErrorCode,
-  { title: string; detail: string }
+  { titleKey: TranslationKey; detailKey: TranslationKey }
 > = {
   GITHUB_REPO_NOT_CONFIGURED: {
-    title: "No GitHub repository is connected to this project.",
-    detail:
-      "Connect this project to a GitHub repository from the Git sync page to triage its issues here.",
+    titleKey: "GithubIssues.config.repoTitle",
+    detailKey: "GithubIssues.config.repoDetail",
   },
   GITHUB_PAT_NOT_CONFIGURED: {
-    title: "No GitHub personal access token is stored.",
-    detail:
-      "Add a GitHub PAT in Settings so Arij can read this repository's issues.",
+    titleKey: "GithubIssues.config.patTitle",
+    detailKey: "GithubIssues.config.patDetail",
   },
 };
 
@@ -58,6 +63,10 @@ function asConfigErrorCode(value: unknown): GitHubConfigErrorCode | null {
 }
 
 export default function GitHubIssuesPage() {
+  const t = useTranslations("GithubIssues");
+  // The empty-state table holds full dotted paths, so it resolves through the
+  // namespace-less translator.
+  const tKey = useTranslations();
   const params = useParams();
   const projectId = params.projectId as string;
 
@@ -113,17 +122,19 @@ export default function GitHubIssuesPage() {
       if (!res.ok) {
         const code = asConfigErrorCode(json.code);
         setServerConfigCode(code);
-        if (!code) setError(json.error || "Failed to load issues");
+        // `json.error` is the route's own text and ships as it came; only the
+        // fallback beside it is this screen's copy.
+        if (!code) setError(json.error || t("list.loadFailed"));
       } else {
         setServerConfigCode(null);
         setIssues(Array.isArray(json.data) ? json.data : []);
       }
     } catch {
-      setError("Failed to load issues");
+      setError(t("list.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, [projectId, labelFilter, milestoneFilter]);
+  }, [projectId, labelFilter, milestoneFilter, t]);
 
   useEffect(() => {
     if (configLoading) return;
@@ -183,14 +194,14 @@ export default function GitHubIssuesPage() {
           setServerConfigCode(code);
           return;
         }
-        showToast("error", json.error || "Failed to sync issues");
+        showToast("error", json.error || t("sync.failed"));
         return;
       }
       setServerConfigCode(null);
       await loadIssues();
-      showToast("success", "Issues synced");
+      showToast("success", t("sync.done"));
     } catch {
-      showToast("error", "Failed to sync issues");
+      showToast("error", t("sync.failed"));
     } finally {
       setSyncing(false);
     }
@@ -208,16 +219,16 @@ export default function GitHubIssuesPage() {
       });
       const json = await res.json();
       if (!res.ok) {
-        setError(json.error || "Import failed");
-        showToast("error", json.error || "Import failed");
+        setError(json.error || t("import.failed"));
+        showToast("error", json.error || t("import.failed"));
       } else {
         setSelected(new Set());
         await loadIssues();
-        showToast("success", "Imported " + selected.size + " issues");
+        showToast("success", t("import.done", { count: selected.size }));
       }
     } catch {
-      setError("Import failed");
-      showToast("error", "Import failed");
+      setError(t("import.failed"));
+      showToast("error", t("import.failed"));
     } finally {
       setImporting(false);
     }
@@ -230,9 +241,9 @@ export default function GitHubIssuesPage() {
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex flex-none items-start gap-[16px] px-[26px] pb-[18px] pt-[24px]">
         <div className="flex flex-col gap-[5px]">
-          <h2 className="text-[19px] font-semibold">GitHub Issue Triage</h2>
+          <h2 className="text-[19px] font-semibold">{t("header.title")}</h2>
           <p className="text-[13px] text-muted-foreground">
-            Import issues as epics or bugs, based on their labels.
+            {t("header.subtitle")}
           </p>
         </div>
         <div className="ml-auto flex items-center gap-[9px]">
@@ -247,7 +258,7 @@ export default function GitHubIssuesPage() {
             ) : (
               <RefreshCw className="h-[14px] w-[14px]" />
             )}
-            Sync
+            {t("header.sync")}
           </Button>
           <Button
             className="h-[31px] rounded-[8px] px-[13px] text-[13px]"
@@ -259,7 +270,7 @@ export default function GitHubIssuesPage() {
             ) : (
               <Download className="h-[14px] w-[14px]" />
             )}
-            Import Selected ({selected.size})
+            {t("header.importSelected", { count: selected.size })}
           </Button>
         </div>
       </div>
@@ -267,26 +278,25 @@ export default function GitHubIssuesPage() {
       <div className="flex flex-none flex-wrap items-center gap-[10px] px-[26px] pb-[16px]">
         <span className="inline-flex items-center gap-[8px] text-[12.5px] text-muted-foreground">
           <Github className="h-[14px] w-[14px]" />
-          {ownerRepo || "Not connected"}
+          {ownerRepo || t("filters.notConnected")}
         </span>
         <span className="h-4 w-px bg-border" />
         <Input
           value={labelFilter}
           onChange={(e) => setLabelFilter(e.target.value)}
-          placeholder="Filter by label"
-          aria-label="Filter by label"
+          placeholder={t("filters.label")}
+          aria-label={t("filters.label")}
           className="h-[26px] w-[160px] rounded-full px-[11px] text-[12.5px]"
         />
         <Input
           value={milestoneFilter}
           onChange={(e) => setMilestoneFilter(e.target.value)}
-          placeholder="Filter by milestone"
-          aria-label="Filter by milestone"
+          placeholder={t("filters.milestone")}
+          aria-label={t("filters.milestone")}
           className="h-[26px] w-[160px] rounded-full px-[11px] font-mono text-[12px]"
         />
         <span className="ml-auto text-[12.5px] text-muted-foreground">
-          {visible.length} issue{visible.length === 1 ? "" : "s"} · {notImported}{" "}
-          not imported
+          {t("filters.summary", { count: visible.length, notImported })}
         </span>
       </div>
 
@@ -302,13 +312,13 @@ export default function GitHubIssuesPage() {
               #
             </span>
             <span className="text-[11.5px] uppercase tracking-[.08em] text-meta">
-              Title
+              {t("columns.title")}
             </span>
             <span className="text-[11.5px] uppercase tracking-[.08em] text-meta">
-              Labels
+              {t("columns.labels")}
             </span>
             <span className="text-[11.5px] uppercase tracking-[.08em] text-meta">
-              Milestone
+              {t("columns.milestone")}
             </span>
             <span />
           </div>
@@ -318,10 +328,10 @@ export default function GitHubIssuesPage() {
               <div className="flex flex-col items-center gap-[8px] px-[22px] py-[44px] text-center">
                 <Github className="h-[20px] w-[20px] text-meta" />
                 <p className="text-[13.5px] font-medium">
-                  {CONFIG_EMPTY_STATE[configCode].title}
+                  {tKey(CONFIG_EMPTY_STATE[configCode].titleKey)}
                 </p>
                 <p className="max-w-[420px] text-[12.5px] leading-[1.5] text-muted-foreground">
-                  {CONFIG_EMPTY_STATE[configCode].detail}
+                  {tKey(CONFIG_EMPTY_STATE[configCode].detailKey)}
                 </p>
               </div>
             ) : (
@@ -333,11 +343,11 @@ export default function GitHubIssuesPage() {
                 )}
                 {loading ? (
                   <p className="px-[22px] py-[14px] text-[13px] text-muted-foreground">
-                    Loading issues...
+                    {t("list.loading")}
                   </p>
                 ) : visible.length === 0 ? (
                   <p className="px-[22px] py-[14px] text-[13px] text-muted-foreground">
-                    No open issues found.
+                    {t("list.empty")}
                   </p>
                 ) : (
                   visible.map((issue) => {
@@ -354,7 +364,9 @@ export default function GitHubIssuesPage() {
                         <span className="flex min-w-0 items-center gap-[6px]">
                           <Checkbox
                             checked={checked}
-                            aria-label={`Select issue #${issue.issueNumber}`}
+                            aria-label={t("list.select", {
+                              number: issue.issueNumber,
+                            })}
                             onCheckedChange={(value) => {
                               setSelected((prev) => {
                                 const next = new Set(prev);
@@ -396,7 +408,7 @@ export default function GitHubIssuesPage() {
                             imported ? "text-agent" : "text-primary"
                           )}
                         >
-                          {imported ? "imported" : "to import"}
+                          {imported ? t("list.imported") : t("list.toImport")}
                         </span>
                       </div>
                     );
@@ -410,20 +422,26 @@ export default function GitHubIssuesPage() {
         <aside className="hidden w-[330px] flex-none flex-col gap-[16px] lg:flex">
           <div className="flex flex-col gap-[12px] rounded-[12px] border border-border p-[18px]">
             <span className="text-[11.5px] uppercase tracking-[.08em] text-meta">
-              Label mapping
+              {t("mapping.title")}
             </span>
             <div className="flex flex-col gap-[6px]">
               <label
                 htmlFor="label-mapping-feature"
                 className="text-[12.5px] text-muted-foreground"
               >
-                Feature labels (comma-separated)
+                {t("mapping.feature")}
               </label>
+              {/*
+                The two placeholders are SAMPLE label names, authored here
+                rather than read from the repository — so they are copy, and a
+                team whose labels are French should see French examples. The
+                labels the rows actually draw stay values, never keys.
+              */}
               <Input
                 id="label-mapping-feature"
                 value={featureLabels}
                 onChange={(e) => setFeatureLabels(e.target.value)}
-                placeholder="feature, enhancement, epic"
+                placeholder={t("mapping.featurePlaceholder")}
                 className="h-[34px] rounded-[8px] font-mono text-[12.5px]"
                 aria-describedby="label-mapping-hint"
               />
@@ -433,13 +451,13 @@ export default function GitHubIssuesPage() {
                 htmlFor="label-mapping-bug"
                 className="text-[12.5px] text-muted-foreground"
               >
-                Bug labels (comma-separated)
+                {t("mapping.bug")}
               </label>
               <Input
                 id="label-mapping-bug"
                 value={bugLabels}
                 onChange={(e) => setBugLabels(e.target.value)}
-                placeholder="bug, defect, error"
+                placeholder={t("mapping.bugPlaceholder")}
                 className="h-[34px] rounded-[8px] font-mono text-[12.5px]"
                 aria-describedby="label-mapping-hint"
               />
@@ -448,8 +466,7 @@ export default function GitHubIssuesPage() {
               id="label-mapping-hint"
               className="text-[12.5px] leading-[1.5] text-muted-foreground"
             >
-              Configure which GitHub labels map to Feature (Epic) or Bug ticket
-              types.
+              {t("mapping.hint")}
             </p>
             <Button
               variant="outline"
@@ -460,7 +477,7 @@ export default function GitHubIssuesPage() {
               {savingMapping ? (
                 <Loader2 className="h-[13px] w-[13px] animate-spin" />
               ) : null}
-              Save Mapping
+              {t("mapping.save")}
             </Button>
           </div>
         </aside>

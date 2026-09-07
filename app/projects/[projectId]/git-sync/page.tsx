@@ -1,5 +1,6 @@
 "use client";
 
+import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useParams } from "next/navigation";
@@ -18,7 +19,8 @@ import {
 import { useNamedAgentsList } from "@/hooks/useNamedAgentsList";
 import { useWorktrees, type WorktreeState } from "@/hooks/useWorktrees";
 import { cn } from "@/lib/utils";
-import { timeAgo } from "@/lib/utils/format-date";
+import type { TranslationKey } from "@/lib/i18n/catalogue";
+import { formatRelative } from "@/lib/i18n/format";
 import {
   Loader2,
   ArrowDownToLine,
@@ -59,11 +61,19 @@ const WORKTREE_STATE_TONE: Record<WorktreeState, string> = {
   orphan: "text-destructive",
 };
 
-const WORKTREE_STATE_LABELS: Record<WorktreeState, string> = {
-  running: "running",
-  idle: "idle",
-  orphan: "orphan",
+/**
+ * A MODULE-SCOPE COPY TABLE, so it holds catalogue KEY REFERENCES and the
+ * aside resolves them at render with the namespace-less translator
+ * (`lib/i18n/catalogue.ts`, pattern 3).
+ */
+const WORKTREE_STATE_LABEL_KEYS: Record<WorktreeState, TranslationKey> = {
+  running: "GitSync.worktrees.running",
+  idle: "GitSync.worktrees.idle",
+  orphan: "GitSync.worktrees.orphan",
 };
+
+/** The `<mono>` of the missing-remote prose — the remote name, in mono. */
+const monoTag = (chunks: ReactNode) => <span className="font-mono">{chunks}</span>;
 
 function diffLineTone(line: string): string {
   if (line.startsWith("@@")) return "text-meta";
@@ -74,6 +84,11 @@ function diffLineTone(line: string): string {
 }
 
 export default function GitSyncPage() {
+  const locale = useLocale();
+  const t = useTranslations("GitSync");
+  // The worktree-state table holds full dotted paths, so it resolves through
+  // the namespace-less translator.
+  const tKey = useTranslations();
   const params = useParams();
   const projectId = params.projectId as string;
 
@@ -180,7 +195,9 @@ export default function GitSyncPage() {
       const res = await fetch(statusUrl);
       const json = (await res.json()) as StatusResponse;
       if (!res.ok || !json.data) {
-        setStatusReadError(json.error || "Failed to fetch git status");
+        // `json.error` is the route's own text and ships as it came; only the
+        // fallback beside it is this screen's copy.
+        setStatusReadError(json.error || t("status.readFailed"));
         return;
       }
 
@@ -204,14 +221,14 @@ export default function GitSyncPage() {
       setLastFetchedAt(json.data.lastFetchedAt ?? null);
       setLastFetchError(json.data.lastFetchError ?? null);
     } catch {
-      setStatusReadError("Failed to fetch git status");
+      setStatusReadError(t("status.readFailed"));
     } finally {
       setLoadingStatus(false);
     }
     // Both setters are useCallback([]) and so never change; listed because the
     // exhaustive-deps rule cannot see that, and a silenced warning here is how
     // a real missing dependency gets in later.
-  }, [statusUrl, setError, setStatusReadError]);
+  }, [statusUrl, setError, setStatusReadError, t]);
 
   useEffect(() => {
     refreshStatus();
@@ -242,11 +259,11 @@ export default function GitSyncPage() {
    * clears `error` on entry, so setting it first would lose it.
    */
   async function reportMissingRemote(json: { error?: string }) {
-    showToast("error", "No git remote configured");
+    showToast("error", t("remoteMissing.toast"));
     await refreshStatus();
     // The user pressed Push; this is their answer, not the status read's, and
     // `setError` marks it as such.
-    setError(json?.error || "No git remote is configured for this repository.");
+    setError(json?.error || t("remoteMissing.error"));
   }
 
   async function handlePull() {
@@ -270,15 +287,15 @@ export default function GitSyncPage() {
 
       const json = await res.json();
       if (res.status === 202) {
-        setMessage(`Conflicts detected. Resolution agent started (session ${json.data?.sessionId}).`);
-        showToast("success", "Conflict resolution agent started");
+        setMessage(t("pull.agentStarted", { sessionId: json.data?.sessionId }));
+        showToast("success", t("pull.agentStartedToast"));
         await refreshStatus();
         return;
       }
 
       if (res.status === 409 && json.conflicted) {
-        setError(json.error || "Merge conflicts detected");
-        showToast("error", "Merge conflicts detected");
+        setError(json.error || t("pull.conflicts"));
+        showToast("error", t("pull.conflicts"));
         setConflictDiffs(Array.isArray(json.conflictDiffs) ? json.conflictDiffs : []);
         return;
       }
@@ -289,17 +306,17 @@ export default function GitSyncPage() {
       }
 
       if (!res.ok) {
-        setError(json.error || "Pull failed");
-        showToast("error", json.error || "Pull failed");
+        setError(json.error || t("pull.failed"));
+        showToast("error", json.error || t("pull.failed"));
         return;
       }
 
-      setMessage("Pull completed successfully.");
-      showToast("success", "Pull completed successfully");
+      setMessage(t("pull.done"));
+      showToast("success", t("pull.doneToast"));
       await refreshStatus();
     } catch {
-      setError("Pull failed");
-      showToast("error", "Pull failed");
+      setError(t("pull.failed"));
+      showToast("error", t("pull.failed"));
     } finally {
       setPulling(false);
     }
@@ -327,17 +344,17 @@ export default function GitSyncPage() {
       }
 
       if (!res.ok) {
-        setError(json.error || "Push failed");
-        showToast("error", json.error || "Push failed");
+        setError(json.error || t("push.failed"));
+        showToast("error", json.error || t("push.failed"));
         return;
       }
 
-      setMessage("Push completed successfully.");
-      showToast("success", "Push completed successfully");
+      setMessage(t("push.done"));
+      showToast("success", t("push.doneToast"));
       await refreshStatus();
     } catch {
-      setError("Push failed");
-      showToast("error", "Push failed");
+      setError(t("push.failed"));
+      showToast("error", t("push.failed"));
     } finally {
       setPushing(false);
     }
@@ -355,21 +372,25 @@ export default function GitSyncPage() {
       ? fetchRemotes
       : pushRemotes;
 
-  const rows: Array<{ key: string; value: ReactNode }> = [
+  const rows: Array<{ id: string; label: string; value: ReactNode }> = [
     {
-      key: "Ahead",
-      value: `${ahead} commit${ahead === 1 ? "" : "s"}`,
+      id: "ahead",
+      label: t("status.ahead"),
+      value: t("status.commits", { count: ahead }),
     },
     {
-      key: "Behind",
-      value: `${behind} commit${behind === 1 ? "" : "s"}`,
+      id: "behind",
+      label: t("status.behind"),
+      value: t("status.commits", { count: behind }),
     },
     {
-      key: "Remote branch",
-      value: hasRemoteBranch ? "yes" : "no",
+      id: "remote-branch",
+      label: t("status.remoteBranch"),
+      value: hasRemoteBranch ? t("status.yes") : t("status.no"),
     },
     {
-      key: "Last fetch",
+      id: "last-fetch",
+      label: t("status.lastFetch"),
       value:
         lastFetchedAt !== null || lastFetchError ? (
           <Tooltip>
@@ -380,14 +401,16 @@ export default function GitSyncPage() {
                 }
               >
                 {lastFetchedAt !== null
-                  ? `Synced ${timeAgo(new Date(lastFetchedAt).toISOString())}`
-                  : "Never synced"}
+                  ? t("status.synced", {
+                      age: formatRelative(lastFetchedAt, { locale }),
+                    })
+                  : t("status.neverSynced")}
               </span>
             </TooltipTrigger>
             <TooltipContent>
               {lastFetchError
-                ? `Could not fetch from remote: ${lastFetchError}`
-                : "Last successful fetch from the remote"}
+                ? t("status.fetchError", { error: lastFetchError })
+                : t("status.lastFetchHint")}
             </TooltipContent>
           </Tooltip>
         ) : (
@@ -400,9 +423,9 @@ export default function GitSyncPage() {
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex flex-none items-start gap-[16px] px-[26px] pb-[18px] pt-[24px]">
         <div className="flex flex-col gap-[5px]">
-          <h2 className="text-[19px] font-semibold">Git Sync</h2>
+          <h2 className="text-[19px] font-semibold">{t("header.title")}</h2>
           <p className="text-[13px] text-muted-foreground">
-            Repository state and assisted conflict resolution.
+            {t("header.subtitle")}
           </p>
         </div>
         <div className="ml-auto flex items-center gap-[9px]">
@@ -417,7 +440,7 @@ export default function GitSyncPage() {
             ) : (
               <RefreshCw className="h-[14px] w-[14px]" />
             )}
-            Refresh
+            {t("header.refresh")}
           </Button>
         </div>
       </div>
@@ -446,7 +469,7 @@ export default function GitSyncPage() {
                   htmlFor="git-sync-remote"
                   className="text-[12px] text-muted-foreground"
                 >
-                  Remote
+                  {t("fields.remote")}
                 </label>
                 <Input
                   id="git-sync-remote"
@@ -460,7 +483,7 @@ export default function GitSyncPage() {
                   htmlFor="git-sync-branch"
                   className="text-[12px] text-muted-foreground"
                 >
-                  Branch
+                  {t("fields.branch")}
                 </label>
                 <Input
                   id="git-sync-branch"
@@ -474,14 +497,14 @@ export default function GitSyncPage() {
             <div className="flex flex-col">
               {rows.map((row, index) => (
                 <div
-                  key={row.key}
+                  key={row.id}
                   className={cn(
                     "flex items-center justify-between border-t border-border-soft py-[11px]",
                     index === rows.length - 1 && "border-b"
                   )}
                 >
                   <span className="text-[12.5px] text-muted-foreground">
-                    {row.key}
+                    {row.label}
                   </span>
                   <span className="text-[13px]">{row.value}</span>
                 </div>
@@ -496,7 +519,7 @@ export default function GitSyncPage() {
                   onChange={(e) => setAutoResolveConflicts(e.target.checked)}
                   className="h-[15px] w-[15px] accent-primary"
                 />
-                Auto-resolve pull conflicts with agent
+                {t("fields.autoResolve")}
               </label>
               <div className="ml-auto flex flex-wrap items-center gap-[9px]">
                 <NamedAgentSelect
@@ -531,35 +554,29 @@ export default function GitSyncPage() {
                   <TriangleAlert className="h-[15px] w-[15px] flex-none text-priority-yellow" />
                   <h3 className="text-[13.5px] font-semibold">
                     {remoteMissing
-                      ? "No remote to sync with"
+                      ? t("remoteMissing.titleBoth")
                       : fetchMissing
-                        ? "No remote to pull from"
-                        : "No remote to push to"}
+                        ? t("remoteMissing.titleFetch")
+                        : t("remoteMissing.titlePush")}
                   </h3>
                 </div>
                 <p className="text-[12.5px] leading-[1.55] text-muted-foreground">
-                  {remoteMissing ? (
-                    <>
-                      This repository has no remote named{" "}
-                      <span className="font-mono">{remote}</span>, so there is
-                      nothing to pull from or push to yet.
-                    </>
-                  ) : fetchMissing ? (
-                    <>
-                      Remote <span className="font-mono">{remote}</span> can
-                      push, but has no fetch URL, so Pull is unavailable.
-                    </>
-                  ) : (
-                    <>
-                      Remote <span className="font-mono">{remote}</span> has no
-                      push URL, so Push is unavailable.
-                    </>
-                  )}
+                  {remoteMissing
+                    ? t.rich("remoteMissing.bodyBoth", { remote, mono: monoTag })
+                    : fetchMissing
+                      ? t.rich("remoteMissing.bodyFetch", {
+                          remote,
+                          mono: monoTag,
+                        })
+                      : t.rich("remoteMissing.bodyPush", {
+                          remote,
+                          mono: monoTag,
+                        })}
                 </p>
                 {recoveryRemotes.length > 0 ? (
                   <div className="flex flex-wrap items-center gap-[9px]">
                     <span className="text-[12.5px] text-muted-foreground">
-                      Remotes available for this operation:
+                      {t("remoteMissing.available")}
                     </span>
                     {recoveryRemotes.map((name) => (
                       <Button
@@ -569,7 +586,7 @@ export default function GitSyncPage() {
                         className="h-[27px] rounded-[8px] px-[10px] font-mono text-[12px]"
                         onClick={() => setRemote(name)}
                       >
-                        Use {name}
+                        {t("remoteMissing.use", { remote: name })}
                       </Button>
                     ))}
                   </div>
@@ -578,7 +595,8 @@ export default function GitSyncPage() {
                     data-testid="git-remote-add-hint"
                     className="text-[12.5px] leading-[1.55] text-muted-foreground"
                   >
-                    Configure the remote from the repository, then refresh:{" "}
+                    {t("remoteMissing.configureHint")}{" "}
+                    {/* A shell command, not copy: it is typed verbatim. */}
                     <span className="font-mono">
                       {remoteMissing
                         ? `git remote add ${remote} <url>`
@@ -602,7 +620,7 @@ export default function GitSyncPage() {
                 ) : (
                   <ArrowDownToLine className="h-[14px] w-[14px]" />
                 )}
-                Pull
+                {t("actions.pull")}
               </Button>
               <Button
                 variant="outline"
@@ -615,7 +633,7 @@ export default function GitSyncPage() {
                 ) : (
                   <ArrowUpToLine className="h-[14px] w-[14px]" />
                 )}
-                Push
+                {t("actions.push")}
               </Button>
             </div>
 
@@ -643,7 +661,7 @@ export default function GitSyncPage() {
               <div className="flex items-center gap-[10px]">
                 <TriangleAlert className="h-[15px] w-[15px] flex-none text-destructive" />
                 <h3 className="text-[14px] font-semibold">
-                  Manual Conflict Review
+                  {t("conflicts.title")}
                 </h3>
               </div>
               {conflictDiffs.map((item) => (
@@ -652,7 +670,7 @@ export default function GitSyncPage() {
                     {item.filePath}
                   </div>
                   <div className="overflow-x-auto rounded-[10px] bg-band p-[14px] font-mono text-[11.5px] leading-[1.8]">
-                    {(item.diff || "No diff output available.")
+                    {(item.diff || t("conflicts.noDiff"))
                       .split("\n")
                       .map((line, index) => (
                         <div
@@ -678,7 +696,7 @@ export default function GitSyncPage() {
             data-testid="git-sync-worktrees"
           >
             <span className="text-[11.5px] uppercase tracking-[.08em] text-meta">
-              Agent worktrees
+              {t("worktrees.title")}
             </span>
 
             {worktreeError ? (
@@ -688,8 +706,8 @@ export default function GitSyncPage() {
             ) : worktrees.length === 0 ? (
               <span className="text-[13px] leading-[1.55] text-muted-foreground">
                 {worktreesLoading
-                  ? "Reading worktrees…"
-                  : "No agent worktrees right now."}
+                  ? t("worktrees.loading")
+                  : t("worktrees.empty")}
               </span>
             ) : (
               <div className="flex flex-col">
@@ -701,7 +719,7 @@ export default function GitSyncPage() {
                   >
                     <div className="flex min-w-0 flex-col gap-[2px]">
                       <span className="truncate font-mono text-[12px]">
-                        {worktree.branch ?? "(detached)"}
+                        {worktree.branch ?? t("worktrees.detached")}
                       </span>
                       {worktree.epicReadableId && (
                         <span className="font-mono text-[11px] text-meta">
@@ -715,7 +733,7 @@ export default function GitSyncPage() {
                         WORKTREE_STATE_TONE[worktree.state]
                       )}
                     >
-                      {WORKTREE_STATE_LABELS[worktree.state]}
+                      {tKey(WORKTREE_STATE_LABEL_KEYS[worktree.state])}
                     </span>
                   </div>
                 ))}
@@ -730,19 +748,17 @@ export default function GitSyncPage() {
               className="self-start text-[12.5px] text-primary hover:underline disabled:cursor-not-allowed disabled:text-meta disabled:no-underline"
             >
               {orphanCount > 0
-                ? `Clean orphan worktrees (${orphanCount})`
-                : "Clean orphan worktrees"}
+                ? t("worktrees.pruneCount", { count: orphanCount })
+                : t("worktrees.prune")}
             </button>
           </div>
 
           <div className="flex flex-col gap-[10px] rounded-[12px] border border-border p-[18px]">
             <span className="text-[11.5px] uppercase tracking-[.08em] text-meta">
-              arji.json sync
+              {t("arji.title")}
             </span>
             <span className="text-[13.5px] leading-[1.55] text-muted-foreground">
-              The board is also a versioned file. Importing it overwrites the
-              local database — run it from the sync action in the project
-              header.
+              {t("arji.body")}
             </span>
           </div>
         </aside>

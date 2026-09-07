@@ -7,6 +7,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { createTranslator } from "next-intl";
 
 import {
   citedDocuments,
@@ -14,8 +15,17 @@ import {
   mentionedNames,
   tokensOf,
 } from "@/components/chat-page/chat-context-tokens";
-import { relativeAge } from "@/components/chat-page/relative-age";
 import { shortPlacement } from "@/components/chat-page/placement";
+import { messagesFor } from "@/lib/i18n";
+import { formatRelative } from "@/lib/i18n/format";
+
+/**
+ * The rail's note is composed outside React from full dotted KEY REFERENCES,
+ * so `shortPlacement` takes the NAMESPACE-LESS translator as an argument
+ * (lib/i18n/catalogue.ts) — here a bare `createTranslator` over the same
+ * catalogue the page reads through `useTranslations()`.
+ */
+const t = createTranslator({ locale: "en", messages: messagesFor("en") });
 
 const NOW = Date.parse("2026-08-30T12:00:00.000Z");
 
@@ -23,30 +33,42 @@ function ago(ms: number): string {
   return new Date(NOW - ms).toISOString();
 }
 
-describe("relativeAge", () => {
+/**
+ * The roster's age is the shared `formatRelative` now (the local French
+ * `relativeAge` is gone). Under the French seed it prints the same
+ * `il y a 4 min` / `il y a 3 h` / `à l'instant` as before; the ONE deliberate
+ * change is the day band, where the roster used to say `hier` / `3d` while
+ * every other screen said `il y a 1 j` / `2d ago` — one family, one shape.
+ */
+describe("roster age (formatRelative, fr)", () => {
+  const fr = (iso: string | null) => formatRelative(iso, { locale: "fr", now: NOW });
+
   it("prints the frame's own shapes", () => {
-    expect(relativeAge(ago(4 * 60_000), NOW)).toBe("il y a 4 min");
-    expect(relativeAge(ago(26 * 3_600_000), NOW)).toBe("hier");
-    expect(relativeAge(ago(3 * 86_400_000), NOW)).toBe("3d");
+    expect(fr(ago(4 * 60_000))).toBe("il y a 4 min");
+    expect(fr(ago(26 * 3_600_000))).toBe("il y a 1 j");
+    expect(fr(ago(3 * 86_400_000))).toBe("il y a 3 j");
   });
 
   it("degrades to `à l'instant` under a minute", () => {
-    expect(relativeAge(ago(5_000), NOW)).toBe("à l'instant");
+    expect(fr(ago(5_000))).toBe("à l'instant");
   });
 
   it("says hours between one hour and one day", () => {
-    expect(relativeAge(ago(3 * 3_600_000), NOW)).toBe("il y a 3 h");
+    expect(fr(ago(3 * 3_600_000))).toBe("il y a 3 h");
   });
 
   it("treats clock skew as `just now`, never a negative age", () => {
-    expect(relativeAge(new Date(NOW + 30_000).toISOString(), NOW)).toBe(
-      "à l'instant",
-    );
+    expect(fr(new Date(NOW + 30_000).toISOString())).toBe("à l'instant");
   });
 
-  it("returns null — an em-dash upstream — for a timestamp it cannot read", () => {
-    expect(relativeAge(null, NOW)).toBeNull();
-    expect(relativeAge("not a date", NOW)).toBeNull();
+  it("is empty — an em-dash upstream — for a timestamp it cannot read", () => {
+    expect(fr(null)).toBe("");
+    expect(fr("not a date")).toBe("");
+  });
+
+  it("prints the English family under en", () => {
+    expect(formatRelative(ago(4 * 60_000), { locale: "en", now: NOW })).toBe("4m ago");
+    expect(formatRelative(ago(3 * 86_400_000), { locale: "en", now: NOW })).toBe("3d ago");
   });
 });
 
@@ -116,11 +138,11 @@ describe("which documents a conversation cites", () => {
 
 describe("the rail's short placement", () => {
   it("prints the frame's `To Do #4` and `Backlog`", () => {
-    expect(shortPlacement("todo", 4)).toBe("To Do #4");
-    expect(shortPlacement("backlog", null)).toBe("Backlog");
+    expect(shortPlacement("todo", 4, t)).toBe("To Do #4");
+    expect(shortPlacement("backlog", null, t)).toBe("Backlog");
   });
 
   it("is null — an em-dash — when nothing resolved", () => {
-    expect(shortPlacement(null, null)).toBeNull();
+    expect(shortPlacement(null, null, t)).toBeNull();
   });
 });

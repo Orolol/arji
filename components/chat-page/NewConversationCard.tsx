@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { Plus } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import {
   DropdownMenu,
@@ -35,6 +36,8 @@ export function NewConversationCard({
   onCreate,
   disabled = false,
 }: NewConversationCardProps) {
+  const t = useTranslations("Chat");
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -53,20 +56,26 @@ export function NewConversationCard({
           ].join(" ")}
         >
           <Plus size={14} aria-hidden="true" />
-          New conversation
+          {t("roster.newConversation")}
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="start"
         className="rounded-[12px] border-[1.5px] border-border bg-card shadow-none"
       >
+        {/*
+          The `label` in each payload is NOT copy: it is written to
+          `chat_conversations.label` and read back by every surface that lists
+          the row, so it stays a literal (persisted text — see the exclusions
+          in lib/i18n/catalogue.ts). Only the visible menu entry is a key.
+        */}
         <DropdownMenuItem
           data-testid="chat-new-conversation-brainstorm"
           onSelect={() =>
             onCreate({ type: BRAINSTORM_AGENT_TYPE, label: "Brainstorm" })
           }
         >
-          Brainstorm
+          {t("roster.newBrainstorm")}
         </DropdownMenuItem>
         <DropdownMenuItem
           data-testid="chat-new-conversation-epic"
@@ -74,7 +83,7 @@ export function NewConversationCard({
             onCreate({ type: EPIC_CREATION_AGENT_TYPE, label: "New Epic" })
           }
         >
-          New Epic
+          {t("roster.newEpic")}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

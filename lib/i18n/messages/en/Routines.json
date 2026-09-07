@@ -1,0 +1,61 @@
+{
+  "page": {
+    "title": "Project settings",
+    "subtitle": "Configure server-owned automation for this project.",
+    "refresh": "Refresh",
+    "addRoutine": "Add routine",
+    "routinesTab": "Routines",
+    "loading": "Loading routines…"
+  },
+  "section": {
+    "heading": "Scheduled routines",
+    "timezoneNote": "Daily times use the Arij server's local timezone, not the browser's timezone. The in-process scheduler must be running for routines to trigger.",
+    "timezoneNoteZoned": "Daily times use the Arij server's local timezone ({timezone}), not the browser's timezone. The in-process scheduler must be running for routines to trigger.",
+    "availableKinds": "Available kinds: {kinds}. Unavailable kinds are hidden until their scheduler integration ships."
+  },
+  "autofix": {
+    "label": "Enable CI autofix",
+    "description": "Off by default. When enabled, a newly failing PR head may queue one normal fix session after CI watch sends its notification."
+  },
+  "empty": {
+    "title": "No routines configured",
+    "description": "Existing manual and automated paths are unchanged until you add and enable a routine."
+  },
+  "editor": {
+    "newRoutine": "New routine",
+    "enableAria": "Enable {label}",
+    "deleteAria": "Delete {label}",
+    "routineFallback": "routine",
+    "enabled": "Enabled",
+    "kind": "Kind",
+    "dailyTime": "Daily time",
+    "ciWatchTimeNote": "CI watch uses its interval; this time is retained but not used.",
+    "configuration": "Configuration (JSON)",
+    "configHintNightRun": "Supports includeBacklog, failurePolicy, circuitBreaker, costCapUsd and namedAgentId.",
+    "configHintGithubIssueSync": "intervalMinutes is a freshness TTL; the selected daily time remains the schedule.",
+    "configHintRetention": "maxDeletedChunks bounds one run; vacuum allows the one-off reclaim after the first prune. The window itself is the session_chunk_retention_days setting.",
+    "configHintInterval": "intervalMinutes sets the polling cadence and must be a positive integer.",
+    "scheduledTomorrow": "Saved after today's {time} slot — first run scheduled for tomorrow ({timezone}).",
+    "lastRun": "Last run: {time}",
+    "lastRunNever": "Never run",
+    "status": "Status: {status}",
+    "statusNotRun": "Not run",
+    "create": "Create routine",
+    "save": "Save changes",
+    "cancel": "Cancel",
+    "confirmDelete": "Confirm delete",
+    "delete": "Delete",
+    "created": "Routine created.",
+    "saved": "Routine saved."
+  },
+  "errors": {
+    "configNotJson": "Configuration must be valid JSON.",
+    "configNotObject": "Configuration must be a JSON object.",
+    "invalidConfig": "Invalid configuration.",
+    "save": "Failed to save routine.",
+    "update": "Failed to update routine.",
+    "delete": "Failed to delete routine.",
+    "load": "Failed to load routines.",
+    "autofix": "Failed to update CI autofix."
+  }
+}

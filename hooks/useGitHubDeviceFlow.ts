@@ -24,6 +24,7 @@
  *   the same refusal.
  */
 
+import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 
 import type { GitHubOAuthMeta } from "@/lib/github/oauth-meta";
@@ -52,16 +53,26 @@ const MIN_POLL_INTERVAL_SECONDS = 1;
  */
 const DEFAULT_EXPIRES_IN_SECONDS = 900;
 
-const EXPIRED_MESSAGE =
-  "Ce code a expiré. Relancez la connexion pour en obtenir un nouveau.";
-const UNREADABLE_START_MESSAGE =
-  "GitHub n'a pas renvoyé de code utilisable. Réessayez.";
-const UNREADABLE_POLL_MESSAGE =
-  "GitHub a confirmé la connexion mais la réponse est illisible. Réessayez.";
-const UNREACHABLE_MESSAGE =
-  "Connexion à Arij impossible. Vérifiez que le serveur tourne, puis réessayez.";
-const FALLBACK_POLL_MESSAGE =
-  "La connexion GitHub a échoué. Réessayez.";
+/**
+ * The five sentences a failed sign-in can end on.
+ *
+ * They used to be module-scope string constants, which is exactly the shape
+ * that cannot call a translator: the poll helpers below run outside React, on
+ * a timer, long after any render. So the HOOK resolves all five once (it is a
+ * hook, it may call `useTranslations`) and hands them down the `PollContext`
+ * — `lib/i18n/catalogue.ts`, the "copy composed outside React takes a
+ * translator's output as an argument" rule.
+ *
+ * `state.message` therefore stays a plain resolved string, and `GitHubCard`
+ * keeps rendering it unchanged.
+ */
+interface DeviceFlowCopy {
+  expired: string;
+  unreadableStart: string;
+  unreadablePoll: string;
+  unreachable: string;
+  fallbackPoll: string;
+}
 
 /**
  * What the card renders.
@@ -140,6 +151,8 @@ interface PollContext {
   handle: string;
   /** Epoch ms after which the device code is dead, whatever GitHub says. */
   deadline: number;
+  /** Resolved by the hook; these helpers never resolve copy themselves. */
+  copy: DeviceFlowCopy;
   isCurrent: () => boolean;
   setTimer: (timer: ReturnType<typeof setTimeout>) => void;
   setState: (state: DeviceFlowState) => void;
@@ -215,7 +228,7 @@ async function runPollTick(
     context.setState({
       status: "failed",
       code: "DEVICE_FLOW_EXPIRED",
-      message: EXPIRED_MESSAGE,
+      message: context.copy.expired,
     });
     return;
   }
@@ -242,7 +255,7 @@ async function runPollTick(
       intervalSeconds,
       transientFailures,
       "NETWORK_ERROR",
-      UNREACHABLE_MESSAGE
+      context.copy.unreachable
     );
     return;
   }
@@ -259,7 +272,7 @@ async function runPollTick(
         context.setState({
           status: "failed",
           code: "MALFORMED_RESPONSE",
-          message: UNREADABLE_POLL_MESSAGE,
+          message: context.copy.unreadablePoll,
         });
         return;
       }
@@ -278,7 +291,7 @@ async function runPollTick(
   }
 
   const code = readString(payload, "code") || `HTTP_${status}`;
-  const message = readString(payload, "error") || FALLBACK_POLL_MESSAGE;
+  const message = readString(payload, "error") || context.copy.fallbackPoll;
 
   // 503 is the ONE refusal a flow survives: GitHub was unreachable for this
   // tick and the device code is still good. 410 (expired), 403 (denied), 404
@@ -305,6 +318,18 @@ export function useGitHubDeviceFlow(
   onConnected: (meta: GitHubOAuthMeta) => void
 ): GitHubDeviceFlow {
   const [state, setState] = useState<DeviceFlowState>({ status: "idle" });
+
+  // Resolved here, at the one point in this module that is allowed to: the
+  // poll helpers below run on a timer, outside React, and take these strings
+  // on their `PollContext` instead of reaching for a translator.
+  const t = useTranslations("Github");
+  const copy: DeviceFlowCopy = {
+    expired: t("deviceFlow.expired"),
+    unreadableStart: t("deviceFlow.unreadableStart"),
+    unreadablePoll: t("deviceFlow.unreadablePoll"),
+    unreachable: t("deviceFlow.unreachable"),
+    fallbackPoll: t("deviceFlow.fallbackPoll"),
+  };
 
   // Bumped by every start, cancel and unmount. A tick or an in-flight `start`
   // compares against the value it captured; a mismatch means "you are the
@@ -370,7 +395,7 @@ export function useGitHubDeviceFlow(
       write({
         status: "failed",
         code: "NETWORK_ERROR",
-        message: UNREACHABLE_MESSAGE,
+        message: copy.unreachable,
       });
       return;
     }
@@ -384,7 +409,7 @@ export function useGitHubDeviceFlow(
       write({
         status: "failed",
         code: readString(payload, "code") || "DEVICE_FLOW_START_FAILED",
-        message: readString(payload, "error") || UNREADABLE_START_MESSAGE,
+        message: readString(payload, "error") || copy.unreadableStart,
       });
       return;
     }
@@ -398,7 +423,7 @@ export function useGitHubDeviceFlow(
       write({
         status: "failed",
         code: "MALFORMED_RESPONSE",
-        message: UNREADABLE_START_MESSAGE,
+        message: copy.unreadableStart,
       });
       return;
     }
@@ -413,6 +438,7 @@ export function useGitHubDeviceFlow(
       {
         handle,
         deadline: Date.now() + expiresIn * 1000,
+        copy,
         isCurrent,
         setTimer: (timer) => {
           if (isCurrent()) timerRef.current = timer;

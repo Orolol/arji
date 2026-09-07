@@ -33,10 +33,22 @@
  *
  * This module is imported by client components, so it must stay free of node
  * built-ins and of any import that pulls in `child_process` or the database.
+ *
+ * NO COPY IN THIS FILE. Every label, hint and choice name is a catalogue KEY
+ * REFERENCE (`labelKey` / `hintKey`), resolved where it is drawn with the
+ * namespace-less translator — `useTranslations()` in the CLI OPTIONS band and
+ * on the session card — per pattern 3 in `lib/i18n/catalogue.ts`. This table
+ * is evaluated at import time and read by pure logic (`toArgs`, the spawn
+ * paths, the tests) that never renders text, which is exactly why it cannot
+ * hold a `t()` call and must not hold a string.
  */
 
 import { isCodeProducingAgentType } from "@/lib/agent-config/constants";
+import type { TranslationKey } from "@/lib/i18n/catalogue";
+import enProviderOptions from "@/lib/i18n/messages/en/ProviderOptions.json";
 import type { ProviderType } from "./types";
+
+type ProviderOptionKey = Extract<TranslationKey, `ProviderOptions.${string}`>;
 
 export type ProviderOptionType = "select" | "bool" | "number" | "text";
 
@@ -48,14 +60,17 @@ export type NamedAgentCliOptions = Record<string, ProviderOptionValue>;
 
 export interface ProviderOptionChoice {
   value: string;
-  label: string;
+  /** Catalogue key of the visible name — `t(choice.labelKey)` at render. */
+  labelKey: ProviderOptionKey;
 }
 
 export interface ProviderOptionDefinition {
   /** Stable storage key. Never renamed — it is persisted per agent. */
   key: string;
-  label: string;
-  hint: string;
+  /** Catalogue key of the option's visible name. */
+  labelKey: ProviderOptionKey;
+  /** Catalogue key of the sentence the band shows on hover. */
+  hintKey: ProviderOptionKey;
   type: ProviderOptionType;
   /**
    * The value that means "leave it to the CLI". A stored value equal to the
@@ -97,13 +112,25 @@ export interface ProviderOptionDefinition {
   codeProducingOnly?: boolean;
 }
 
+/**
+ * The effort ladder, shared by every CLI that has one. A provider offering a
+ * subset (agy stops at `high`) slices this list rather than restating it, so
+ * the five words exist once in the catalogue.
+ */
 const EFFORT_CHOICES: ProviderOptionChoice[] = [
-  { value: "low", label: "Low" },
-  { value: "medium", label: "Medium" },
-  { value: "high", label: "High" },
-  { value: "xhigh", label: "Extra high" },
-  { value: "max", label: "Max" },
+  { value: "low", labelKey: "ProviderOptions.effort.low" },
+  { value: "medium", labelKey: "ProviderOptions.effort.medium" },
+  { value: "high", labelKey: "ProviderOptions.effort.high" },
+  { value: "xhigh", labelKey: "ProviderOptions.effort.xhigh" },
+  { value: "max", labelKey: "ProviderOptions.effort.max" },
 ];
+
+/** `low` … `high` — every level agy accepts, and codex's first four. */
+const effortChoicesUpTo = (last: string): ProviderOptionChoice[] =>
+  EFFORT_CHOICES.slice(
+    0,
+    EFFORT_CHOICES.findIndex((choice) => choice.value === last) + 1,
+  );
 
 /**
  * Claude Code's permission modes that are SAFE for a headless, allowlisted
@@ -134,18 +161,24 @@ const EFFORT_CHOICES: ProviderOptionChoice[] = [
  * relative to Arij's bypassPermissions default.
  */
 const CLAUDE_PERMISSION_MODES: ProviderOptionChoice[] = [
-  { value: "acceptEdits", label: "Accept edits" },
-  { value: "auto", label: "Auto" },
-  { value: "bypassPermissions", label: "Bypass permissions" },
-  { value: "manual", label: "Manual" },
-  { value: "dontAsk", label: "Don't ask" },
+  {
+    value: "acceptEdits",
+    labelKey: "ProviderOptions.claudeCode.permissionMode.choices.acceptEdits",
+  },
+  { value: "auto", labelKey: "ProviderOptions.claudeCode.permissionMode.choices.auto" },
+  {
+    value: "bypassPermissions",
+    labelKey: "ProviderOptions.claudeCode.permissionMode.choices.bypassPermissions",
+  },
+  { value: "manual", labelKey: "ProviderOptions.claudeCode.permissionMode.choices.manual" },
+  { value: "dontAsk", labelKey: "ProviderOptions.claudeCode.permissionMode.choices.dontAsk" },
 ];
 
 const CLAUDE_CODE_OPTIONS: ProviderOptionDefinition[] = [
   {
     key: "effort",
-    label: "Effort",
-    hint: "How much thinking Claude Code puts into each turn. Empty uses the CLI's own default.",
+    labelKey: "ProviderOptions.claudeCode.effort.label",
+    hintKey: "ProviderOptions.claudeCode.effort.hint",
     type: "select",
     default: "",
     choices: EFFORT_CHOICES,
@@ -153,8 +186,8 @@ const CLAUDE_CODE_OPTIONS: ProviderOptionDefinition[] = [
   },
   {
     key: "permission_mode",
-    label: "Permission mode",
-    hint: "Applies to code-producing sessions (build, ticket build, team build). Reviews, grading and every read-only session keep the posture their tool channel needs.",
+    labelKey: "ProviderOptions.claudeCode.permissionMode.label",
+    hintKey: "ProviderOptions.claudeCode.permissionMode.hint",
     type: "select",
     default: "",
     choices: CLAUDE_PERMISSION_MODES,
@@ -169,24 +202,19 @@ const CLAUDE_CODE_OPTIONS: ProviderOptionDefinition[] = [
 const CODEX_OPTIONS: ProviderOptionDefinition[] = [
   {
     key: "reasoning_effort",
-    label: "Reasoning effort",
-    hint: "Codex's reasoning budget. Empty uses the model's own default.",
+    labelKey: "ProviderOptions.codex.reasoningEffort.label",
+    hintKey: "ProviderOptions.codex.reasoningEffort.hint",
     type: "select",
     default: "",
-    choices: [
-      { value: "low", label: "Low" },
-      { value: "medium", label: "Medium" },
-      { value: "high", label: "High" },
-      { value: "xhigh", label: "Extra high" },
-    ],
+    choices: effortChoicesUpTo("xhigh"),
     // codex has no dedicated flag; the documented path is a config override,
     // and `-c` is accepted by both `codex exec` and `codex exec resume`.
     toArgs: (value) => ["-c", `model_reasoning_effort=${String(value)}`],
   },
   {
     key: "profile",
-    label: "Config profile",
-    hint: "Layers $CODEX_HOME/<name>.config.toml over the base config. Empty uses no profile.",
+    labelKey: "ProviderOptions.codex.profile.label",
+    hintKey: "ProviderOptions.codex.profile.hint",
     type: "text",
     default: "",
     pattern: /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/,
@@ -199,26 +227,22 @@ const CODEX_OPTIONS: ProviderOptionDefinition[] = [
 const OH_MY_PI_OPTIONS: ProviderOptionDefinition[] = [
   {
     key: "thinking",
-    label: "Thinking",
-    hint: "Oh My Pi's thinking level. Empty uses the CLI's own default.",
+    labelKey: "ProviderOptions.ohMyPi.thinking.label",
+    hintKey: "ProviderOptions.ohMyPi.thinking.hint",
     type: "select",
     default: "",
     choices: [
-      { value: "off", label: "Off" },
-      { value: "minimal", label: "Minimal" },
-      { value: "low", label: "Low" },
-      { value: "medium", label: "Medium" },
-      { value: "high", label: "High" },
-      { value: "xhigh", label: "Extra high" },
-      { value: "max", label: "Max" },
-      { value: "auto", label: "Auto" },
+      { value: "off", labelKey: "ProviderOptions.ohMyPi.thinking.choices.off" },
+      { value: "minimal", labelKey: "ProviderOptions.ohMyPi.thinking.choices.minimal" },
+      ...EFFORT_CHOICES,
+      { value: "auto", labelKey: "ProviderOptions.ohMyPi.thinking.choices.auto" },
     ],
     toArgs: (value) => ["--thinking", String(value)],
   },
   {
     key: "max_time",
-    label: "Time limit (seconds)",
-    hint: "Stops the session after this many seconds. Empty lets Arij's watchdog own the timing.",
+    labelKey: "ProviderOptions.ohMyPi.maxTime.label",
+    hintKey: "ProviderOptions.ohMyPi.maxTime.hint",
     type: "number",
     default: 0,
     min: 30,
@@ -227,8 +251,8 @@ const OH_MY_PI_OPTIONS: ProviderOptionDefinition[] = [
   },
   {
     key: "advisor",
-    label: "Advisor",
-    hint: "Runs Oh My Pi's advisor, which passively reviews each turn and injects notes.",
+    labelKey: "ProviderOptions.ohMyPi.advisor.label",
+    hintKey: "ProviderOptions.ohMyPi.advisor.hint",
     type: "bool",
     default: false,
     toArgs: () => ["--advisor"],
@@ -238,15 +262,11 @@ const OH_MY_PI_OPTIONS: ProviderOptionDefinition[] = [
 const AGY_OPTIONS: ProviderOptionDefinition[] = [
   {
     key: "effort",
-    label: "Reasoning effort",
-    hint: "Antigravity's reasoning effort. Empty uses the CLI's own default.",
+    labelKey: "ProviderOptions.agy.effort.label",
+    hintKey: "ProviderOptions.agy.effort.hint",
     type: "select",
     default: "",
-    choices: [
-      { value: "low", label: "Low" },
-      { value: "medium", label: "Medium" },
-      { value: "high", label: "High" },
-    ],
+    choices: effortChoicesUpTo("high"),
     toArgs: (value) => ["--effort", String(value)],
   },
 ];
@@ -308,37 +328,56 @@ export interface ProviderOptionValidation {
   errors: string[];
 }
 
+/**
+ * The option's name for a VALIDATION MESSAGE, resolved against the source
+ * language and nothing else.
+ *
+ * These strings leave through an API route, so they are the "persisted /
+ * server-generated text" the catalogue header keeps out of the interface
+ * locale (lib/i18n/catalogue.ts, rule 5): the route answers a POST, not a
+ * render, and has no request locale to honour. The copy still lives in the
+ * catalogue — only the resolution is pinned here.
+ */
+function optionLabel(definition: ProviderOptionDefinition): string {
+  // Validation is pinned to English; import only this namespace so UI callers
+  // of the registry do not bundle every locale alongside the provider payload.
+  return definition.labelKey.split(".").slice(1).reduce<unknown>(
+    (node, part) => (node as Record<string, unknown>)[part], enProviderOptions,
+  ) as string;
+}
+
 function validateOne(
   definition: ProviderOptionDefinition,
   raw: unknown,
 ): { value?: ProviderOptionValue; error?: string } {
+  const label = optionLabel(definition);
   switch (definition.type) {
     case "bool": {
       if (typeof raw !== "boolean") {
-        return { error: `${definition.label} must be true or false` };
+        return { error: `${label} must be true or false` };
       }
       return { value: raw };
     }
     case "number": {
       const numeric = typeof raw === "string" ? Number(raw) : raw;
       if (typeof numeric !== "number" || !Number.isFinite(numeric)) {
-        return { error: `${definition.label} must be a number` };
+        return { error: `${label} must be a number` };
       }
       if (!Number.isInteger(numeric)) {
-        return { error: `${definition.label} must be a whole number` };
+        return { error: `${label} must be a whole number` };
       }
       const min = definition.min ?? Number.NEGATIVE_INFINITY;
       const max = definition.max ?? Number.POSITIVE_INFINITY;
       if (numeric < min || numeric > max) {
         return {
-          error: `${definition.label} must be between ${min} and ${max}`,
+          error: `${label} must be between ${min} and ${max}`,
         };
       }
       return { value: numeric };
     }
     case "select": {
       if (typeof raw !== "string") {
-        return { error: `${definition.label} must be one of the offered values` };
+        return { error: `${label} must be one of the offered values` };
       }
       const allowed = definition.choices?.some((choice) => choice.value === raw);
       if (!allowed) {
@@ -346,18 +385,18 @@ function validateOne(
           .map((choice) => choice.value)
           .join(", ");
         return {
-          error: `${definition.label} must be one of: ${values}`,
+          error: `${label} must be one of: ${values}`,
         };
       }
       return { value: raw };
     }
     case "text": {
       if (typeof raw !== "string") {
-        return { error: `${definition.label} must be text` };
+        return { error: `${label} must be text` };
       }
       const trimmed = raw.trim();
       if (definition.pattern && !definition.pattern.test(trimmed)) {
-        return { error: `${definition.label} has an unsupported value` };
+        return { error: `${label} has an unsupported value` };
       }
       return { value: trimmed };
     }
@@ -538,15 +577,41 @@ export function resolveClaudePermissionMode(
   return known ? chosen : derived;
 }
 
+/** `on` / `off`, the two words a boolean option reads as in the audit trail. */
+const BOOL_VALUE_KEYS: { onKey: TranslationKey; offKey: TranslationKey } = {
+  onKey: "ProviderOptions.bool.on",
+  offKey: "ProviderOptions.bool.off",
+};
+
 /**
- * Human-readable "options in effect" pairs for a session detail view.
+ * One "option in effect" row, as KEY REFERENCES plus the raw text to print
+ * when there is no catalogue word for it.
+ *
+ * A row keeps its `fallback*` half because an option REMOVED from the
+ * registry still has to read sensibly on an old session row: its key and its
+ * stored value are all the trace has, and they are data, not copy.
+ */
+export interface DescribedProviderOption {
+  key: string;
+  /** Catalogue key of the option's name; null once the registry drops it. */
+  labelKey: ProviderOptionKey | null;
+  /** The storage key, printed when there is no catalogue name. */
+  fallbackLabel: string;
+  /** Catalogue key of the value's word (a choice, or on/off); null for data. */
+  valueKey: TranslationKey | null;
+  /** The stored value as text, printed when there is no catalogue word. */
+  fallbackValue: string;
+}
+
+/**
+ * The "options in effect" rows for a session detail view.
  * Unknown keys are kept verbatim so an option removed from the registry
  * still reads sensibly on an old session row.
  */
 export function describeProviderOptions(
   provider: string | null | undefined,
   options: NamedAgentCliOptions | null | undefined,
-): Array<{ key: string; label: string; value: string }> {
+): DescribedProviderOption[] {
   if (!options) return [];
   const definitions = getProviderOptionDefinitions(provider);
   const byKey = new Map(definitions.map((d) => [d.key, d]));
@@ -554,20 +619,28 @@ export function describeProviderOptions(
   return Object.entries(options).map(([key, value]) => {
     const definition = byKey.get(key);
     if (!definition) {
-      return { key, label: key, value: String(value) };
+      return {
+        key,
+        labelKey: null,
+        fallbackLabel: key,
+        valueKey: null,
+        fallbackValue: String(value),
+      };
     }
     const choice = definition.choices?.find(
       (candidate) => candidate.value === String(value),
     );
     return {
       key,
-      label: definition.label,
-      value:
+      labelKey: definition.labelKey,
+      fallbackLabel: key,
+      valueKey:
         definition.type === "bool"
           ? value
-            ? "on"
-            : "off"
-          : (choice?.label ?? String(value)),
+            ? BOOL_VALUE_KEYS.onKey
+            : BOOL_VALUE_KEYS.offKey
+          : (choice?.labelKey ?? null),
+      fallbackValue: String(value),
     };
   });
 }

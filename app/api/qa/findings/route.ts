@@ -33,12 +33,15 @@ import {
   deriveVerdicts,
   rubricItemsFromChecklist,
   severityOf,
+  type QaVerdictCopy,
   stripSeverityPrefix,
   type QaFilingCounts,
   type QaSessionRow,
   type QaVerdictEpic,
   type QaVerdictSessionRow,
 } from "@/lib/qa/aggregate";
+import { resolveUiLocaleForRequest } from "@/lib/i18n/resolve-request-locale";
+import { translatorFor } from "@/lib/i18n/translator";
 import {
   QA_CHECK_LIMIT,
   QA_CHECK_SUMMARY_LIMIT,
@@ -150,7 +153,7 @@ function emptyPayload(now: Date): QaPayload {
   };
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   const queryStartedAt = Date.now();
   const now = new Date();
   const verdictCutoff = cutoff(now, QA_VERDICT_DAYS);
@@ -597,6 +600,27 @@ export async function GET() {
       status: row.status ?? "",
     }));
 
+  /* The verdict lines are composed here rather than in `lib/qa/aggregate.ts`:
+     the derivation is pure and this handler is the thing that knows the
+     locale. `lib/i18n/catalogue.ts` calls this the API-route exception.
+
+     The locale comes from THIS REQUEST, never from `next/headers`:
+     `resolveRequestUiLocale()` reads the ambient request scope, which a route
+     unit test does not enter — it fails with "`headers` was called outside a
+     request scope". `resolveUiLocaleForRequest` exists for exactly this, and
+     `app/api/tickets/route.ts` takes the same shape. */
+  const t = translatorFor(resolveUiLocaleForRequest(request), "Qa");
+  const verdictCopy: QaVerdictCopy = {
+    unverifiable: t("verdicts.unverifiable"),
+    changesRequested: (count) => t("verdicts.changesRequested", { count }),
+    cleanNoFindings: t("verdicts.cleanNoFindings"),
+    cleanWithFindings: (count) => t("verdicts.cleanWithFindings", { count }),
+    noStructuredVerdict: t("verdicts.noStructuredVerdict"),
+    outcomeLanded: t("verdicts.outcomeLanded"),
+    outcomeReady: t("verdicts.outcomeReady"),
+    outcomeYourTurn: t("verdicts.outcomeYourTurn"),
+  };
+
   const payload: QaPayload = {
     generatedAt: now.toISOString(),
     // Reused, never re-derived: project identity colour is the position in
@@ -606,7 +630,7 @@ export async function GET() {
     runs: deriveRuns(reviewRows, filingCounts),
     queued: deriveQueued(reviewRows),
     findings,
-    verdicts: deriveVerdicts(verdictSessions, verdictEpics, unverifiableEpicIds),
+    verdicts: deriveVerdicts(verdictSessions, verdictEpics, unverifiableEpicIds, verdictCopy),
     rubric: {
       items: rubricItemsFromChecklist(REVIEW_CHECKLISTS.feature_review),
       projectRuleCount: Number(projectRules?.rules ?? 0),

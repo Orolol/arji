@@ -215,7 +215,7 @@ describe("GIT band", () => {
     renderSubject();
     expect(screen.getByText("arij/arj-122-sse-logs")).toBeInTheDocument();
     expect(screen.getByTestId("ticket-diffstat")).toHaveTextContent(
-      "worktree isolé",
+      "isolated worktree",
     );
   });
 
@@ -233,11 +233,11 @@ describe("GIT band", () => {
     renderSubject();
     // Before the deferred fetch lands.
     expect(screen.getByTestId("ticket-diffstat")).toHaveTextContent(
-      "— · — files · worktree isolé",
+      "— · — files · isolated worktree",
     );
     await waitFor(() =>
       expect(screen.getByTestId("ticket-diffstat")).toHaveTextContent(
-        "+3−1 · 2 files · worktree isolé",
+        "+3−1 · 2 files · isolated worktree",
       ),
     );
   });

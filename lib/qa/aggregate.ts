@@ -418,20 +418,36 @@ export interface QaVerdictEpic {
 }
 
 /**
- * The short reason an unverifiable review row prints.
+ * The sentences a verdict row can print, resolved by the caller.
  *
- * NOT `UNVERIFIABLE_REVIEW_REASON` (`lib/pipeline/findings.ts`): that sentence
- * is written for a prompt and does not fit a 12.5px row. The frame's own
- * "tests timeout" was sample data and would be a lie — the rule is about a
- * `submit_findings` call that never landed, not about tests.
+ * THIS MODULE HOLDS NO COPY. It is a pure derivation that the QA route calls
+ * per request, so it takes the RESOLVED PHRASES rather than a translator —
+ * `lib/i18n/catalogue.ts`, pattern 3. The route is the one that knows the
+ * locale (`translatorFor(resolveUiLocaleForRequest(request), "Qa")`), and the
+ * key literals stay at a real call site where the coverage gate can see them.
+ *
+ * The unverifiable line is NOT `UNVERIFIABLE_REVIEW_REASON`
+ * (`lib/pipeline/findings.ts`): that sentence is written for a prompt and does
+ * not fit a 12.5px row. The frame's own "tests timeout" was sample data and
+ * would be a lie — the rule is about a `submit_findings` call that never
+ * landed, not about tests.
  */
-export const QA_UNVERIFIABLE_TEXT = "review unverifiable · findings jamais reçues";
+export interface QaVerdictCopy {
+  unverifiable: string;
+  changesRequested: (count: number) => string;
+  cleanNoFindings: string;
+  cleanWithFindings: (count: number) => string;
+  noStructuredVerdict: string;
+  outcomeLanded: string;
+  outcomeReady: string;
+  outcomeYourTurn: string;
+}
 
 /** Where the ticket went, from its CURRENT status. Verbatim, arrow included. */
-export function outcomeArrow(status: string): string {
-  if (status === "done" || status === "released") return "→ landed";
-  if (status === "to_merge") return "→ ready";
-  return "→ your turn";
+export function outcomeArrow(status: string, copy: QaVerdictCopy): string {
+  if (status === "done" || status === "released") return copy.outcomeLanded;
+  if (status === "to_merge") return copy.outcomeReady;
+  return copy.outcomeYourTurn;
 }
 
 /**
@@ -454,6 +470,7 @@ export function deriveVerdicts(
   rows: readonly QaVerdictSessionRow[],
   epicsById: ReadonlyMap<string, QaVerdictEpic>,
   unverifiableEpicIds: ReadonlySet<string>,
+  copy: QaVerdictCopy,
   limit: number = QA_VERDICT_LIMIT,
 ): QaVerdict[] {
   const newestByEpic = new Map<string, QaVerdictSessionRow>();
@@ -469,7 +486,6 @@ export function deriveVerdicts(
     .map((row) => {
       const epic = epicsById.get(row.epicId);
       const n = row.findingsFiled;
-      const plural = n === 1 ? "" : "s";
       const structured =
         row.reviewVerdict === "approved" ||
         row.reviewVerdict === "approved_with_minor_issues" ||
@@ -480,20 +496,17 @@ export function deriveVerdicts(
 
       if (!structured && unverifiableEpicIds.has(row.epicId)) {
         kind = "attention";
-        verdictText = QA_UNVERIFIABLE_TEXT;
+        verdictText = copy.unverifiable;
       } else if (row.reviewVerdict === "changes_requested") {
         kind = "attention";
-        verdictText = `changes requested · ${n} finding${plural}`;
+        verdictText = copy.changesRequested(n);
       } else if (structured) {
-        verdictText =
-          n === 0
-            ? "review clean · 0 findings"
-            : `clean après review · ${n} finding${plural} filed`;
+        verdictText = n === 0 ? copy.cleanNoFindings : copy.cleanWithFindings(n);
       } else {
         // No structured verdict and not unverifiable: an MCP-less provider
         // reviewed through prose. Saying so is honest; calling it approved
         // would not be.
-        verdictText = "review sans verdict structuré";
+        verdictText = copy.noStructuredVerdict;
       }
 
       return {
@@ -503,7 +516,7 @@ export function deriveVerdicts(
         title: epic?.title ?? "",
         verdictText,
         kind,
-        outcome: outcomeArrow(epic?.status ?? ""),
+        outcome: outcomeArrow(epic?.status ?? "", copy),
         at: row.at,
       };
     });

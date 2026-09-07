@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslations } from "next-intl";
 import {
   Dialog,
   DialogContent,
@@ -67,6 +68,7 @@ export function ScanProjectDialog({
   projectId,
   onImported,
 }: ScanProjectDialogProps) {
+  const t = useTranslations("Documents");
   const [open, setOpen] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [result, setResult] = useState<ScanResult | null>(null);
@@ -93,16 +95,18 @@ export function ScanProjectDialog({
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(data.error || `Scan failed (HTTP ${res.status}).`);
+        setError(
+          data.error || t("errors.scanHttp", { status: String(res.status) }),
+        );
         return;
       }
       setResult(data.data as ScanResult);
     } catch {
-      setError("Scan failed: could not reach the server.");
+      setError(t("errors.scanUnreachable"));
     } finally {
       setScanning(false);
     }
-  }, [projectId]);
+  }, [projectId, t]);
   // Documents already registered for the project — the same key the upload
   // route dedups on (case-insensitive originalFilename). Re-fetched on every
   // open AND every in-dialog rescan, so a second scan also reflects imports
@@ -203,7 +207,9 @@ export function ScanProjectDialog({
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(data.error || `Import failed (HTTP ${res.status}).`);
+        setError(
+          data.error || t("errors.importHttp", { status: String(res.status) }),
+        );
         return;
       }
       const payload = data.data as ImportResponse;
@@ -220,7 +226,7 @@ export function ScanProjectDialog({
       });
       onImported?.();
     } catch {
-      setError("Import failed: could not reach the server.");
+      setError(t("errors.importUnreachable"));
     } finally {
       setImporting(false);
     }
@@ -246,24 +252,20 @@ export function ScanProjectDialog({
         onClick={() => setOpen(true)}
       >
         <FolderSearch className="h-[14px] w-[14px]" />
-        Scanner le projet
+        {t("scan.trigger")}
       </Button>
       <DialogContent className="rounded-[14px] shadow-[0_18px_40px_rgba(58,48,44,.14)] sm:max-w-[640px]">
         <DialogHeader>
           <DialogTitle className="text-[16px] font-semibold">
-            Scanner le projet
+            {t("scan.title")}
           </DialogTitle>
-          <DialogDescription>
-            Documents détectés dans le dépôt (pdf, md, txt, doc, docx). Les
-            répertoires .git, node_modules, dist, build, etc. sont ignorés.
-            Cochez les fichiers à importer.
-          </DialogDescription>
+          <DialogDescription>{t("scan.description")}</DialogDescription>
         </DialogHeader>
 
         {scanning && (
           <div className="flex items-center gap-2 py-[18px] text-[13.5px] text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />
-            <span>Scan en cours...</span>
+            <span>{t("scan.running")}</span>
           </div>
         )}
 
@@ -285,12 +287,12 @@ export function ScanProjectDialog({
             )}
             {result.truncated && (
               <p className="text-[12.5px] text-muted-foreground">
-                Liste tronquée aux 500 premiers fichiers.
+                {t("scan.truncated")}
               </p>
             )}
             {result.files.length === 0 ? (
               <p className="py-[10px] text-[13.5px] text-muted-foreground">
-                Aucun document détecté dans le projet.
+                {t("scan.empty")}
               </p>
             ) : (
               <>
@@ -299,9 +301,9 @@ export function ScanProjectDialog({
                     checked={allSelected}
                     disabled={importableFiles.length === 0}
                     onCheckedChange={toggleAll}
-                    aria-label="Tout sélectionner"
+                    aria-label={t("scan.selectAll")}
                   />
-                  Tout sélectionner
+                  {t("scan.selectAll")}
                 </label>
                 <div className="flex max-h-[380px] flex-col overflow-y-auto rounded-[8px] border border-border">
                   {result.files.map((file) => {
@@ -317,7 +319,9 @@ export function ScanProjectDialog({
                           checked={selected.has(file.relativePath)}
                           disabled={alreadyImported}
                           onCheckedChange={() => toggleFile(file.relativePath)}
-                          aria-label={`Sélectionner ${file.relativePath}`}
+                          aria-label={t("scan.selectFile", {
+                            path: file.relativePath,
+                          })}
                         />
                         <span className="min-w-0 flex-1 truncate text-[13px] font-medium">
                           {file.name}
@@ -327,7 +331,7 @@ export function ScanProjectDialog({
                             variant="secondary"
                             className="flex-none text-[10px]"
                           >
-                            déjà importé
+                            {t("scan.alreadyImported")}
                           </Badge>
                         )}
                         <span className="min-w-0 flex-[2] truncate font-mono text-[11px] text-meta">
@@ -344,10 +348,10 @@ export function ScanProjectDialog({
             )}
             <div className="flex items-center justify-between gap-[10px]">
               <p className="text-[12px] text-muted-foreground">
-                {result.files.length} document
-                {result.files.length === 1 ? "" : "s"} détecté
-                {result.files.length === 1 ? "" : "s"} ·{" "}
-                {selected.size} sélectionné{selected.size === 1 ? "" : "s"}
+                {t("scan.counts", {
+                  count: result.files.length,
+                  selected: selected.size,
+                })}
               </p>
               <div className="flex flex-none items-center gap-[8px]">
                 <Button
@@ -356,7 +360,7 @@ export function ScanProjectDialog({
                   disabled={scanning || importing}
                   onClick={rescan}
                 >
-                  Relancer le scan
+                  {t("scan.rescan")}
                 </Button>
                 <Button
                   size="sm"
@@ -365,17 +369,14 @@ export function ScanProjectDialog({
                   onClick={importSelection}
                 >
                   {importing && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                  Importer la sélection
-                  {selected.size > 0 ? ` (${selected.size})` : ""}
+                  {t("scan.import", { count: selected.size })}
                 </Button>
               </div>
             </div>
             {importSummary && (
               <div className="flex flex-col gap-[4px] rounded-[8px] border border-border bg-muted/40 p-[10px]">
                 <p className="text-[12.5px]">
-                  {importSummary.importedCount} document
-                  {importSummary.importedCount === 1 ? "" : "s"} importé
-                  {importSummary.importedCount === 1 ? "" : "s"}.
+                  {t("scan.imported", { count: importSummary.importedCount })}
                 </p>
                 {importSummary.skipped.length > 0 && (
                   <div className="flex flex-col gap-[2px]">
@@ -384,7 +385,10 @@ export function ScanProjectDialog({
                         key={entry.relativePath}
                         className="font-mono text-[11px] text-muted-foreground"
                       >
-                        {entry.relativePath} — {entry.reason}
+                        {t("scan.skippedEntry", {
+                          path: entry.relativePath,
+                          reason: entry.reason,
+                        })}
                       </p>
                     ))}
                   </div>
@@ -394,13 +398,7 @@ export function ScanProjectDialog({
             {missingSources.length > 0 && (
               <div className="flex flex-col gap-[4px] rounded-[8px] border border-border bg-muted/40 p-[10px]">
                 <p className="text-[12.5px]">
-                  {missingSources.length} document
-                  {missingSources.length === 1 ? "" : "s"} déjà importé
-                  {missingSources.length === 1 ? "" : "s"} ne correspond
-                  {missingSources.length === 1 ? "" : "ent"} à aucun fichier du
-                  dépôt — il{missingSources.length === 1 ? "" : "s"} reste
-                  {missingSources.length === 1 ? "" : "nt"} accessible
-                  {missingSources.length === 1 ? "" : "s"} dans Arij.
+                  {t("scan.missingSources", { count: missingSources.length })}
                 </p>
                 <div className="flex flex-col gap-[2px]">
                   {missingSources.map((doc) => (

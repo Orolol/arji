@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { StopCircle } from "lucide-react";
 
 import {
@@ -41,6 +42,7 @@ export function QaRunCard({
   onStop,
   className,
 }: QaRunCardProps) {
+  const t = useTranslations("Qa");
   const tone = projectTone(project?.colorIndex ?? 0);
 
   return (
@@ -60,11 +62,11 @@ export function QaRunCard({
           size="sm"
         />
         <Mono size={10} tone="live-mid">
-          REVIEW
+          {t("runs.kicker")}
         </Mono>
         <button
           type="button"
-          aria-label="Stop this review"
+          aria-label={t("runs.stop")}
           data-testid="qa-run-stop"
           onClick={(event) => {
             event.stopPropagation();

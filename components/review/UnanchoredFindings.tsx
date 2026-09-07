@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { FileQuestion } from "lucide-react";
 import type { FileDiff } from "@/lib/git/diff";
 import type { ReviewComment } from "@/hooks/useReviewComments";
@@ -57,6 +58,7 @@ export function UnanchoredFindings({
   onUpdateComment,
   onDeleteComment,
 }: UnanchoredFindingsProps) {
+  const t = useTranslations("Review");
   if (comments.length === 0) return null;
 
   const groups = new Map<string, ReviewComment[]>();
@@ -77,10 +79,9 @@ export function UnanchoredFindings({
     >
       <div className="flex items-center gap-2 text-sm font-medium">
         <FileQuestion className="h-4 w-4 text-amber-500" />
-        Findings outside the diff
+        {t("unanchored.title")}
         <span className="text-xs text-muted-foreground font-normal">
-          — anchored to lines not shown above; resolved by the reviewer or by
-          the merge
+          {t("unanchored.note")}
         </span>
       </div>
       {Array.from(groups.entries()).map(([key, group]) => (

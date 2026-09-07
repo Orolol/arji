@@ -6,6 +6,9 @@ import {
   GitPullRequestClosed,
   GitPullRequestDraft,
 } from "lucide-react";
+import { useTranslations } from "next-intl";
+
+import type { TranslationKey } from "@/lib/i18n/catalogue";
 import { cn } from "@/lib/utils";
 
 type PrStatus = "draft" | "open" | "closed" | "merged";
@@ -28,11 +31,16 @@ const STATUS_STYLES: Record<PrStatus, string> = {
   merged: "bg-card border-primary/40 text-primary",
 };
 
-const STATUS_LABELS: Record<PrStatus, string> = {
-  draft: "Draft",
-  open: "Open",
-  closed: "Closed",
-  merged: "Merged",
+/**
+ * A MODULE-SCOPE COPY TABLE, so it holds catalogue KEY REFERENCES and the
+ * badge resolves them at render with the namespace-less translator
+ * (`lib/i18n/catalogue.ts`, pattern 3).
+ */
+const STATUS_LABELS: Record<PrStatus, { labelKey: TranslationKey }> = {
+  draft: { labelKey: "Github.pr.draft" },
+  open: { labelKey: "Github.pr.open" },
+  closed: { labelKey: "Github.pr.closed" },
+  merged: { labelKey: "Github.pr.merged" },
 };
 
 /**
@@ -49,6 +57,7 @@ const STATUS_ICONS: Record<PrStatus, typeof GitPullRequestArrow> = {
 };
 
 export function PrBadge({ status, number, url }: PrBadgeProps) {
+  const t = useTranslations();
   const Icon = STATUS_ICONS[status];
   const content = (
     <span
@@ -66,7 +75,7 @@ export function PrBadge({ status, number, url }: PrBadgeProps) {
       {number ? (
         <span className="font-mono text-[11.5px]">{`#${number}`}</span>
       ) : null}
-      <span>{STATUS_LABELS[status]}</span>
+      <span>{t(STATUS_LABELS[status].labelKey)}</span>
     </span>
   );
 

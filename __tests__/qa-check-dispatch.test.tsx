@@ -285,7 +285,7 @@ describe("QaScreen — New check", () => {
     await renderScreen(payload({ checkableProjectIds: [] }));
 
     const blocked = screen.getByTestId("qa-new-check-blocked");
-    expect(blocked).toHaveAttribute("title", expect.stringContaining("dépôt git"));
+    expect(blocked).toHaveAttribute("title", expect.stringContaining("git repo"));
     expect(blocked).toContainElement(screen.getByTestId("qa-new-check"));
   });
 
@@ -358,7 +358,7 @@ describe("QaScreen — New check", () => {
     );
 
     const toast = await screen.findByTestId("qa-toast");
-    expect(toast).toHaveTextContent("QA check lancé");
+    expect(toast).toHaveTextContent("QA check launched");
     expect(within(toast).getByRole("link")).toHaveAttribute(
       "href",
       "/projects/p1/qa?reportId=rep-9",
@@ -367,7 +367,7 @@ describe("QaScreen — New check", () => {
 
   /**
    * An empty failure-digest window is journalled as a COMPLETED report with no
-   * agent session at all. Saying "QA check lancé" would promise a run that will
+   * agent session at all. Saying "QA check launched" would promise a run that will
    * never appear in QA RUNS or in the band.
    */
   it("says nothing was launched when the digest window was empty", async () => {
@@ -381,7 +381,7 @@ describe("QaScreen — New check", () => {
     );
 
     const toast = await screen.findByTestId("qa-toast");
-    expect(toast).toHaveTextContent("aucun agent lancé");
+    expect(toast).toHaveTextContent("no agent launched");
     expect(within(toast).getByRole("link")).toHaveAttribute(
       "href",
       "/projects/p1/qa?reportId=rep-0",

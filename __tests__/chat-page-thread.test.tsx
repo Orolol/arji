@@ -107,7 +107,7 @@ describe("ChatThread", () => {
 
     const typing = screen.getByTestId("chat-typing");
     expect(typing).toBeInTheDocument();
-    expect(typing).toHaveTextContent("Opus Planner rédige…");
+    expect(typing).toHaveTextContent("Opus Planner is writing…");
     expect(
       typing.querySelector('[data-slot="breathing-dot"]'),
     ).not.toBeNull();

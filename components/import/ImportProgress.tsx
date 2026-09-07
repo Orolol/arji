@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { Loader2 } from "lucide-react";
 
 export type ImportProgressStep = "cloning" | "analyzing";
@@ -15,13 +16,14 @@ export function ImportProgress({
   step = "analyzing",
   repo,
 }: ImportProgressProps) {
+  const t = useTranslations("Import");
   const cloning = step === "cloning";
   const heading = cloning
-    ? `Cloning ${repo || "repository"}...`
-    : "Analyzing project...";
+    ? t("progress.cloning", { repo: repo || t("progress.cloningUnnamedRepo") })
+    : t("progress.analyzing");
   const detail = cloning
-    ? "Fetching the full history from GitHub"
-    : "Claude Code is scanning the codebase and generating epics";
+    ? t("progress.cloningDetail")
+    : t("progress.analyzingDetail");
 
   return (
     <div className="flex flex-col items-center justify-center py-16 gap-4">

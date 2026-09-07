@@ -1,0 +1,54 @@
+{
+  "panes": {
+    "label": "Panneau du chat",
+    "thread": "Fil",
+    "context": "Contexte"
+  },
+  "roster": {
+    "ticketsCreated": "{count, plural, one {# ticket créé dans cette conversation} other {# tickets créés dans cette conversation}}",
+    "knows": {
+      "label": "LE CHAT SAIT",
+      "body": "spec du projet, mémoire, tickets ouverts — cite un doc avec"
+    }
+  },
+  "thread": {
+    "paneLabel": "Fil de la conversation",
+    "typing": "{agent} rédige…",
+    "typingAgentFallback": "L'agent",
+    "createEpicPending": "Création…",
+    "generateSpecPending": "Génération…"
+  },
+  "composer": {
+    "placeholder": "Écris — ⏎ envoie, ⇧⏎ saute une ligne, @ cite un doc",
+    "label": "Écris un message",
+    "attachImage": "Joindre une image"
+  },
+  "epicCard": {
+    "sendToDevPending": "Envoi…",
+    "createPending": "Création…",
+    "sentToDev": "Envoyé en dev",
+    "createdInBacklog": "Epic créé dans le backlog",
+    "buildNotStarted": "Epic créé, mais le build n'a pas démarré"
+  },
+  "placement": {
+    "createdInTodoRanked": "créé dans To Do · #{rank}",
+    "createdInTodo": "créé dans To Do",
+    "createdInBacklog": "créé dans Backlog"
+  },
+  "context": {
+    "label": "Contexte",
+    "spec": "Spec projet",
+    "memory": "Mémoire"
+  },
+  "createdHere": {
+    "label": "Créé dans ce chat"
+  },
+  "towardSpec": {
+    "label": "Vers la spec",
+    "body": "Cette décision mérite d'entrer dans la spec.",
+    "propose": "Proposer l'ajout",
+    "proposePending": "Envoi…",
+    "viewSpec": "voir la spec →",
+    "proposalSent": "Proposition envoyée à la spec"
+  }
+}

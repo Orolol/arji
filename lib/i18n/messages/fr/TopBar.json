@@ -1,0 +1,27 @@
+{
+  "search": {
+    "title": "Rechercher — ⌘K"
+  },
+  "auto": {
+    "titleArmed": "Full Auto · {armed}/{total} projets"
+  },
+  "menu": {
+    "planned": "à venir",
+    "needsProject": "choisir un projet",
+    "plannedTitle": "{label} — écran en cours de construction ({href})",
+    "needsProjectTitle": "{label} — choisir un projet d'abord"
+  },
+  "digest": {
+    "kicker": "CE MATIN",
+    "shipped": "{count, plural, one {# landé aujourd'hui} other {# landés aujourd'hui}}",
+    "blocking": "{count, plural, one {# bloqué par une finding} other {# bloqués par une finding}}",
+    "ready": "{count, plural, one {# prêt à lander} other {# prêts à lander}}",
+    "waiting": "{count} en attente de toi",
+    "empty": "Rien à signaler.",
+    "open": "ouvrir le digest →"
+  },
+  "live": {
+    "kicker": "EN CE MOMENT",
+    "empty": "Aucun agent en cours."
+  }
+}

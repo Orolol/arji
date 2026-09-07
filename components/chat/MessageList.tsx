@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
 import { MarkdownContent } from "./MarkdownContent";
 import { ImageLightbox, type LightboxImage } from "@/components/shared/ImageLightbox";
 import type { ChatAttachment } from "@/hooks/useChat";
@@ -21,6 +22,7 @@ interface MessageListProps {
 }
 
 export function MessageList({ messages, loading, streamStatus }: MessageListProps) {
+  const t = useTranslations("ChatLegacy");
   const bottomRef = useRef<HTMLDivElement>(null);
   const [lightboxImage, setLightboxImage] = useState<LightboxImage | null>(null);
 
@@ -31,7 +33,7 @@ export function MessageList({ messages, loading, streamStatus }: MessageListProp
   if (loading) {
     return (
       <div className="px-[18px] py-[18px] text-[13.5px] text-muted-foreground">
-        Loading messages...
+        {t("messages.loading")}
       </div>
     );
   }
@@ -39,7 +41,7 @@ export function MessageList({ messages, loading, streamStatus }: MessageListProp
   if (messages.length === 0) {
     return (
       <div className="mt-8 px-[18px] text-center text-[13.5px] text-muted-foreground">
-        Start a conversation to brainstorm your project with Claude
+        {t("messages.empty")}
       </div>
     );
   }

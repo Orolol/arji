@@ -1,3 +1,6 @@
+"use client";
+
+import { useTranslations } from "next-intl";
 import { Check } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -22,6 +25,8 @@ export function RubricChips({
   projectRuleCount,
   className,
 }: RubricChipsProps) {
+  const t = useTranslations("Qa");
+
   return (
     <div className={cn("flex flex-wrap gap-[7px]", className)}>
       {items.map((item) => (
@@ -44,7 +49,7 @@ export function RubricChips({
           data-testid="qa-rubric-project-rules"
           className="flex h-[27px] items-center rounded-full bg-card-translucent px-[11px] font-sans text-[12px] text-strata-next-mid"
         >
-          {`+ ${projectRuleCount} règle${projectRuleCount === 1 ? "" : "s"} projet`}
+          {t("rubric.projectRules", { count: projectRuleCount })}
         </span>
       ) : null}
     </div>

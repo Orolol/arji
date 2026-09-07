@@ -81,7 +81,7 @@ zones:
   (`lib/piscine/nav.ts` is the single definition):
   - **Work** — Tickets, Spec & Memory, QA, Releases
   - **Agents** — Named agents, Sessions, Chat, Usage
-  - **Réglages** — Workspace & Full Auto, Night runs, Notifications, Intégrations
+  - **Settings** — Workspace & Full Auto, Night runs, Notifications, Integrations
 - **right** — `⌘K` command palette, Inbox, Auto, New.
 
 `Now` is a direct destination with no menu; the logo also returns to the desk.
@@ -96,7 +96,7 @@ zones:
 | `/qa` | cross-project review findings, verdicts and the rubric |
 | `/agents` | the agents workshop — Named agents / Assignments / Prompts / Limits (it used to be a side sheet) |
 | `/usage` | cost and quota observatory |
-| `/settings` | Paramètres → Workspace: workspace, Full Auto, night runs, notifications, budget. Its siblings are `/settings/pipeline`, `/settings/integrations` and `/settings/appearance` |
+| `/settings` | Settings → Workspace: workspace, Full Auto, night runs, notifications, budget. Its siblings are `/settings/pipeline`, `/settings/integrations` and `/settings/appearance` |
 | `/inbox` | agent questions awaiting a reply |
 | `/projects/:id` | the desk scoped to one project |
 | `/projects/:id/spec` | Spec & Memory, agent suggestions, docs, prompt anatomy |
@@ -205,7 +205,7 @@ For large features, enable Team Mode to have a single Claude Code session orches
 Arm a project and walk away. Full Auto Mode is a standing supervisor, enabled
 **per project** — there is no global switch. The desk's `Full Auto · n/m` pill
 opens the per-project checkboxes; the top bar's `Auto` pill is the read-only
-roll-up and leads to Réglages. It keeps building everything in To Do, reviewing
+roll-up and leads to Settings. It keeps building everything in To Do, reviewing
 everything in Review, and **merging each ticket into `main` as soon as its
 review comes back clean** — with separate concurrency budgets for builds and
 reviews.
@@ -292,7 +292,7 @@ The project is created already connected to GitHub: push, PR creation, releases 
 
 Notes:
 
-- **Private repositories** need a GitHub PAT — set it in **Paramètres → Intégrations** (`/settings/integrations`). The token is only sent when an anonymous attempt is refused, and it is never written to `.git/config`, so `origin` keeps a clean URL. Public repositories clone with no token at all.
+- **Private repositories** need a GitHub PAT — set it in **Settings → Integrations** (`/settings/integrations`). The token is only sent when an anonymous attempt is refused, and it is never written to `.git/config`, so `origin` keeps a clean URL. Public repositories clone with no token at all.
 - **Clones are full clones** — no `--depth`, no `--single-branch`. Arij creates worktrees off the default branch, computes merge bases and tags releases, and all of that needs the complete history. Expect the clone of a large repository to take a while; the UI shows "Cloning repository..." as its own step.
 - **Re-importing the same repository is safe.** If the destination already holds that repository, Arij fetches it instead of re-cloning. If it holds something else, the import stops with a conflict and tells you what is in the way — nothing is ever overwritten.
 - Only directories Arij created itself are ever treated as Arij's to remove. A project you pointed at a local path is never touched.
@@ -303,13 +303,13 @@ Notes:
 
 Cloned repositories go to `<arij>/projects/` — the directory next to `data/`, gitignored, created on first use. Each clone is `<projects root>/<owner>-<repo>`, and their worktrees sit alongside in `<projects root>/.arij-worktrees`.
 
-To keep your code elsewhere, set the projects directory in **Paramètres → Workspace** (`/settings`), stored as the `projects_root` setting. Only an absolute path is accepted — a relative one would move with the directory Arij runs from, so it is refused and the default is used instead. Clearing the field restores the default.
+To keep your code elsewhere, set the projects directory in **Settings → Workspace** (`/settings`), stored as the `projects_root` setting. Only an absolute path is accepted — a relative one would move with the directory Arij runs from, so it is refused and the default is used instead. Clearing the field restores the default.
 
 #### Credentials
 
-GitHub credentials live in **Paramètres**, not in the environment: the PAT is stored in the `settings` table of the local SQLite database, and read from there by every GitHub feature (clone, push, PR, releases, issue sync).
+GitHub credentials live in **Settings**, not in the environment: the PAT is stored in the `settings` table of the local SQLite database, and read from there by every GitHub feature (clone, push, PR, releases, issue sync).
 
-> The `GITHUB_TOKEN` environment variable is **not** read by Arij. If you set it in an older `.env.local`, it has no effect — move the token to Paramètres → Intégrations.
+> The `GITHUB_TOKEN` environment variable is **not** read by Arij. If you set it in an older `.env.local`, it has no effect — move the token to Settings → Integrations.
 
 Create `.env.local` for optional settings:
 

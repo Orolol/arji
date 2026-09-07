@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { useTranslations } from "next-intl";
 import { X } from "lucide-react";
 
 export interface LightboxImage {
@@ -23,6 +24,7 @@ interface ImageLightboxProps {
  * near-identical overlay.
  */
 export function ImageLightbox({ image, onClose }: ImageLightboxProps) {
+  const t = useTranslations("Shared");
   useEffect(() => {
     if (!image) return;
     function handleKeyDown(e: KeyboardEvent) {
@@ -44,7 +46,7 @@ export function ImageLightbox({ image, onClose }: ImageLightboxProps) {
         onClick={onClose}
         className="absolute top-4 right-4 text-white/80 transition-colors hover:text-white"
         type="button"
-        aria-label="Close image"
+        aria-label={t("imageLightbox.close")}
       >
         <X className="h-6 w-6" />
       </button>

@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { BandHeader, QuietLink, StrataBand } from "@/components/piscine";
 import type { QaRubric } from "@/lib/qa/types";
 
@@ -26,10 +28,12 @@ export interface RubricBandProps {
 }
 
 export function RubricBand({ rubric, className }: RubricBandProps) {
+  const t = useTranslations("Qa");
+
   return (
     <StrataBand stratum="next" density="full" gap={9} className={className}>
       <BandHeader
-        label="La rubrique"
+        label={t("rubric.label")}
         stratum="next"
         labelSize={13}
         right={
@@ -38,7 +42,7 @@ export function RubricBand({ rubric, className }: RubricBandProps) {
               data-testid="qa-rubric-helper"
               className="font-sans text-[11.5px] text-strata-next-mid"
             >
-              ce que chaque reviewer vérifie — injectée dans son prompt
+              {t("rubric.helper")}
             </span>
             <QuietLink
               tone="next"
@@ -46,7 +50,7 @@ export function RubricBand({ rubric, className }: RubricBandProps) {
               href="/agents/prompts"
               testId="qa-rubric-edit"
             >
-              éditer →
+              {t("rubric.edit")}
             </QuietLink>
           </div>
         }
@@ -63,7 +67,7 @@ export function RubricBand({ rubric, className }: RubricBandProps) {
         data-testid="qa-rubric-footnote"
         className="font-sans text-[11.5px] text-strata-next-mid"
       >
-        {"Review unverifiable (tests KO) = verdict à part : le ticket remonte en Your turn au lieu de passer."}
+        {t("rubric.footnote")}
       </span>
     </StrataBand>
   );

@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { useState, useCallback } from "react";
 import { usePolling } from "@/hooks/usePolling";
 
@@ -44,6 +46,7 @@ const POLL_INTERVAL_MS = 5000;
  * blocked agents.
  */
 export function useInbox() {
+  const tErrors = useTranslations("ClientErrors");
   const [state, setState] = useState<InboxState>({
     items: [],
     unreadCount: 0,
@@ -104,11 +107,11 @@ export function useInbox() {
       );
       const body = await res.json().catch(() => ({}));
       if (!res.ok || body.error) {
-        throw new Error(body.error || "Failed to post reply");
+        throw new Error(body.error || tErrors("failedToPostReply"));
       }
       await markRead(item.epicId);
     },
-    [markRead]
+    [markRead, tErrors]
   );
 
   return {

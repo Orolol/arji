@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { FieldKicker, Mono, SurfaceCard } from "@/components/piscine";
 import type { DeskToday } from "@/lib/control-desk/types";
 import { cn } from "@/lib/utils";
@@ -31,14 +33,18 @@ function money(value: number | null): string {
 }
 
 export function TodayTile({ today, className }: TodayTileProps) {
-  // French agrees in the singular too — "1 projets" is the kind of detail the
-  // frame's own copy gets right.
-  const plural = (value: number | null, word: string): string =>
-    `${figure(value)} ${word}${value !== null && Math.abs(value) < 2 ? "" : "s"}`;
+  const t = useTranslations("Desk");
+  /*
+    Agreement is the catalogue's ICU plural, and the FIGURE is a separate
+    argument because an absent one is an em dash rather than a numeral — `#`
+    could not print it. An absent figure takes the plural form ("— projects"),
+    which is what `?? 2` selects; French agrees in the singular at 0 and 1, and
+    its own `one` branch covers that without a second rule here.
+  */
   const footer = [
     money(today.costUsd),
-    plural(today.projects, "projet"),
-    plural(today.sessions, "session"),
+    t("today.projects", { value: figure(today.projects), count: today.projects ?? 2 }),
+    t("today.sessions", { value: figure(today.sessions), count: today.sessions ?? 2 }),
   ].join(" · ");
 
   return (
@@ -52,7 +58,7 @@ export function TodayTile({ today, className }: TodayTileProps) {
       )}
     >
       <FieldKicker stratum="live" size={10.5}>
-        TODAY
+        {t("today.label")}
       </FieldKicker>
 
       <div className="flex items-baseline gap-3">
@@ -62,7 +68,7 @@ export function TodayTile({ today, className }: TodayTileProps) {
           </Mono>
         </span>
         <span className="font-sans text-[12.5px] font-medium text-strata-live-mid">
-          landed
+          {t("today.landed")}
         </span>
         <span data-testid="desk-today-failed">
           <Mono size={22} weight={700} tone="you-deep">
@@ -70,7 +76,7 @@ export function TodayTile({ today, className }: TodayTileProps) {
           </Mono>
         </span>
         <span className="font-sans text-[12.5px] font-medium text-strata-live-mid">
-          failed
+          {t("today.failed")}
         </span>
       </div>
 

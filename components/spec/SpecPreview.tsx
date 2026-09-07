@@ -2,6 +2,7 @@
 
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { useTranslations } from "next-intl";
 
 interface SpecPreviewProps {
   markdown: string;
@@ -31,11 +32,12 @@ interface SpecPreviewProps {
  */
 
 export function SpecPreview({ markdown }: SpecPreviewProps) {
+  const t = useTranslations("Spec");
+
   if (!markdown) {
     return (
       <p className="text-[13.5px] text-muted-foreground">
-        No specification written yet. Use the editor or generate one from the
-        chat.
+        {t("preview.empty")}
       </p>
     );
   }

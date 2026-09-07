@@ -3,6 +3,7 @@
 import * as React from "react";
 import { useMemo } from "react";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { Moon } from "lucide-react";
 
 import { useControlDesk } from "@/hooks/useControlDesk";
@@ -37,11 +38,6 @@ import { Mono } from "./Mono";
 /** Poll cadence while a menu is held open. Slower than the desk's own 4s. */
 const OPEN_POLL_MS = 10_000;
 
-/** French agreement for the digest lines — one is not "1 prêts". */
-function plural(count: number, one: string, many: string): string {
-  return count > 1 ? many : one;
-}
-
 /** Per-panel geometry, measured off the frame. */
 const CARD: Record<string, { card: number; panel: number }> = {
   morning: { card: 560, panel: 200 },
@@ -73,6 +69,20 @@ const STRATUM_CLASS: Record<
     link: "text-strata-feed-deep",
   },
 };
+
+/**
+ * The three runs `deriveStatuses` can print, ALREADY RESOLVED by the menu.
+ *
+ * `deriveStatuses` decides WHICH entry carries a figure and in what tone; the
+ * words are the caller's, per `lib/i18n/catalogue.ts` — a helper that composes
+ * a display string takes resolved phrases rather than a translator, so every
+ * key stays a literal next to a `useTranslations` binding.
+ */
+export interface EntryStatusCopy {
+  blocking: string;
+  live: string;
+  usage: string;
+}
 
 /** The mono run printed at the right of an entry. */
 interface EntryStatus {
@@ -106,10 +116,22 @@ export function TopBarMenu({
   className,
 }: TopBarMenuProps) {
   const { data } = useControlDesk(null, OPEN_POLL_MS);
+  const t = useTranslations();
+  const tBar = useTranslations("TopBar");
   const stratum = STRATUM_CLASS[category.stratum];
   const geometry = CARD[category.panel ?? "none"];
 
-  const statuses = useMemo(() => deriveStatuses(data), [data]);
+  const statuses = useMemo(
+    () =>
+      deriveStatuses(data, {
+        blocking: tBar("status.blocking", { count: String(data?.heldBackCount ?? 0) }),
+        live: tBar("status.live", { count: String(data?.working.length ?? 0) }),
+        usage: tBar("status.usage", {
+          amount: `$${(data?.today.costUsd ?? 0).toFixed(2)}`,
+        }),
+      }),
+    [data, tBar],
+  );
 
   /*
    * The 8px offset below the bar is PADDING on a transparent wrapper, never a
@@ -131,7 +153,7 @@ export function TopBarMenu({
     <div
       data-testid={`top-bar-menu-${category.id}`}
       role="menu"
-      aria-label={category.label}
+      aria-label={t(category.labelKey)}
       onMouseEnter={onPointerEnter}
       onMouseLeave={onPointerLeave}
       className={cn(
@@ -162,7 +184,7 @@ export function TopBarMenu({
           tracking={0.08}
           className={cn("px-[10px] py-[4px]", stratum.kicker)}
         >
-          {category.label}
+          {t(category.labelKey)}
         </Mono>
 
         {category.entries.map((entry) => (
@@ -224,6 +246,9 @@ function MenuRow({
   const blocked = navHrefBlockedReason(entry, activeProjectId);
   const active = isNavEntryActive(entry, pathname, activeProjectId);
   const Icon = entry.icon;
+  const t = useTranslations();
+  const tBar = useTranslations("TopBar");
+  const label = t(entry.labelKey);
 
   const body = (
     <>
@@ -232,10 +257,10 @@ function MenuRow({
         aria-hidden="true"
         className={cn("shrink-0", active ? stratum.icon : "text-muted-foreground")}
       />
-      <span className="min-w-0 truncate">{entry.label}</span>
+      <span className="min-w-0 truncate">{label}</span>
       {blocked ? (
         <Mono size={11} tone="muted" className="ml-auto shrink-0">
-          {blocked === "planned" ? "à venir" : "choisir un projet"}
+          {blocked === "planned" ? tBar("menu.planned") : tBar("menu.needsProject")}
         </Mono>
       ) : status ? (
         <span className="ml-auto flex shrink-0 items-center gap-[5px]">
@@ -259,8 +284,8 @@ function MenuRow({
         aria-disabled="true"
         title={
           blocked === "planned"
-            ? `${entry.label} — écran en cours de construction (${entry.href})`
-            : `${entry.label} — choisir un projet d'abord`
+            ? tBar("menu.plannedTitle", { label, href: entry.href })
+            : tBar("menu.needsProjectTitle", { label })
         }
         className={cn(ROW_CLASS, "cursor-default font-medium text-muted-foreground opacity-60")}
       >
@@ -319,39 +344,41 @@ function MorningPanel({
   linkClass: string;
   onNavigate: () => void;
 }) {
+  // Agreement lives in the catalogue as ICU plurals (`{count, plural, …}`),
+  // where the language that needs it declares it — not in a helper here.
+  const tBar = useTranslations("TopBar");
   const lines: { key: string; text: string; danger?: boolean }[] = [];
 
   if (data) {
     const shipped = data.today.ticketsShipped;
     if (shipped !== null && shipped > 0) {
-      lines.push({ key: "shipped", text: `${shipped} land${plural(shipped, "é", "és")} aujourd'hui` });
+      lines.push({ key: "shipped", text: tBar("digest.shipped", { count: shipped }) });
     }
     if (data.heldBackCount > 0) {
       lines.push({
         key: "blocking",
-        text: `${data.heldBackCount} bloqu${plural(data.heldBackCount, "é", "és")} par une finding`,
+        text: tBar("digest.blocking", { count: data.heldBackCount }),
         danger: true,
       });
     }
     if (data.readyToLand.length > 0) {
-      const ready = data.readyToLand.length;
-      lines.push({ key: "ready", text: `${ready} prêt${plural(ready, "", "s")} à lander` });
+      lines.push({ key: "ready", text: tBar("digest.ready", { count: data.readyToLand.length }) });
     }
     const waiting =
       data.yourTurn.awaitingReply.length +
       data.yourTurn.failed.length +
       data.yourTurn.conflicts.length;
     if (waiting > 0) {
-      lines.push({ key: "waiting", text: `${waiting} en attente de toi` });
+      lines.push({ key: "waiting", text: tBar("digest.waiting", { count: waiting }) });
     }
   }
 
   return (
     <>
-      <PanelKicker>CE MATIN</PanelKicker>
+      <PanelKicker>{tBar("digest.kicker")}</PanelKicker>
       {lines.length === 0 ? (
         <span className="font-sans text-[12px] leading-[1.5] text-muted-foreground">
-          {data ? "Rien à signaler." : "…"}
+          {data ? tBar("digest.empty") : tBar("loading")}
         </span>
       ) : (
         lines.map((line) => (
@@ -376,7 +403,7 @@ function MorningPanel({
           linkClass,
         )}
       >
-        ouvrir le digest →
+        {tBar("digest.open")}
       </Link>
     </>
   );
@@ -389,6 +416,7 @@ function MorningPanel({
  * agent falls back to its dispatch role, which is what the desk's own cards do.
  */
 function RightNowPanel({ data }: { data: ReturnType<typeof useControlDesk>["data"] }) {
+  const tBar = useTranslations("TopBar");
   const groups = useMemo(() => {
     if (!data) return [];
     const counts = new Map<string, number>();
@@ -405,10 +433,10 @@ function RightNowPanel({ data }: { data: ReturnType<typeof useControlDesk>["data
 
   return (
     <>
-      <PanelKicker>EN CE MOMENT</PanelKicker>
+      <PanelKicker>{tBar("live.kicker")}</PanelKicker>
       {groups.length === 0 ? (
         <span className="font-sans text-[12px] leading-[1.5] text-muted-foreground">
-          {data ? "Aucun agent en cours." : "…"}
+          {data ? tBar("live.empty") : tBar("loading")}
         </span>
       ) : (
         groups.map(([label, count]) => (
@@ -418,14 +446,14 @@ function RightNowPanel({ data }: { data: ReturnType<typeof useControlDesk>["data
             className="flex items-center gap-[7px] font-sans text-[12px] text-foreground"
           >
             <BreathingDot size={6} />
-            {count > 1 ? `${label} × ${count}` : label}
+            {count > 1 ? tBar("live.agent", { label, count: String(count) }) : label}
           </span>
         ))
       )}
       {nightRuns > 0 ? (
         <span className="flex items-center gap-[7px] font-sans text-[12px] text-muted-foreground">
           <Moon size={12} aria-hidden="true" />
-          {`night run · ${nightRuns} ${nightRuns === 1 ? "session" : "sessions"}`}
+          {tBar("live.nightRuns", { count: nightRuns })}
         </span>
       ) : null}
     </>
@@ -446,23 +474,24 @@ function RightNowPanel({ data }: { data: ReturnType<typeof useControlDesk>["data
  */
 export function deriveStatuses(
   data: ReturnType<typeof useControlDesk>["data"],
+  copy: EntryStatusCopy,
 ): Map<string, EntryStatus> {
   const statuses = new Map<string, EntryStatus>();
   if (!data) return statuses;
 
   if (data.heldBackCount > 0) {
-    statuses.set("qa", { text: `${data.heldBackCount} blocking`, tone: "danger" });
+    statuses.set("qa", { text: copy.blocking, tone: "danger" });
   }
   if (data.working.length > 0) {
     statuses.set("sessions", {
-      text: `${data.working.length} live`,
+      text: copy.live,
       tone: "live-deep",
       live: true,
     });
   }
   if (data.today.costUsd !== null && data.today.costUsd > 0) {
     statuses.set("usage", {
-      text: `$${data.today.costUsd.toFixed(2)} today`,
+      text: copy.usage,
       tone: "muted",
     });
   }

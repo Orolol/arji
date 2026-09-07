@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { Loader2, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -30,6 +31,8 @@ export function PermanentDeleteDialog({
   deleting,
   onConfirm,
 }: PermanentDeleteDialogProps) {
+  const t = useTranslations("Shared");
+
   async function handleConfirm() {
     if (deleting) return;
     await onConfirm();
@@ -52,7 +55,7 @@ export function PermanentDeleteDialog({
         <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
           <div className="flex items-start gap-2">
             <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
-            <span>This action cannot be undone.</span>
+            <span>{t("permanentDelete.warning")}</span>
           </div>
         </div>
 
@@ -62,7 +65,7 @@ export function PermanentDeleteDialog({
             onClick={() => onOpenChange(false)}
             disabled={deleting}
           >
-            Cancel
+            {t("cancel")}
           </Button>
           <Button
             variant="destructive"

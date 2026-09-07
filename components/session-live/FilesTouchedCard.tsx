@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import {
   BandHeader,
   DiffDelta,
@@ -32,7 +34,7 @@ export interface FilesTouchedCardProps {
 
 /**
  * One file row: path, counts, then EITHER the proportion bar (the diff is
- * settled) OR the word "en cours" (the agent is still writing this file).
+ * settled) OR the word "running" (the agent is still writing this file).
  * A bar over a diff that is still moving would be a lie about a number.
  */
 function FileDiffRow({
@@ -42,6 +44,7 @@ function FileDiffRow({
   file: SessionDiffFile;
   maxTotal: number;
 }) {
+  const t = useTranslations("SessionLive");
   const { addedPx, removedPx } = scaleDiffBar(
     file.added ?? 0,
     file.removed ?? 0,
@@ -71,7 +74,7 @@ function FileDiffRow({
       <DiffDelta added={file.added} removed={file.removed} size={11} />
       {file.inProgress ? (
         <Mono size={10} tone="muted">
-          en cours
+          {t("files.inProgress")}
         </Mono>
       ) : segments.length > 0 ? (
         <RatioBar
@@ -90,6 +93,7 @@ export function FilesTouchedCard({
   epicId,
   diff,
 }: FilesTouchedCardProps) {
+  const t = useTranslations("SessionLive");
   const files = diff?.available ? diff.files : [];
   const totals = diff?.available ? diff.totals : null;
 
@@ -101,13 +105,13 @@ export function FilesTouchedCard({
   return (
     <StrataBand stratum="card" density="full" gap={9} className="shrink-0">
       <BandHeader
-        label="Files touched"
+        label={t("files.label")}
         stratum="neutral"
         labelSize={12}
         meta={
           totals ? (
             <>
-              {`${totals.files} files · `}
+              {t("files.count", { count: totals.files })}
               {/* `DiffDelta` is display:contents and relies on the parent's
                   gap; inside the header's inline mono run there is none. */}
               <span className="inline-flex items-baseline gap-[5px]">
@@ -129,7 +133,7 @@ export function FilesTouchedCard({
               tone="next"
               size={12}
             >
-              open diff →
+              {t("files.openDiff")}
             </QuietLink>
           ) : undefined
         }

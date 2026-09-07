@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
+import { useTranslations } from "next-intl";
 import { AlertTriangle, Loader2, Play, Save, X } from "lucide-react";
 import { NamedAgentSelect } from "@/components/shared/NamedAgentSelect";
 import { Button } from "@/components/ui/button";
@@ -21,6 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import type { TranslationKey } from "@/lib/i18n/catalogue";
 import { TELESCOPE_MAX_WINDOW_DAYS } from "@/lib/telescope/constants";
 
 type CheckType = "tech_check" | "e2e_test" | "failure_digest";
@@ -42,19 +44,33 @@ interface StartQaCheckDialogProps {
   }) => void;
 }
 
-const CHECK_TYPE_CONFIG: Record<CheckType, { title: string; description: string }> = {
+/**
+ * A module-scope copy table, so it holds catalogue KEY REFERENCES and the
+ * dialog resolves them at render with the namespace-less translator
+ * (`lib/i18n/catalogue.ts`, pattern 3).
+ *
+ * `nameKey` is the bare check name ("Tech Check"). It exists so the failure
+ * message does not have to derive one by stripping "Start " off the title — a
+ * string surgery that only works in English.
+ */
+const CHECK_TYPE_CONFIG: Record<
+  CheckType,
+  { nameKey: TranslationKey; titleKey: TranslationKey; descriptionKey: TranslationKey }
+> = {
   tech_check: {
-    title: "Start Tech Check",
-    description: "Launch a full project QA audit and generate a markdown report.",
+    nameKey: "Qa.checkTypes.techCheck.name",
+    titleKey: "Qa.checkTypes.techCheck.title",
+    descriptionKey: "Qa.checkTypes.techCheck.description",
   },
   e2e_test: {
-    title: "Start E2E Test",
-    description: "Run comprehensive end-to-end tests across all app features.",
+    nameKey: "Qa.checkTypes.e2eTest.name",
+    titleKey: "Qa.checkTypes.e2eTest.title",
+    descriptionKey: "Qa.checkTypes.e2eTest.description",
   },
   failure_digest: {
-    title: "Start Failure Digest",
-    description:
-      "Analyze mechanically grouped recurring failures in a read-only plan session.",
+    nameKey: "Qa.checkTypes.failureDigest.name",
+    titleKey: "Qa.checkTypes.failureDigest.title",
+    descriptionKey: "Qa.checkTypes.failureDigest.description",
   },
 };
 
@@ -64,6 +80,10 @@ export function StartQaCheckDialog({
   onOpenChange,
   onStarted,
 }: StartQaCheckDialogProps) {
+  const t = useTranslations("Qa");
+  // The check-type table holds full dotted paths, so it resolves through the
+  // namespace-less translator.
+  const tKey = useTranslations();
   // The dialog is a reusable component, so the field ids are generated rather
   // than static — two mounted copies would otherwise share them and every
   // label would point at the first copy's controls.
@@ -86,28 +106,31 @@ export function StartQaCheckDialog({
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function loadPrompts() {
+  // `useCallback` because the failure copy now comes from the catalogue, so
+  // this closes over `t` and the mount effect has to depend on it. `t` is
+  // memoised per (locale, namespace) by next-intl, so the identity is stable.
+  const loadPrompts = useCallback(async () => {
     setLoadingPrompts(true);
     try {
       const res = await fetch("/api/qa/prompts");
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(json.error || "Failed to load saved prompts");
+        setError(json.error || t("checkDialog.errors.loadPrompts"));
         return;
       }
       setPrompts((json.data || []) as QaPrompt[]);
     } catch {
-      setError("Failed to load saved prompts");
+      setError(t("checkDialog.errors.loadPrompts"));
     } finally {
       setLoadingPrompts(false);
     }
-  }
+  }, [t]);
 
   useEffect(() => {
     if (!open) return;
     setError(null);
     void loadPrompts();
-  }, [open]);
+  }, [open, loadPrompts]);
 
   function resetForm() {
     setCheckType("tech_check");
@@ -135,7 +158,7 @@ export function StartQaCheckDialog({
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(json.error || "Failed to save prompt");
+        setError(json.error || t("checkDialog.errors.savePrompt"));
         return;
       }
 
@@ -147,7 +170,7 @@ export function StartQaCheckDialog({
         setCustomPromptId(newPromptId);
       }
     } catch {
-      setError("Failed to save prompt");
+      setError(t("checkDialog.errors.savePrompt"));
     } finally {
       setSavingPrompt(false);
     }
@@ -186,7 +209,10 @@ export function StartQaCheckDialog({
       const json = await res.json().catch(() => ({}));
 
       if (!res.ok || !json.data) {
-        setError(json.error || `Failed to start ${config.title.replace(/^Start /, "")}`);
+        setError(
+          json.error ||
+            t("checkDialog.errors.start", { checkType: tKey(config.nameKey) }),
+        );
         return;
       }
 
@@ -200,7 +226,7 @@ export function StartQaCheckDialog({
       onOpenChange(false);
       resetForm();
     } catch {
-      setError(`Failed to start ${config.title.replace(/^Start /, "")}`);
+      setError(t("checkDialog.errors.start", { checkType: tKey(config.nameKey) }));
     } finally {
       setStarting(false);
     }
@@ -220,8 +246,8 @@ export function StartQaCheckDialog({
     >
       <DialogContent className="sm:max-w-[680px] rounded-[14px] shadow-[0_18px_40px_rgba(58,48,44,.14)]">
         <DialogHeader>
-          <DialogTitle>{config.title}</DialogTitle>
-          <DialogDescription>{config.description}</DialogDescription>
+          <DialogTitle>{tKey(config.titleKey)}</DialogTitle>
+          <DialogDescription>{tKey(config.descriptionKey)}</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-1">
@@ -230,7 +256,7 @@ export function StartQaCheckDialog({
               htmlFor={checkTypeId}
               className="text-[12.5px] text-muted-foreground"
             >
-              Check Type
+              {t("checkDialog.checkTypeLabel")}
             </label>
             <Select
               value={checkType}
@@ -243,9 +269,15 @@ export function StartQaCheckDialog({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="tech_check">Tech Check</SelectItem>
-                <SelectItem value="e2e_test">E2E Test</SelectItem>
-                <SelectItem value="failure_digest">Failure Digest</SelectItem>
+                <SelectItem value="tech_check">
+                  {tKey(CHECK_TYPE_CONFIG.tech_check.nameKey)}
+                </SelectItem>
+                <SelectItem value="e2e_test">
+                  {tKey(CHECK_TYPE_CONFIG.e2e_test.nameKey)}
+                </SelectItem>
+                <SelectItem value="failure_digest">
+                  {tKey(CHECK_TYPE_CONFIG.failure_digest.nameKey)}
+                </SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -254,9 +286,7 @@ export function StartQaCheckDialog({
             <div className="flex items-start gap-2 rounded-[10px] border border-priority-yellow/40 bg-priority-yellow/10 p-3">
               <AlertTriangle className="h-4 w-4 text-priority-yellow mt-0.5 shrink-0" />
               <p className="text-[12.5px] leading-[1.55] text-priority-yellow">
-                E2E testing requires an agent with access to browser automation and testing tools
-                (e.g. Playwright, Puppeteer). Ensure your selected agent has the appropriate tool
-                permissions.
+                {t("checkDialog.e2eWarning")}
               </p>
             </div>
           )}
@@ -267,7 +297,7 @@ export function StartQaCheckDialog({
                 htmlFor="failure-digest-window"
                 className="text-[12.5px] text-muted-foreground"
               >
-                Collection Window (days)
+                {t("checkDialog.windowLabel")}
               </label>
               <Input
                 id="failure-digest-window"
@@ -280,8 +310,7 @@ export function StartQaCheckDialog({
                 className="h-[34px] w-32 rounded-[8px] text-[13px]"
               />
               <p className="text-[11px] text-muted-foreground">
-                If the window is empty, Arij records a completed no-op report
-                without launching an agent.
+                {t("checkDialog.windowHint")}
               </p>
             </div>
           )}
@@ -291,7 +320,7 @@ export function StartQaCheckDialog({
               htmlFor={namedAgentFieldId}
               className="text-[12.5px] text-muted-foreground"
             >
-              Named Agent (optional)
+              {t("checkDialog.namedAgentLabel")}
             </label>
             <div className="flex items-center gap-2">
               <NamedAgentSelect
@@ -315,13 +344,13 @@ export function StartQaCheckDialog({
                   onClick={() => setNamedAgentId(null)}
                 >
                   <X className="h-3.5 w-3.5 mr-1" />
-                  Use Default
+                  {t("checkDialog.useDefault")}
                 </Button>
               )}
             </div>
             {!namedAgentId && (
               <p id={namedAgentHintId} className="text-[11px] text-muted-foreground">
-                No agent selected: Arij will automatically use the configured default.
+                {t("checkDialog.namedAgentHint")}
               </p>
             )}
           </div>
@@ -331,7 +360,7 @@ export function StartQaCheckDialog({
               htmlFor={savedPromptId}
               className="text-[12.5px] text-muted-foreground"
             >
-              Saved Prompt
+              {t("checkDialog.savedPromptLabel")}
             </label>
             <Select
               value={customPromptId ?? "__none__"}
@@ -340,11 +369,15 @@ export function StartQaCheckDialog({
             >
               <SelectTrigger id={savedPromptId} className="h-8 text-xs">
                 <SelectValue
-                  placeholder={loadingPrompts ? "Loading prompts..." : "Select saved prompt"}
+                  placeholder={
+                    loadingPrompts
+                      ? t("checkDialog.loadingPrompts")
+                      : t("checkDialog.selectSavedPrompt")
+                  }
                 />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="__none__">None</SelectItem>
+                <SelectItem value="__none__">{t("checkDialog.none")}</SelectItem>
                 {prompts.map((prompt) => (
                   <SelectItem key={prompt.id} value={prompt.id}>
                     {prompt.name}
@@ -359,13 +392,13 @@ export function StartQaCheckDialog({
               htmlFor={customPromptFieldId}
               className="text-[12.5px] text-muted-foreground"
             >
-              Custom Prompt (optional)
+              {t("checkDialog.customPromptLabel")}
             </label>
             <Textarea
               id={customPromptFieldId}
               value={customPrompt}
               onChange={(event) => setCustomPrompt(event.target.value)}
-              placeholder="Add custom QA instructions..."
+              placeholder={t("checkDialog.customPromptPlaceholder")}
               rows={8}
               className="rounded-[10px] text-[13.5px] leading-[1.6]"
             />
@@ -375,7 +408,7 @@ export function StartQaCheckDialog({
             <Input
               value={savePromptName}
               onChange={(event) => setSavePromptName(event.target.value)}
-              placeholder="Prompt name for reuse"
+              placeholder={t("checkDialog.promptNamePlaceholder")}
               className="h-[34px] rounded-[8px] text-[13px]"
             />
             <Button
@@ -391,7 +424,7 @@ export function StartQaCheckDialog({
               ) : (
                 <Save className="h-3.5 w-3.5 mr-1" />
               )}
-              Save Prompt
+              {t("checkDialog.savePrompt")}
             </Button>
           </div>
 
@@ -407,7 +440,7 @@ export function StartQaCheckDialog({
             }}
             disabled={starting}
           >
-            Cancel
+            {t("checkDialog.cancel")}
           </Button>
           <Button onClick={handleStart} disabled={starting}>
             {starting ? (
@@ -415,7 +448,7 @@ export function StartQaCheckDialog({
             ) : (
               <Play className="h-4 w-4 mr-1" />
             )}
-            {config.title}
+            {tKey(config.titleKey)}
           </Button>
         </DialogFooter>
       </DialogContent>

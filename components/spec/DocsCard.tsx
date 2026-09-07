@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
 import { Upload } from "lucide-react";
 
 import { BandHeader, Mono, QuietLink, StrataBand } from "@/components/piscine";
@@ -32,26 +33,42 @@ const MAX_VISIBLE = 6;
 const PLAIN_TEXT_MIME = new Set(["text/markdown", "text/plain"]);
 
 /**
- * The `· 4 KB` / `· converti` suffix — DERIVED, never stored.
+ * The suffix's two strings, resolved by the caller from the `Spec` namespace —
+ * the same shape `formatSaveState` takes in `spec-format.ts`, and for the same
+ * reason: this is a pure derivation, so it cannot call a hook and the copy
+ * travels in rather than being imported.
+ */
+export interface DocsSuffixCopy {
+  /** `(kilobytes) => t("docs.suffix.size", { kilobytes })` */
+  size: (kilobytes: number) => string;
+  /** `t("docs.suffix.converted")` */
+  converted: string;
+}
+
+/**
+ * The `· 4 KB` / `· converted` suffix — DERIVED, never stored.
  *
  * - a positive `sizeBytes` prints kilobytes (rounded up to 1, because a
  *   200-byte doc is a document, and `· 0 KB` is a house-rule violation);
  * - no size + a converted text document (its mime type is neither markdown
- *   nor plain text, so it came through `convertToMarkdown`) prints `converti`,
- *   which is the honest answer for a scan-imported row whose byte size we
- *   never recorded;
+ *   nor plain text, so it came through `convertToMarkdown`) prints
+ *   `converted`, which is the honest answer for a scan-imported row whose
+ *   byte size we never recorded;
  * - anything else prints NOTHING. Never a zero.
  */
-export function documentSuffix(doc: DocsCardDocument): string | null {
+export function documentSuffix(
+  doc: DocsCardDocument,
+  copy: DocsSuffixCopy,
+): string | null {
   if (typeof doc.sizeBytes === "number" && doc.sizeBytes > 0) {
-    return ` · ${Math.max(1, Math.round(doc.sizeBytes / 1024))} KB`;
+    return ` ${copy.size(Math.max(1, Math.round(doc.sizeBytes / 1024)))}`;
   }
   if (
     doc.kind === "text" &&
     doc.mimeType &&
     !PLAIN_TEXT_MIME.has(doc.mimeType)
   ) {
-    return " · converti";
+    return ` ${copy.converted}`;
   }
   return null;
 }
@@ -68,6 +85,7 @@ export function documentSuffix(doc: DocsCardDocument): string | null {
  * leaving the project and this is not it.
  */
 export function DocsCard({ projectId, initialDocuments, className }: DocsCardProps) {
+  const t = useTranslations("Spec");
   const [documents, setDocuments] = useState<DocsCardDocument[]>(
     initialDocuments ?? [],
   );
@@ -118,18 +136,20 @@ export function DocsCard({ projectId, initialDocuments, className }: DocsCardPro
           });
           const json = (await res.json().catch(() => ({}))) as { error?: string };
           if (!res.ok) {
-            setError(json.error || `Échec de l'import de ${file.name}.`);
+            setError(
+              json.error || t("docs.errors.importFile", { name: file.name }),
+            );
             return;
           }
         }
         load();
       } catch {
-        setError("Échec de l'import du document.");
+        setError(t("docs.errors.import"));
       } finally {
         setUploading(false);
       }
     },
-    [projectId, load],
+    [projectId, load, t],
   );
 
   const visible = documents.slice(0, MAX_VISIBLE);
@@ -144,10 +164,18 @@ export function DocsCard({ projectId, initialDocuments, className }: DocsCardPro
       gap={8}
       className={`py-[14px] ${className ?? ""}`}
     >
-      <BandHeader stratum="neutral" label="Docs" labelSize={12} standalone />
+      <BandHeader
+        stratum="neutral"
+        label={t("docs.label")}
+        labelSize={12}
+        standalone
+      />
 
       {visible.map((doc) => {
-        const suffix = documentSuffix(doc);
+        const suffix = documentSuffix(doc, {
+          size: (kilobytes) => t("docs.suffix.size", { kilobytes }),
+          converted: t("docs.suffix.converted"),
+        });
         return (
           <div
             key={doc.id}
@@ -171,7 +199,7 @@ export function DocsCard({ projectId, initialDocuments, className }: DocsCardPro
           size={11.5}
           href={`/projects/${projectId}/documents`}
         >
-          {`${overflow} autres →`}
+          {t("docs.more", { count: overflow })}
         </QuietLink>
       ) : null}
 
@@ -179,7 +207,7 @@ export function DocsCard({ projectId, initialDocuments, className }: DocsCardPro
         data-testid="docs-drop-zone"
         role="button"
         tabIndex={0}
-        aria-label="Déposer un doc — cité avec @ dans le chat"
+        aria-label={t("docs.dropZone")}
         aria-busy={uploading || undefined}
         onClick={() => inputRef.current?.click()}
         onKeyDown={(event) => {
@@ -214,7 +242,7 @@ export function DocsCard({ projectId, initialDocuments, className }: DocsCardPro
         )}
       >
         <Upload size={13} aria-hidden="true" />
-        Déposer un doc — cité avec @ dans le chat
+        {t("docs.dropZone")}
       </div>
 
       <input

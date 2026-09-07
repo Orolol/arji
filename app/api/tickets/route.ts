@@ -1,9 +1,13 @@
+import { COLUMN_LABEL_KEYS } from "@/lib/types/kanban";
+import { catalogueValue } from "@/lib/i18n/catalogue";
 import { NextResponse } from "next/server";
 import { and, asc, desc, eq, inArray, or, sql } from "drizzle-orm";
 
 import { KANBAN_COLUMNS, type KanbanStatus } from "@/lib/types/kanban";
 import { REGISTRY_SORTS, type RegistrySort } from "@/lib/tickets-registry/sort";
 import { getSessionLastActivityAt } from "@/lib/agents/watchdog";
+import { resolveUiLocaleForRequest } from "@/lib/i18n/resolve-request-locale";
+import { translatorFor } from "@/lib/i18n/translator";
 import { db } from "@/lib/db";
 import {
   agentSessions,
@@ -36,6 +40,7 @@ import {
 import {
   deriveRegistryRows,
   deriveRegistryTotals,
+  type ActivityCopy,
   type RegistryEpicRow,
   type RegistrySessionRow,
 } from "@/lib/tickets-registry/aggregate";
@@ -797,17 +802,45 @@ export async function GET(request: Request) {
     };
   });
 
-  const derivedRows = deriveRegistryRows({
-    projects: deskProjects,
-    epics: registryEpics,
-    sessions: sessionRows,
-    failureSessions,
-    edges,
-    dependencyEpics,
-    releaseVersionById,
-    costByEpicId,
-    now,
-  });
+  // The DERNIÈRE ACTIVITÉ column is interface copy composed on the server, so
+  // this handler resolves it: an API route is the one place that knows the
+  // request's locale with no component above it (`lib/i18n/catalogue.ts`).
+  // The derivation is handed RESOLVED PHRASES rather than the translator, so
+  // every `Registry.activity.*` key stays literal next to this binding.
+  const locale = resolveUiLocaleForRequest(request);
+  const t = translatorFor(locale, "Registry");
+  const activityCopy: ActivityCopy = {
+    columns: Object.fromEntries(Object.entries(COLUMN_LABEL_KEYS).map(([status, key]) => [status, catalogueValue(locale, key)])),
+    running: (line) => t("activity.running", { line }),
+    question: (age) => t("activity.question", { age }),
+    failed: (error, age) => t("activity.failed", { error, age }),
+    failedFallback: t("activity.failedFallback"),
+    conflict: (branch, age) => t("activity.conflict", { branch, age }),
+    branchUnknown: t("activity.branchUnknown"),
+    blocked: (age) => t("activity.blocked", { age }),
+    created: (age) => t("activity.created", { age }),
+    updated: (age) => t("activity.updated", { age }),
+    merged: (age) => t("activity.merged", { age }),
+    released: (age) => t("activity.released", { age }),
+    reviewClean: t("activity.reviewClean"),
+    findings: (count) => t("activity.findings", { count }),
+    withPr: (pr, detail) => t("activity.withPr", { pr, detail }),
+  };
+  const derivedRows = deriveRegistryRows(
+    {
+      projects: deskProjects,
+      epics: registryEpics,
+      sessions: sessionRows,
+      failureSessions,
+      edges,
+      dependencyEpics,
+      releaseVersionById,
+      costByEpicId,
+      locale,
+      now,
+    },
+    activityCopy,
+  );
   const rows = derivedRows.filter((row) => !scopedStatus || row.status === scopedStatus);
 
   // State pills clear the exact filter, so their counts describe that scope.

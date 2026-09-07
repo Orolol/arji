@@ -1,3 +1,7 @@
+import { COLUMN_LABEL_KEYS, PRIORITY_LABEL_KEYS } from "@/lib/types/kanban";
+import { catalogueValue } from "@/lib/i18n/catalogue";
+import { translatorFor } from "@/lib/i18n/translator";
+import type { TicketDerivedCopy } from "@/components/ticket/copy";
 /**
  * Pure derivations behind the frame-6a ticket overlay.
  *
@@ -281,24 +285,27 @@ describe("session derivations", () => {
 
 describe("descriptionMeta", () => {
   it("builds priority and created from the columns that exist", () => {
-    const meta = descriptionMeta({
-      priority: 2,
-      createdAt: new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString(),
-    });
+    const meta = descriptionMeta(
+      {
+        priority: 2,
+        createdAt: new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString(),
+      },
+      "en", copy
+    );
     expect(meta).toBe("priority high · created 2d ago");
   });
 
   it("adds the GitHub issue only when the column is set", () => {
     expect(
-      descriptionMeta({ priority: 1, createdAt: null, githubIssueNumber: 412 }),
+      descriptionMeta({ priority: 1, createdAt: null, githubIssueNumber: 412 }, "en", copy),
     ).toBe("priority medium · from GH #412");
-    expect(descriptionMeta({ priority: 1, createdAt: null })).toBe(
+    expect(descriptionMeta({ priority: 1, createdAt: null }, "en", copy)).toBe(
       "priority medium",
     );
   });
 
   it("drops the created segment rather than printing a dash for it", () => {
-    expect(descriptionMeta({ priority: 0, createdAt: null })).toBe(
+    expect(descriptionMeta({ priority: 0, createdAt: null }, "en", copy)).toBe(
       "priority low",
     );
   });
@@ -370,7 +377,7 @@ function activity(
 describe("activityTimelineLines", () => {
   it("reads a transition as a completed step, in board labels", () => {
     const [line] = activityTimelineLines(
-      buildActivityFeed([], [activity({ id: "a1" })]),
+      buildActivityFeed([], [activity({ id: "a1" })]), copy
     );
     expect(line.kind).toBe("done");
     expect(line.text).toBe("you · Review → To Merge");
@@ -379,7 +386,7 @@ describe("activityTimelineLines", () => {
 
   it("appends the recorded reason when there is one", () => {
     const [line] = activityTimelineLines(
-      buildActivityFeed([], [activity({ id: "a1", reason: "review passed" })]),
+      buildActivityFeed([], [activity({ id: "a1", reason: "review passed" })]), copy
     );
     expect(line.text).toBe("you · Review → To Merge — review passed");
   });
@@ -397,7 +404,7 @@ describe("activityTimelineLines", () => {
             reason: "Pipeline finished: everything green",
           }),
         ],
-      ),
+      ), copy
     );
     expect(line.kind).toBe("summary");
     expect(line.text).toBe("Pipeline finished: everything green");
@@ -414,7 +421,7 @@ describe("activityTimelineLines", () => {
             reason: `${MCP_CREATE_BUG_ACTIVITY_PREFIX} reported from ARJ-9`,
           }),
         ],
-      ),
+      ), copy
     );
     expect(line.text).toBe("agent created this bug — reported from ARJ-9");
   });
@@ -434,7 +441,7 @@ describe("activityTimelineLines", () => {
         createdAt: "2026-08-28T10:00:10.000Z",
       }),
     ];
-    const [line] = activityTimelineLines(buildActivityFeed([], burst));
+    const [line] = activityTimelineLines(buildActivityFeed([], burst), copy);
     expect(line.text).toBe("2 automatic transitions");
     expect(line.group).toEqual([
       "system · Review → To Merge",
@@ -454,7 +461,7 @@ describe("activityTimelineLines", () => {
           } as never,
         ],
         [activity({ id: "a1" })],
-      ),
+      ), copy
     );
     expect(lines).toHaveLength(1);
     expect(lines[0].text).toBe("you · Review → To Merge");
@@ -502,3 +509,17 @@ describe("mergeTimelineLines", () => {
     expect(merged.map((item) => item.key)).toEqual(["t1", "s1"]);
   });
 });
+
+const t = translatorFor("en", "Ticket");
+const copy: TicketDerivedCopy = {
+  columns: Object.fromEntries(Object.entries(COLUMN_LABEL_KEYS).map(([value, key]) => [value, catalogueValue("en", key)])),
+  priorities: Object.fromEntries(Object.entries(PRIORITY_LABEL_KEYS).map(([value, key]) => [value, catalogueValue("en", key)])),
+  actors: { user: t("derived.actors.user"), agent: t("derived.actors.agent"), system: t("derived.actors.system") },
+  transitions: (count) => t("derived.transitions", { count }),
+  pipelineEvent: t("derived.pipelineEvent"),
+  bugCreated: t("derived.bugCreated"),
+  bugDetail: (detail) => t("derived.bugDetail", { detail }),
+  priority: (priority) => t("derived.priority", { priority }),
+  created: (age) => t("derived.created", { age }),
+  github: (number) => t("derived.github", { number }),
+};

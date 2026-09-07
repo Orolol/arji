@@ -1,0 +1,53 @@
+{
+  "diff": {
+    "loading": "Loading diff...",
+    "retry": "Retry",
+    "refresh": "Refresh"
+  },
+  "summary": {
+    "files": "{count, plural, one {# file} other {# files}}",
+    "openComments": "{count, plural, one {# open comment} other {# open comments}}",
+    "commitsAhead": "{count, plural, one {# commit} other {# commits}} ahead"
+  },
+  "emptyDiff": {
+    "title": "No changes detected.",
+    "versus": "vs",
+    "ahead": "Branch is {count, plural, one {# commit} other {# commits}} ahead of {base}. The branch may have been merged already.",
+    "aheadAndBehind": "Branch is {count, plural, one {# commit} other {# commits}} ahead of {base}, {behind} behind. The branch may have been merged already.",
+    "notDiverged": "The branch has not diverged from {base}. The agent may not have committed its changes yet, or the build may still be running.",
+    "uncommitted": "There are uncommitted changes in the worktree. The agent may have been interrupted before committing."
+  },
+  "file": {
+    "renamedFrom": "(from {path})",
+    "comments": "{count, plural, one {# comment} other {# comments}}"
+  },
+  "commentForm": {
+    "placeholder": "Leave a review comment...",
+    "cancel": "Cancel",
+    "submit": "Comment"
+  },
+  "thread": {
+    "agent": "Agent",
+    "you": "You",
+    "resolved": "Resolved",
+    "resolve": "Resolve",
+    "delete": "Delete"
+  },
+  "actions": {
+    "open": "{count} open",
+    "resolveAll": "Resolve All",
+    "backToDev": "Back to Dev",
+    "merge": "Merge"
+  },
+  "backToDevDialog": {
+    "title": "Send Back to Dev",
+    "description": "{count, plural, one {# open review comment} other {# open review comments}} will be formatted and sent to the agent as context for the next iteration.",
+    "placeholder": "Additional instructions (optional)...",
+    "cancel": "Cancel",
+    "send": "Send to Dev"
+  },
+  "unanchored": {
+    "title": "Findings outside the diff",
+    "note": "— anchored to lines not shown above; resolved by the reviewer or by the merge"
+  }
+}

@@ -1,6 +1,7 @@
 "use client";
 
 import { Hourglass, Moon, StopCircle } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import {
   Chrono,
@@ -39,6 +40,7 @@ export function LiveSessionCard({
   onStop,
   className,
 }: LiveSessionCardProps) {
+  const t = useTranslations("Desk");
   const tone = projectTone(project?.colorIndex ?? 0);
   const metaParts = [session.readableId, session.agentName].filter(Boolean);
 
@@ -68,7 +70,7 @@ export function LiveSessionCard({
           >
             <Moon size={11} aria-hidden="true" />
             <Mono size={10} tone="live-mid">
-              NIGHT
+              {t("working.night")}
             </Mono>
           </span>
         ) : null}
@@ -84,13 +86,13 @@ export function LiveSessionCard({
           >
             <Hourglass size={11} aria-hidden="true" />
             <Mono size={10} tone="live-mid">
-              STALLED
+              {t("working.stalled")}
             </Mono>
           </span>
         ) : null}
         <button
           type="button"
-          aria-label="Stop this session"
+          aria-label={t("working.stopSession")}
           data-testid="desk-stop-session"
           onClick={(event) => {
             event.stopPropagation();

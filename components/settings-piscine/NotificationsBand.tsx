@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { BandHeader, CheckMark, Mono, QuietLink, StrataBand } from "@/components/piscine";
 
 import { SettingRow } from "./SettingRow";
@@ -36,22 +38,24 @@ export interface NotificationsBandProps {
 }
 
 export function NotificationsBand({ webhooks, failed = false }: NotificationsBandProps) {
+  const t = useTranslations("Settings");
+
   return (
     <SettingsSection id="notifications" testId="notifications-settings" className="min-w-0">
       <StrataBand stratum="feed" gap={9} grow>
         <BandHeader
           stratum="feed"
-          label="Notifications"
+          label={t("notifications.label")}
           right={
             <QuietLink href="/settings/integrations" tone="next" size={12}>
-              tout configurer →
+              {t("notifications.configureAll")}
             </QuietLink>
           }
         />
 
         {failed ? null : webhooks.length === 0 ? (
           <Mono size={11} tone="feed-deep" as="div">
-            aucun projet — crée un projet pour brancher une notification
+            {t("notifications.empty")}
           </Mono>
         ) : (
           webhooks.map((entry) => (
@@ -63,15 +67,16 @@ export function NotificationsBand({ webhooks, failed = false }: NotificationsBan
               }
               label={entry.projectName}
               off={entry.url === ""}
-              suffix={entry.url !== "" ? "webhook" : "off"}
+              suffix={
+                entry.url !== "" ? t("notifications.on") : t("notifications.off")
+              }
               suffixTone="feed-deep"
             />
           ))
         )}
 
         <Mono size={10.5} tone="feed-deep" as="div">
-          une session qui se termine et une release publiée sont postées au
-          webhook du projet
+          {t("notifications.note")}
         </Mono>
       </StrataBand>
     </SettingsSection>

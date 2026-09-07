@@ -1,5 +1,8 @@
 "use client";
 
+import { useLocale, useTranslations } from "next-intl";
+import { formatDateTime } from "@/lib/i18n/format";
+import type { UiLocale } from "@/lib/i18n/locales";
 import { Card } from "@/components/ui/card";
 import {
   ArrowRightLeft,
@@ -62,11 +65,8 @@ export function arijActionColor(kind: ArijActionItem["kind"]): string {
   return ARIJ_ACTION_COLORS[kind] ?? "text-muted-foreground";
 }
 
-export function formatArijActionTime(at: string | null): string | null {
-  if (!at) return null;
-  const date = new Date(at);
-  if (Number.isNaN(date.getTime())) return null;
-  return date.toLocaleTimeString();
+export function formatArijActionTime(at: string | null, locale: UiLocale): string | null {
+  return formatDateTime(at, { locale, style: "time" }) || null;
 }
 
 /**
@@ -74,20 +74,27 @@ export function formatArijActionTime(at: string | null): string | null {
  * effects the agent had on the board (status changes, comments, questions,
  * review findings, visual proofs, MCP tool calls). Renders nothing when there are none —
  * sessions without MCP injection stay visually unchanged.
+ *
+ * `summary` and `detail` are NOT catalogue copy: they are the server-side
+ * rendering of what the agent did (lib/agent-sessions/arij-actions.ts), stored
+ * alongside the session, and they are printed exactly as the trace recorded
+ * them.
  */
 export function ArijActionsList({ actions }: { actions?: ArijActionItem[] | null }) {
+  const locale = useLocale();
+  const t = useTranslations("Shared");
   if (!actions || actions.length === 0) return null;
 
   return (
     <Card className="mb-6 rounded-[11px] p-4" data-testid="arij-actions">
       <h3 className="mb-3 text-[11.5px] uppercase tracking-[.08em] text-meta">
-        Arij actions
+        {t("arijActions.title")}
       </h3>
       <ul className="space-y-2">
         {actions.map((action, idx) => {
           const Icon = arijActionIcon(action.kind);
           const color = arijActionColor(action.kind);
-          const time = formatArijActionTime(action.at);
+          const time = formatArijActionTime(action.at, locale);
           return (
             <li
               key={idx}

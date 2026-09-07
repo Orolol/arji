@@ -201,14 +201,14 @@ describe("the project scope round-trips through the URL", () => {
     render(<TicketsRegistryView />);
     expect(ticketIds()).toEqual(["ARJ-a"]);
 
-    await select(/^Projet :/, "Ledger");
+    await select(/^Project:/, "Ledger");
 
     expect(currentUrl()).toBe("/tickets?project=p2");
     expect(ticketIds()).toEqual(["ARJ-b"]);
 
     reload();
 
-    expect(screen.getByRole("button", { name: /^Projet :/ })).toHaveTextContent("Ledger");
+    expect(screen.getByRole("button", { name: /^Project:/ })).toHaveTextContent("Ledger");
     expect(ticketIds()).toEqual(["ARJ-b"]);
     expect(registryCalls.at(-1)?.projectId).toBe("p2");
   });
@@ -216,7 +216,7 @@ describe("the project scope round-trips through the URL", () => {
   it("restores the previous scope on Back and re-applies it on Forward", async () => {
     installAppRouterUrl("/tickets?project=p1");
     render(<TicketsRegistryView />);
-    await select(/^Projet :/, "Ledger");
+    await select(/^Project:/, "Ledger");
     expect(ticketIds()).toEqual(["ARJ-b"]);
 
     await traverse("back");
@@ -232,21 +232,21 @@ describe("the project scope round-trips through the URL", () => {
 
   it("lets a navigation-supplied scope win over the current selection", async () => {
     render(<TicketsRegistryView />);
-    await select(/^Projet :/, "Ledger");
+    await select(/^Project:/, "Ledger");
     expect(currentUrl()).toBe("/tickets?project=p2");
 
     // A top-bar project chip, i.e. a real navigation to the registry.
     act(() => navigateTo("/tickets?project=p1"));
 
     expect(ticketIds()).toEqual(["ARJ-a"]);
-    expect(screen.getByRole("button", { name: /^Projet :/ })).toHaveTextContent("Arij");
+    expect(screen.getByRole("button", { name: /^Project:/ })).toHaveTextContent("Arij");
   });
 
   it("drops the parameter when the scope is cleared rather than writing a blank one", async () => {
     installAppRouterUrl("/tickets?project=p1");
     render(<TicketsRegistryView />);
 
-    await select(/^Projet :/, "Tous les projets");
+    await select(/^Project:/, "All projects");
 
     expect(currentUrl()).toBe("/tickets");
     expect(ticketIds()).toEqual(["ARJ-a", "ARJ-b"]);
@@ -256,7 +256,7 @@ describe("the project scope round-trips through the URL", () => {
     installAppRouterUrl("/tickets?ticket=epic-1&project=p1");
     render(<TicketsRegistryView />);
 
-    await select(/^Projet :/, "Ledger");
+    await select(/^Project:/, "Ledger");
 
     expect(currentUrl()).toBe("/tickets?ticket=epic-1&project=p2");
   });
@@ -266,7 +266,7 @@ describe("the project scope round-trips through the URL", () => {
     render(<TicketsRegistryView />);
     const before = window.history.length;
 
-    await select(/^Projet :/, "Arij");
+    await select(/^Project:/, "Arij");
 
     expect(currentUrl()).toBe("/tickets?project=p1");
     expect(window.history.length).toBe(before);
@@ -288,7 +288,7 @@ describe("state, exact status, sort and direction round-trip too", () => {
     installAppRouterUrl("/tickets?state=done");
     render(<TicketsRegistryView />);
 
-    await select(/^État :/, "Review");
+    await select(/^State:/, "Review");
 
     expect(currentUrl()).toBe("/tickets?status=review");
   });
@@ -296,12 +296,12 @@ describe("state, exact status, sort and direction round-trip too", () => {
   it("writes the sort column, and the direction only when it is not the column's default", async () => {
     render(<TicketsRegistryView />);
     const user = userEvent.setup();
-    const header = () => screen.getByRole("columnheader", { name: "Titre" });
+    const header = () => screen.getByRole("columnheader", { name: "Title" });
 
-    await user.click(within(header()).getByRole("button", { name: "Titre" }));
+    await user.click(within(header()).getByRole("button", { name: "Title" }));
     expect(currentUrl()).toBe("/tickets?sort=titre");
 
-    await user.click(within(header()).getByRole("button", { name: "Titre" }));
+    await user.click(within(header()).getByRole("button", { name: "Title" }));
     expect(currentUrl()).toBe("/tickets?sort=titre&direction=desc");
 
     await traverse("back");
@@ -317,9 +317,9 @@ describe("state, exact status, sort and direction round-trip too", () => {
     ]);
     render(<TicketsRegistryView />);
 
-    expect(screen.getByRole("button", { name: /^Projet :/ })).toHaveTextContent("Ledger");
+    expect(screen.getByRole("button", { name: /^Project:/ })).toHaveTextContent("Ledger");
     expect(screen.getByTestId("tickets-filter-done")).toHaveAttribute("data-active", "true");
-    expect(screen.getByRole("button", { name: /^sort:/ })).toHaveTextContent("coût ↑");
+    expect(screen.getByRole("button", { name: /^sort:/ })).toHaveTextContent("cost ↑");
     expect(registryCalls.at(-1)).toMatchObject({
       projectId: "p2",
       sort: "cout",
@@ -334,8 +334,8 @@ describe("state, exact status, sort and direction round-trip too", () => {
     render(<TicketsRegistryView />);
 
     expect(screen.getByTestId("tickets-filter-all")).toHaveAttribute("data-active", "true");
-    expect(screen.getByRole("button", { name: /^État :/ })).toHaveTextContent("Tous les états");
-    expect(screen.getByRole("button", { name: /^sort:/ })).toHaveTextContent("activité ↓");
+    expect(screen.getByRole("button", { name: /^State:/ })).toHaveTextContent("All states");
+    expect(screen.getByRole("button", { name: /^sort:/ })).toHaveTextContent("activity ↓");
     expect(ticketIds()).toEqual(["ARJ-a", "ARJ-b"]);
     expect(currentUrl()).toBe(
       "/tickets?project=&state=nope&status=nope&sort=nope&direction=nope",

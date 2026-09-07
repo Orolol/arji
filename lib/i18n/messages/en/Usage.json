@@ -1,0 +1,83 @@
+{
+  "range": {
+    "last7d": "7d",
+    "last30d": "30d",
+    "all": "All",
+    "caption7d": "LAST 7 DAYS",
+    "caption30d": "LAST 30 DAYS",
+    "captionAll": "ALL TIME"
+  },
+  "header": {
+    "updated": "Updated {time}",
+    "refresh": "Refresh"
+  },
+  "stats": {
+    "sessions": "SESSIONS",
+    "clean": "CLEAN",
+    "perTicket": "PER TICKET SHIPPED"
+  },
+  "cap": {
+    "label": "MONTHLY CAP",
+    "alert": "alert at {percent}%",
+    "set": "set a cap →",
+    "invalid": "The cap must be a positive amount.",
+    "saveFailed": "Could not save the cap."
+  },
+  "empty": "No agent sessions recorded yet.",
+  "retry": "Retry",
+  "byAgent": {
+    "label": "By agent",
+    "footnote": "cost follows the model, not the CLI — per-session detail in Sessions"
+  },
+  "byProject": {
+    "label": "By project",
+    "footnote": "night runs included",
+    "footnoteWithBatch": "night runs included — last night: {cost}"
+  },
+  "byDay": {
+    "label": "By day",
+    "days": "{count, plural, one {# day} other {# days}}",
+    "legend": "red = failed sessions",
+    "sessions": "{count, plural, one {# session} other {# sessions}}",
+    "failed": "{count} failed"
+  },
+  "providerQuota": "Provider quota",
+  "window": {
+    "unknown": "WINDOW",
+    "weekly": "WEEKLY",
+    "days": "{count}D WINDOW",
+    "hours": "{count}H WINDOW",
+    "minutes": "{count}MIN WINDOW"
+  },
+  "subscription": {
+    "sourceProviderReported": "Provider-reported",
+    "sourceMetered": "Metered via Arij",
+    "plan": "plan: {plan}",
+    "claudeFiveHour": "5H WINDOW",
+    "claudeSevenDay": "7D WINDOW",
+    "claudeSevenDayOpus": "7D OPUS",
+    "claudeSevenDaySonnet": "7D SONNET",
+    "extraUsage": "Extra usage: {used} / {limit} credits · {percent}%",
+    "polledClaude": "Live · polled {age} · claude CLI",
+    "polledCodex": "Live · polled {age} · codex app-server",
+    "stale": "— stale",
+    "meteredSection": "ARIJ-METERED · THIS MACHINE ONLY",
+    "last5h": "LAST 5H",
+    "last7d": "LAST 7 DAYS",
+    "weeklyBudget": "WEEKLY BUDGET",
+    "creditsUnlimited": "Credits: unlimited",
+    "credits": "Credits: {balance}",
+    "allDevices": "ALL DEVICES · PROVIDER-REPORTED",
+    "lifetime": "Lifetime: {tokens} tokens",
+    "historyDay": "{date} · {tokens} tokens",
+    "resetUnknown": "reset time unknown",
+    "windowExpired": "window expired — data stale",
+    "resetsIn": "resets in {countdown}",
+    "codexEmpty": "No provider snapshot found. Codex records rate-limit data when a session runs — none is recorded on this machine yet.",
+    "liveUnavailableSnapshot": "Live quota unavailable — showing last snapshot.",
+    "liveUnavailableMetered": "Live quota unavailable — showing metered data.",
+    "captured": "Captured {age} · ~/.codex/sessions",
+    "meteredDisclaimer": "Sessions recorded by Arij only — not the account's full quota.",
+    "meteredLine": "{sessions, plural, one {# session} other {# sessions}} · {tokens} tokens · {cost}"
+  }
+}

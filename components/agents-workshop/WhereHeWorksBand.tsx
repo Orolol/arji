@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 
 import {
   BandHeader,
@@ -21,8 +22,9 @@ import {
   PROVIDER_LABELS,
   type AgentType,
 } from "@/lib/agent-config/constants";
+import type { TranslationKey } from "@/lib/i18n/catalogue";
 
-import { sourceLabel } from "./agent-initials";
+import { sourceLabelKey } from "./agent-initials";
 
 /**
  * WHERE HE WORKS — the turquoise band, and the ONE band on this screen that
@@ -36,16 +38,28 @@ import { sourceLabel } from "./agent-initials";
  * header carries a link to the full table. Each tile puts the REAL
  * `AGENT_TYPE_LABELS` value in its `title`, so the friendly name never hides
  * which role is being written.
+ *
+ * A MODULE-SCOPE COPY TABLE, so the kickers are catalogue KEY REFERENCES
+ * resolved at render (`lib/i18n/catalogue.ts`, pattern 3).
  */
-const TILES: { kicker: string; agentType: AgentType }[] = [
-  { kicker: "BUILD", agentType: "build" },
+const TILES: { kickerKey: TranslationKey; agentType: AgentType }[] = [
+  { kickerKey: "AgentsWorkshop.whereHeWorks.tiles.build", agentType: "build" },
   // Story-scoped code work — also what the pipeline's fix stage dispatches at
   // story scope, which is what makes "bug fix" the honest user-facing name.
-  { kicker: "BUG FIX", agentType: "ticket_build" },
-  { kicker: "REVIEW", agentType: "review_code" },
-  { kicker: "MERGE FIX", agentType: "merge" },
+  {
+    kickerKey: "AgentsWorkshop.whereHeWorks.tiles.bugFix",
+    agentType: "ticket_build",
+  },
+  {
+    kickerKey: "AgentsWorkshop.whereHeWorks.tiles.review",
+    agentType: "review_code",
+  },
+  {
+    kickerKey: "AgentsWorkshop.whereHeWorks.tiles.mergeFix",
+    agentType: "merge",
+  },
   // spec_generation is reachable on /agents/assignments.
-  { kicker: "CHAT & SPEC", agentType: "chat" },
+  { kickerKey: "AgentsWorkshop.whereHeWorks.tiles.chatAndSpec", agentType: "chat" },
 ];
 
 export interface WhereHeWorksBandProps {
@@ -66,6 +80,10 @@ export function WhereHeWorksBand({
   scope,
   onAssign,
 }: WhereHeWorksBandProps) {
+  const t = useTranslations("AgentsWorkshop");
+  // The second, namespace-less translator resolves the KEY REFERENCES the
+  // module-scope tables above and in `agent-initials.ts` hold.
+  const tKey = useTranslations();
   const [savingRole, setSavingRole] = useState<AgentType | null>(null);
   // A per-role map, never one shared string: one failing assignment must not
   // blank the message of another.
@@ -86,13 +104,13 @@ export function WhereHeWorksBand({
       if (!result.ok) {
         setErrors((current) => ({
           ...current,
-          [agentType]: result.error || "Could not update this assignment.",
+          [agentType]: result.error || t("assignments.updateFailed"),
         }));
       }
     } catch {
       setErrors((current) => ({
         ...current,
-        [agentType]: "Could not update this assignment. Try again.",
+        [agentType]: t("assignments.updateFailedRetry"),
       }));
     } finally {
       setSavingRole(null);
@@ -101,19 +119,19 @@ export function WhereHeWorksBand({
 
   const clearLabel =
     scope === "project"
-      ? "Use the all-projects assignment"
-      : "Use the Arij default";
+      ? t("assignments.clearToGlobal")
+      : t("assignments.clearToDefault");
 
   return (
     <StrataBand stratum="live" density="full" gap={10} grow>
       <BandHeader
         stratum="live"
         labelSize={12}
-        label="Where he works"
-        meta="l'agent par défaut de chaque type de tâche — cet agent est surligné"
+        label={t("whereHeWorks.label")}
+        meta={t("whereHeWorks.meta")}
         right={
           <QuietLink href="/agents/assignments" tone="live" size={12}>
-            tous les rôles →
+            {t("whereHeWorks.allRoles")}
           </QuietLink>
         }
       />
@@ -122,12 +140,12 @@ export function WhereHeWorksBand({
         {/* Five role tiles need ~800px; a phone gets one column, a tablet
             two, and the frame's row of five returns at `xl`. */}
         <div className="grid grid-cols-1 gap-[10px] sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-          {TILES.map(({ kicker, agentType }) => {
+          {TILES.map(({ kickerKey, agentType }) => {
             const assignment = byRole.get(agentType);
             const owned =
               !!selectedAgentId && assignment?.namedAgentId === selectedAgentId;
             const label =
-              assignment?.namedAgent?.name ?? sourceLabel("builtin");
+              assignment?.namedAgent?.name ?? tKey(sourceLabelKey("builtin"));
             const error = errors[agentType];
 
             return (
@@ -141,7 +159,7 @@ export function WhereHeWorksBand({
                 className="flex h-full flex-col gap-[6px] px-3 py-[11px]"
               >
                 <FieldKicker stratum="live" size={10}>
-                  {kicker}
+                  {tKey(kickerKey)}
                 </FieldKicker>
 
                 {owned ? (
@@ -171,10 +189,10 @@ export function WhereHeWorksBand({
                         <span className="flex flex-col items-start">
                           <span>{agent.name}</span>
                           <span className="text-xs text-muted-foreground">
-                            {PROVIDER_LABELS[agent.provider]}
-                            {agent.model
-                              ? ` · ${agent.model}`
-                              : " · CLI default model"}
+                            {t("assignments.agentMeta", {
+                              provider: PROVIDER_LABELS[agent.provider],
+                              model: agent.model || t("common.cliDefaultModel"),
+                            })}
                           </span>
                         </span>
                       </DropdownMenuItem>
@@ -187,11 +205,11 @@ export function WhereHeWorksBand({
                     underneath says nothing. Collapse instead. */}
                 {owned ? (
                   <Mono size={10} tone="muted" clamp={1}>
-                    this agent
+                    {t("whereHeWorks.thisAgent")}
                   </Mono>
                 ) : assignment?.namedAgent ? (
                   <Mono size={10} tone="muted" clamp={1}>
-                    {sourceLabel(assignment.source)}
+                    {tKey(sourceLabelKey(assignment.source))}
                   </Mono>
                 ) : null}
 
@@ -211,14 +229,13 @@ export function WhereHeWorksBand({
 
         {namedAgents.length === 0 ? (
           <p className="pt-[10px] font-sans text-[11.5px] text-strata-live-mid">
-            Create an agent first — then you can assign it to a task.
+            {t("assignments.createFirst")}
           </p>
         ) : null}
       </div>
 
       <span className="font-sans text-[11.5px] text-strata-live-mid">
-        Full Auto et Night runs suivent ces défauts ; un dispatch manuel peut
-        toujours choisir un autre agent.
+        {t("whereHeWorks.footnote")}
       </span>
     </StrataBand>
   );

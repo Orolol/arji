@@ -1,0 +1,56 @@
+{
+  "page": {
+    "heading": "Import Existing Project",
+    "sourceLabel": "Import source",
+    "localFolder": "Local folder",
+    "githubUrl": "GitHub URL",
+    "alreadyCloned": "Repository already cloned — updating.",
+    "fromExistingFile": "Imported from existing arij.json — Claude analysis was skipped.",
+    "openPartial": "Open the partially created project",
+    "partialFailure": "The project was created, but {count, plural, one {# step} other {# steps}} failed:"
+  },
+  "debug": {
+    "summary": "Debug info",
+    "duration": "Duration: {seconds}s",
+    "parseError": "Parse error:",
+    "parsedContent": "Parsed content:",
+    "rawOutput": "Raw CLI output:",
+    "metadata": "Metadata:",
+    "filePreview": "File preview:",
+    "topLevelKeys": "Top-level keys:",
+    "stack": "Stack:"
+  },
+  "errors": {
+    "network": "Network request failed",
+    "requestFailed": "Request failed (HTTP {status})",
+    "bodyNotJson": "Unexpected response from {url} (HTTP {status}): the body is not JSON",
+    "noDataField": "Unexpected response from {url} (HTTP {status}): the JSON has no \"data\" field",
+    "projectUpdateFailed": "Project status and spec were not saved: {error}",
+    "epicNoId": "the API returned no epic id",
+    "epicFailed": "Epic \"{title}\" was not created: {error}",
+    "storyFailed": "User story \"{title}\" (epic \"{epicTitle}\") was not created: {error}",
+    "arjiExportFailed": "arji.json export failed: {error}",
+    "previewShape": "The analysis returned an unexpected preview (missing project or epics). Nothing was imported.",
+    "previewEpicShape": "The analysis returned an unexpected preview (an epic is missing its title or its user stories). Nothing was imported.",
+    "cloneFailed": "Could not clone {repo}: {error}",
+    "cloneIncomplete": "Could not clone {repo}: the clone response is incomplete (missing {fields}).",
+    "projectNoId": "Could not create the project: the API returned no project id.",
+    "projectFailed": "Could not create the project: {error}"
+  },
+  "newProject": {
+    "heading": "New Project",
+    "nameLabel": "Project Name *",
+    "namePlaceholder": "My Awesome Project",
+    "nameRequired": "Project name is required.",
+    "descriptionLabel": "Description",
+    "descriptionPlaceholder": "What is this project about?",
+    "gitPathLabel": "Git Repository Path",
+    "gitPathPlaceholder": "/path/to/your/repo (optional)",
+    "gitPathHint": "Path to an existing local git repository",
+    "submit": "Create Project",
+    "submitPending": "Creating...",
+    "cancel": "Cancel",
+    "createFailedStatus": "Failed to create project (HTTP {status})",
+    "createFailed": "Failed to create project"
+  }
+}

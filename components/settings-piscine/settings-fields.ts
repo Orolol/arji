@@ -26,8 +26,15 @@
  * GLOBAL KEYS ONLY. Every key here is bare. A `<key>:<projectId>` override is
  * per-project state edited by the project's own surfaces (AutoModeDialog,
  * LimitsView, the project settings page); this screen must never write one.
+ *
+ * NO COPY IN THIS FILE. A refusal names a CATALOGUE KEY (`errorKey`), not a
+ * sentence: this table is evaluated at import time and read by pure logic and
+ * tests that never render text, so it cannot call a translator
+ * (`lib/i18n/catalogue.ts`, pattern 3). `useSettingsDraft` resolves the key
+ * where the message is shown.
  */
 
+import type { TranslationKey } from "@/lib/i18n/catalogue";
 import {
   AUTO_MODE_BUILD_AGENT_SETTING_KEY,
   AUTO_MODE_ENABLED_SETTING_KEY,
@@ -112,14 +119,18 @@ export type SettingsData = Record<string, unknown>;
 
 /**
  * `value` — send it. `omit` — the editor holds nothing storable (a half-typed
- * number), so the key drops out of this PATCH. `error` — refuse the WHOLE
- * save and show this message; the settings route validates every key before
- * writing any, and so does this screen.
+ * number), so the key drops out of this PATCH. `errorKey` — refuse the WHOLE
+ * save and show that catalogue string; the settings route validates every key
+ * before writing any, and so does this screen. `errorValues` carries the ICU
+ * arguments the message needs, when it takes any.
  */
 export type ParseResult =
   | { readonly value: unknown }
   | { readonly omit: true }
-  | { readonly error: string };
+  | {
+      readonly errorKey: TranslationKey;
+      readonly errorValues?: Readonly<Record<string, string | number>>;
+    };
 
 export interface SettingFieldSpec {
   key: string;
@@ -139,7 +150,7 @@ function parseDollarBudget(editor: EditorValue): ParseResult {
   if (raw === "") return { value: null };
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed <= 0) {
-    return { error: "Budget must be a positive dollar amount." };
+    return { errorKey: "Settings.errors.dollarBudget" };
   }
   return { value: parsed };
 }
@@ -230,7 +241,7 @@ const SPECS: readonly SettingFieldSpec[] = [
       const raw = String(editor).trim();
       if (raw === "") return { value: null }; // empty = unlimited
       const parsed = parseNightCostCap(raw);
-      if (parsed === null) return { error: "Cost cap must be a positive dollar amount." };
+      if (parsed === null) return { errorKey: "Settings.errors.nightCostCap" };
       return { value: parsed };
     },
   },
@@ -245,7 +256,7 @@ const SPECS: readonly SettingFieldSpec[] = [
       if (raw === "") return { value: null }; // empty = engine default
       const parsed = parseNightCircuitBreaker(raw);
       if (parsed === null) {
-        return { error: "Circuit breaker must be a whole number between 0 and 10." };
+        return { errorKey: "Settings.errors.nightCircuitBreaker" };
       }
       return { value: parsed };
     },
@@ -278,9 +289,7 @@ const SPECS: readonly SettingFieldSpec[] = [
       if (raw === "") return { value: null };
       const parsed = parsePromptTokenBudget(raw);
       if (parsed === null || parsed <= 0) {
-        return {
-          error: "Budget must be a positive integer token count (e.g. 50000 or 50k).",
-        };
+        return { errorKey: "Settings.errors.promptTokenBudget" };
       }
       return { value: parsed };
     },
@@ -330,10 +339,7 @@ const SPECS: readonly SettingFieldSpec[] = [
     parse: (editor) => {
       const parsed = parseVerifyCommands(String(editor));
       if (parsed === null) {
-        return {
-          error:
-            "Verification commands must be a JSON array of objects with non-empty name and command fields.",
-        };
+        return { errorKey: "Settings.errors.verifyCommands" };
       }
       return { value: parsed };
     },
@@ -344,7 +350,7 @@ const SPECS: readonly SettingFieldSpec[] = [
     parse: (editor) => {
       const parsed = parseVerifyTimeoutMs(String(editor).trim());
       if (parsed === null) {
-        return { error: "Verification timeout must be a positive number of milliseconds." };
+        return { errorKey: "Settings.errors.verifyTimeout" };
       }
       return { value: parsed };
     },
@@ -365,7 +371,8 @@ const SPECS: readonly SettingFieldSpec[] = [
       if (!parsed) {
         // Without {files} the template runs the whole suite on every check.
         return {
-          error: `The command must contain ${REGRESSION_COMMAND_FILE_PLACEHOLDER} — it is replaced with the detected test files.`,
+          errorKey: "Settings.errors.regressionCommand",
+          errorValues: { placeholder: REGRESSION_COMMAND_FILE_PLACEHOLDER },
         };
       }
       return { value: parsed };
@@ -380,7 +387,7 @@ const SPECS: readonly SettingFieldSpec[] = [
       ).join(", "),
     parse: (editor) => {
       const parsed = parseTestFilePatterns(String(editor));
-      if (!parsed) return { error: "Enter at least one glob pattern." };
+      if (!parsed) return { errorKey: "Settings.errors.testFilePatterns" };
       return { value: parsed };
     },
   },

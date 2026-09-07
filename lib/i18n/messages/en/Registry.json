@@ -1,0 +1,132 @@
+{
+  "columns": {
+    "ticket": "Ticket",
+    "title": "Title",
+    "state": "State",
+    "stories": "Stories",
+    "priority": "Priority",
+    "activity": "Last activity",
+    "cost": "Cost",
+    "project": "Project",
+    "group": "Group"
+  },
+  "sortOptions": {
+    "activity": "activity",
+    "priority": "priority",
+    "cost": "cost",
+    "ticket": "ticket",
+    "title": "title",
+    "state": "state",
+    "stories": "stories"
+  },
+  "groups": {
+    "active": "Active",
+    "yourTurn": "Your turn",
+    "waiting": "Waiting",
+    "done": "Done",
+    "released": "Released"
+  },
+  "task": {
+    "build": "Build",
+    "review": "Review",
+    "merge": "Merge",
+    "grading": "Grading",
+    "qa": "QA",
+    "memory": "Memory",
+    "release": "Release",
+    "refinement": "Refinement",
+    "chat": "Chat"
+  },
+  "filters": {
+    "searchPlaceholder": "Filter tickets…",
+    "searchLabel": "Filter tickets",
+    "project": "Project: {name}",
+    "projectAll": "All projects",
+    "status": "State: {name}",
+    "statusAll": "All states",
+    "stateAll": "All",
+    "stateOpen": "Open",
+    "stateActive": "Active",
+    "stateYourTurn": "Your turn",
+    "stateDone": "Done",
+    "stateReleased": "Released",
+    "bug": "Bug",
+    "highPlus": "High+",
+    "sort": "sort: {label} {direction}"
+  },
+  "table": {
+    "sortHint": "Sort within each group",
+    "showAll": "show all ↓",
+    "more": "+ {count} more",
+    "moreDone": "+ {count} more done",
+    "moreReleased": "+ {count} more released",
+    "moreBacklog": "+ {count} more in backlog"
+  },
+  "footer": {
+    "status": "{tickets, plural, one {# ticket} other {# tickets}} · {projects, plural, one {# project} other {# projects}}",
+    "cost30d": "30d total cost:",
+    "exportCsv": "Export CSV",
+    "exportHint": "Exports {count, plural, one {the loaded ticket} other {the # loaded tickets}}"
+  },
+  "state": {
+    "active": "active",
+    "asks": "ASKS YOU",
+    "failed": "FAILED",
+    "conflict": "CONFLICT",
+    "waitsOn": "waits on {blocker}",
+    "waitsOnMore": "waits on {blocker} +{count}",
+    "draft": "Draft",
+    "queued": "QUEUED",
+    "queueRank": "{label} · #{rank}",
+    "readyToLand": "Ready to land",
+    "merged": "Merged",
+    "released": "released"
+  },
+  "activity": {
+    "running": "› {line}",
+    "question": "question · {age}",
+    "failed": "{error} · {age}",
+    "failedFallback": "failed",
+    "conflict": "{branch} · {age}",
+    "branchUnknown": "branch",
+    "blocked": "blocked · {age}",
+    "created": "created · {age}",
+    "updated": "updated · {age}",
+    "merged": "merged · {age}",
+    "released": "released · {age}",
+    "reviewClean": "review clean",
+    "findings": "{count, plural, one {# finding} other {# findings}}",
+    "withPr": "#{pr} · {detail}"
+  },
+  "refinement": {
+    "target": "refine: {project}",
+    "targetNone": "refine: —",
+    "started": "Agent Refinement started — re-passing Backlog and To do",
+    "finished": "Board refinement finished — see the notification for the summary"
+  },
+  "errors": {
+    "loadFailed": "Failed to load the registry",
+    "loadFailedStatus": "Failed to load the registry ({status})"
+  },
+  "newTicket": {
+    "back": "← Tickets",
+    "band": "New ticket",
+    "fieldTitle": "Title",
+    "titlePlaceholder": "What the ticket must deliver",
+    "fieldDescription": "Description",
+    "descriptionPlaceholder": "Context, constraints, criteria — optional",
+    "fieldProject": "Project",
+    "projectNone": "No project",
+    "fieldPriority": "Priority",
+    "priorityFallback": "Medium",
+    "fieldColumn": "Column",
+    "columnBacklog": "Backlog",
+    "columnTodo": "To Do",
+    "fieldType": "Type",
+    "bug": "Bug",
+    "submit": "Create ticket",
+    "submitPending": "Creating…",
+    "refused": "Creation refused ({status})",
+    "unreachable": "Could not create — the server did not answer"
+  }
+}

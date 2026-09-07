@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import {
   Select,
   SelectContent,
@@ -51,7 +52,7 @@ interface NamedAgentSelectProps {
    * never switch provider (the provider select yields to a named agent).
    */
   allowClear?: boolean;
-  /** Label of the clear row. */
+  /** Label of the clear row. Defaults to the catalogue's "No agent". */
   clearLabel?: string;
   /**
    * Task type this picker dispatches. When set, each agent row carries its
@@ -72,9 +73,10 @@ export function NamedAgentSelect({
   "aria-labelledby": ariaLabelledBy,
   "aria-describedby": ariaDescribedBy,
   allowClear = false,
-  clearLabel = "No agent",
+  clearLabel,
   dispatchRole,
 }: NamedAgentSelectProps) {
+  const t = useTranslations("Shared");
   const { agents, loading } = useNamedAgentsList();
   const reliability = useDispatchReliability(dispatchRole);
   // Carried by every branch below: the loading and empty states render a
@@ -91,7 +93,7 @@ export function NamedAgentSelect({
     return (
       <Select disabled>
         <SelectTrigger {...labelProps} className={className ?? "w-44 h-7 text-xs"}>
-          <SelectValue placeholder="Loading..." />
+          <SelectValue placeholder={t("namedAgentSelect.loading")} />
         </SelectTrigger>
       </Select>
     );
@@ -101,7 +103,7 @@ export function NamedAgentSelect({
     return (
       <Select disabled>
         <SelectTrigger {...labelProps} className={className ?? "w-44 h-7 text-xs"}>
-          <SelectValue placeholder="No agents configured" />
+          <SelectValue placeholder={t("namedAgentSelect.empty")} />
         </SelectTrigger>
       </Select>
     );
@@ -116,11 +118,13 @@ export function NamedAgentSelect({
       disabled={disabled}
     >
       <SelectTrigger {...labelProps} className={className ?? "w-44 h-7 text-xs"}>
-        <SelectValue placeholder="Select agent" />
+        <SelectValue placeholder={t("namedAgentSelect.placeholder")} />
       </SelectTrigger>
       <SelectContent>
         {allowClear && (
-          <SelectItem value={NO_AGENT_VALUE}>{clearLabel}</SelectItem>
+          <SelectItem value={NO_AGENT_VALUE}>
+            {clearLabel ?? t("namedAgentSelect.noAgent")}
+          </SelectItem>
         )}
         {agents.map((agent) => {
           if (!dispatchRole) {

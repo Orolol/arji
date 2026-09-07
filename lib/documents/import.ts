@@ -45,6 +45,14 @@ export interface ScannedDocumentImportResult {
  * `skipped` with a reason, mirroring the scanner's per-entry error posture.
  * Dedup is case-insensitive on the basename, matching the upload route's
  * uniqueness rule (and the documents_project_filename_unique index).
+ *
+ * THE SKIP REASONS ARE ENGLISH, AND DELIBERATELY NOT CATALOGUE KEYS. They are
+ * server-generated text crossing the API boundary in the response body, which
+ * the localization epic settled as out of scope along with notification rows
+ * and activity entries — localizing them would need a key+params persistence
+ * scheme this epic explicitly does not build. They were French; that was the
+ * language mix the epic removes, so they are rewritten in English and left as
+ * literals. `lib/i18n/catalogue.ts` pattern 5 is the rule they sit under.
  */
 export async function importScannedDocuments(
   root: string,
@@ -67,23 +75,23 @@ export async function importScannedDocuments(
     // refuse anything that is absolute or escapes the scanned root.
     const rel = relativePath.replace(/\\/g, "/");
     if (path.isAbsolute(rel) || rel.split("/").includes("..")) {
-      skip("Chemin invalide.");
+      skip("Not a file.");
       continue;
     }
     const absolutePath = path.resolve(rootResolved, rel);
     if (!absolutePath.startsWith(rootResolved + path.sep)) {
-      skip("Chemin invalide.");
+      skip("Not a file.");
       continue;
     }
 
     const extension = path.extname(rel).toLowerCase();
     if (!DOCUMENT_SCAN_EXTENSIONS[extension]) {
-      skip("Type de fichier non pris en charge.");
+      skip("Unsupported file type.");
       continue;
     }
     if (extension === ".doc") {
       skip(
-        "Format .doc non pris en charge — convertissez le fichier en .docx."
+        "The .doc format is not supported — convert the file to .docx."
       );
       continue;
     }
@@ -93,16 +101,16 @@ export async function importScannedDocuments(
     try {
       stat = fs.statSync(absolutePath);
     } catch {
-      skip("Fichier introuvable sur le disque.");
+      skip("File not found on disk.");
       continue;
     }
     if (!stat.isFile()) {
-      skip("Chemin invalide.");
+      skip("Not a file.");
       continue;
     }
     if (stat.size > MAX_FILE_SIZE_BYTES) {
       skip(
-        `Fichier trop volumineux (${(stat.size / 1024 / 1024).toFixed(1)} Mo, max 20 Mo).`
+        `File too large (${(stat.size / 1024 / 1024).toFixed(1)} MB, max 20 MB).`
       );
       continue;
     }
@@ -110,7 +118,7 @@ export async function importScannedDocuments(
     const fileName = path.basename(rel);
     const lowerName = fileName.toLowerCase();
     if (batchSeen.has(lowerName)) {
-      skip(`« ${fileName} » est déjà importé dans cette demande.`);
+      skip(`"${fileName}" is already part of this request.`);
       continue;
     }
     batchSeen.add(lowerName);
@@ -126,7 +134,7 @@ export async function importScannedDocuments(
       )
       .get();
     if (duplicate) {
-      skip("Déjà importé.");
+      skip("Already imported.");
       continue;
     }
 
@@ -136,8 +144,8 @@ export async function importScannedDocuments(
       markdownContent = await convertToMarkdown(buffer, mimeType, fileName);
     } catch (error) {
       skip(
-        `Échec de la conversion : ${
-          error instanceof Error ? error.message : "Erreur inconnue"
+        `Conversion failed: ${
+          error instanceof Error ? error.message : "Unknown error"
         }`
       );
       continue;
@@ -163,7 +171,7 @@ export async function importScannedDocuments(
     } catch {
       // Lost a race against the case-insensitive unique index (e.g. a manual
       // upload landing between the duplicate check and the insert).
-      skip("Déjà importé.");
+      skip("Already imported.");
       continue;
     }
 

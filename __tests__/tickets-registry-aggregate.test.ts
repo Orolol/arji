@@ -1,3 +1,5 @@
+import { COLUMN_LABEL_KEYS } from "@/lib/types/kanban";
+import { catalogueValue } from "@/lib/i18n/catalogue";
 /**
  * The registry's pure derivation, from plain objects.
  *
@@ -7,21 +9,45 @@
  */
 import { describe, it, expect } from "vitest";
 
-import { relativeAge as deskRelativeAge } from "@/components/desk/AttentionRow";
+import { formatRelative } from "@/lib/i18n/format";
+import { translatorFor } from "@/lib/i18n/translator";
 import { deriveProjects, type FailureSessionRow } from "@/lib/control-desk/aggregate";
 import {
   GROUP_PREVIEW,
   TASK_LABEL,
   composeActivity,
   deriveRegistryRows,
+  type ActivityCopy,
   type RegistrySessionRow,
   deriveRegistryTotals,
-  relativeAge,
   type RegistryEpicRow,
 } from "@/lib/tickets-registry/aggregate";
 import type { TicketDependencyEdge } from "@/lib/types/kanban";
 
 const NOW = new Date("2026-08-30T12:00:00.000Z");
+
+/**
+ * The resolved phrases the route hands the derivation. Built from the real
+ * catalogue, so what this file pins is the copy the screen actually renders.
+ */
+const t = translatorFor("en", "Registry");
+const copy: ActivityCopy = {
+  columns: Object.fromEntries(Object.entries(COLUMN_LABEL_KEYS).map(([value, key]) => [value, catalogueValue("en", key)])),
+  running: (line) => t("activity.running", { line }),
+  question: (age) => t("activity.question", { age }),
+  failed: (error, age) => t("activity.failed", { error, age }),
+  failedFallback: t("activity.failedFallback"),
+  conflict: (branch, age) => t("activity.conflict", { branch, age }),
+  branchUnknown: t("activity.branchUnknown"),
+  blocked: (age) => t("activity.blocked", { age }),
+  created: (age) => t("activity.created", { age }),
+  updated: (age) => t("activity.updated", { age }),
+  merged: (age) => t("activity.merged", { age }),
+  released: (age) => t("activity.released", { age }),
+  reviewClean: t("activity.reviewClean"),
+  findings: (count) => t("activity.findings", { count }),
+  withPr: (pr, detail) => t("activity.withPr", { pr, detail }),
+};
 
 const projects = deriveProjects([
   { id: "p1", name: "Arij", createdAt: "2026-01-01T00:00:00.000Z" },
@@ -123,8 +149,9 @@ function derive(input: {
     edges: input.edges ?? [],
     releaseVersionById: input.releases ?? new Map(),
     costByEpicId: input.costs ?? new Map(),
+    locale: "en",
     now: NOW,
-  });
+  }, copy);
 }
 
 describe("group precedence", () => {
@@ -135,7 +162,7 @@ describe("group precedence", () => {
     });
     expect(row.group).toBe("active");
     expect(row.taskType).toBe("REVIEW");
-    expect(TASK_LABEL[row.taskType!]).toBe("Review");
+    expect(TASK_LABEL[row.taskType!].labelKey).toBe("Registry.task.review");
   });
 
   it("a to_merge epic with a live merge conflict lands in YOUR TURN, not DONE", () => {
@@ -254,11 +281,14 @@ describe("the waiting group", () => {
     expect(byId.get("3")!.activity).toBe("blocked · 1d ago");
   });
 
+  // 10.5 days before NOW reads "10d ago": the shared `formatRelative` floors
+  // whole units the way `timeAgo` and the French formatters always did; the
+  // registry's retired copy was the one variant that rounded half-days up.
   it("marks a backlog epic as a draft and dates it from creation", () => {
     const [row] = derive({ epics: [epic({ id: "1", status: "backlog" })] });
     expect(row.isDraft).toBe(true);
     expect(row.queueLabel).toBe("Backlog");
-    expect(row.activity).toBe("created · 11d ago");
+    expect(row.activity).toBe("created · 10d ago");
   });
 
   it("marks a ticket a queued session already owns", () => {
@@ -289,15 +319,16 @@ describe("composeActivity", () => {
     openFindings: null,
     createdAt: "2026-08-20T00:00:00.000Z",
     updatedAt: "2026-08-29T12:00:00.000Z",
+    locale: "en",
     now: NOW,
   } as const;
 
   it("active quotes the streamed line, or an ellipsis when there is none", () => {
     expect(
-      composeActivity({ ...base, group: "active", lastLogLine: "running vitest" })
+      composeActivity({ ...base, group: "active", lastLogLine: "running vitest" }, copy)
         .activity,
     ).toBe("› running vitest");
-    expect(composeActivity({ ...base, group: "active" }).activity).toBe("› …");
+    expect(composeActivity({ ...base, group: "active" }, copy).activity).toBe("› …");
   });
 
   it("asks / failed / conflict", () => {
@@ -307,7 +338,7 @@ describe("composeActivity", () => {
         group: "your_turn",
         yourTurnKind: "asks",
         askedAt: "2026-08-30T11:54:00.000Z",
-      }).activity,
+      }, copy).activity,
     ).toBe("question · 6m ago");
 
     const failed = composeActivity({
@@ -316,7 +347,7 @@ describe("composeActivity", () => {
       yourTurnKind: "failed",
       failureError: "exit 1",
       failedAt: "2026-08-30T11:39:00.000Z",
-    });
+    }, copy);
     expect(failed.activity).toBe("exit 1 · 21m ago");
     expect(failed.tone).toBe("you-deep");
 
@@ -327,24 +358,24 @@ describe("composeActivity", () => {
         yourTurnKind: "conflict",
         branchName: "epic/tax-export",
         conflictAt: "2026-08-30T11:00:00.000Z",
-      }).activity,
+      }, copy).activity,
     ).toBe("epic/tax-export · 1h ago");
 
     // No branch recorded: the word, never an invented file list.
     expect(
-      composeActivity({ ...base, group: "your_turn", yourTurnKind: "conflict" })
+      composeActivity({ ...base, group: "your_turn", yourTurnKind: "conflict" }, copy)
         .activity,
-    ).toBe("branche · —");
+    ).toBe("branch · —");
   });
 
   it("waiting: blocked, backlog and everything else", () => {
-    expect(composeActivity({ ...base, group: "waiting", blocked: true }).activity).toBe(
+    expect(composeActivity({ ...base, group: "waiting", blocked: true }, copy).activity).toBe(
       "blocked · 1d ago",
     );
     expect(
-      composeActivity({ ...base, group: "waiting", status: "backlog" }).activity,
-    ).toBe("created · 11d ago");
-    expect(composeActivity({ ...base, group: "waiting" }).activity).toBe(
+      composeActivity({ ...base, group: "waiting", status: "backlog" }, copy).activity,
+    ).toBe("created · 10d ago");
+    expect(composeActivity({ ...base, group: "waiting" }, copy).activity).toBe(
       "updated · 1d ago",
     );
   });
@@ -358,7 +389,7 @@ describe("composeActivity", () => {
         mergeReady: true,
         prNumber: 218,
         openFindings: 0,
-      }).activity,
+      }, copy).activity,
     ).toBe("#218 · review clean");
     expect(
       composeActivity({
@@ -367,19 +398,19 @@ describe("composeActivity", () => {
         status: "to_merge",
         mergeReady: true,
         openFindings: 2,
-      }).activity,
+      }, copy).activity,
     ).toBe("2 findings");
-    expect(composeActivity({ ...base, group: "done", status: "done" }).activity).toBe(
+    expect(composeActivity({ ...base, group: "done", status: "done" }, copy).activity).toBe(
       "merged · 1d ago",
     );
     expect(
-      composeActivity({ ...base, group: "done", status: "to_merge" }).activity,
+      composeActivity({ ...base, group: "done", status: "to_merge" }, copy).activity,
     ).toBe("updated · 1d ago");
   });
 
   it("released", () => {
     expect(
-      composeActivity({ ...base, group: "released", status: "released" }).activity,
+      composeActivity({ ...base, group: "released", status: "released" }, copy).activity,
     ).toBe("released · 1d ago");
   });
 });
@@ -400,19 +431,49 @@ describe("data gaps", () => {
   });
 });
 
-describe("relativeAge", () => {
-  it("is byte-identical to the desk's formatter", () => {
-    const samples = [
-      null,
-      "not a date",
+describe("activity ages", () => {
+  /**
+   * The registry used to keep a byte-identical copy of the desk's
+   * `relativeAge` and pin the two together here. Both are the shared
+   * `formatRelative` now, so what this pins is that the column really goes
+   * through it — seconds while fresh, SQLite stamps read as UTC, an em dash
+   * for an unreadable one.
+   */
+  it("are the shared formatRelative, seconds precision", () => {
+    const stamp = (at: string | null) =>
+      formatRelative(at, { locale: "en", now: NOW, precision: "second" }) || "—";
+    const composed = (updatedAt: string | null) =>
+      composeActivity({
+        group: "released",
+        yourTurnKind: null,
+        status: "released",
+        blocked: false,
+        mergeReady: false,
+        lastLogLine: null,
+        askedAt: null,
+        failedAt: null,
+        failureError: null,
+        conflictAt: null,
+        branchName: null,
+        prNumber: null,
+        openFindings: null,
+        createdAt: null,
+        updatedAt,
+        locale: "en",
+        now: NOW,
+      }, copy).activity;
+    for (const sample of [
       "2026-08-30T11:59:30.000Z",
       "2026-08-30T11:39:00.000Z",
       "2026-08-30 11:00:00",
       "2026-08-20T00:00:00.000Z",
-    ];
-    for (const sample of samples) {
-      expect(relativeAge(sample, NOW)).toBe(deskRelativeAge(sample, NOW));
+      "not a date",
+    ]) {
+      expect(composed(sample)).toBe(`released · ${stamp(sample)}`);
     }
+    expect(stamp("2026-08-30T11:59:30.000Z")).toBe("30s ago");
+    expect(stamp("2026-08-30 11:00:00")).toBe("1h ago");
+    expect(stamp("not a date")).toBe("—");
   });
 });
 

@@ -2,6 +2,8 @@ import { defineConfig, globalIgnores } from "eslint/config";
 import nextVitals from "eslint-config-next/core-web-vitals";
 import nextTs from "eslint-config-next/typescript";
 
+import noBareJsxCopy from "./eslint-rules/no-bare-jsx-copy.mjs";
+
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
@@ -25,6 +27,14 @@ const eslintConfig = defineConfig([
     files: ["e2e/**"],
     rules: {
       "react-hooks/rules-of-hooks": "off",
+    },
+  },
+  {
+    files: ["components/**/*.tsx", "app/**/*.tsx"],
+    ignores: ["app/piscine-preview/**", "app/_piscine-preview/**"],
+    plugins: { i18n: { rules: { "no-bare-jsx-copy": noBareJsxCopy } } },
+    rules: {
+      "i18n/no-bare-jsx-copy": ["error", { allowPattern: "^(?:(?:·|—|→|←|↑|↓|⌘|⌥|⇧|…)+|git remote (?:add|set-url)(?: --push)?|<url>)$" }],
     },
   },
   // Override default ignores of eslint-config-next.

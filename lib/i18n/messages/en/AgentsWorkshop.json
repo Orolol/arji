@@ -1,0 +1,190 @@
+{
+  "common": {
+    "save": "Save",
+    "saving": "Saving…",
+    "cancel": "Cancel",
+    "create": "Create",
+    "creating": "Creating…",
+    "delete": "Delete",
+    "deleting": "Deleting…",
+    "loading": "Loading…",
+    "cliDefault": "CLI default",
+    "cliDefaultModel": "CLI default model",
+    "agentNamePlaceholder": "Agent name"
+  },
+  "tabs": {
+    "namedAgents": "Named agents",
+    "assignments": "Assignments",
+    "prompts": "Prompts",
+    "limits": "Limits",
+    "usage": "Usage"
+  },
+  "scope": {
+    "global": "Global",
+    "thisProject": "This project"
+  },
+  "source": {
+    "builtin": "Arij default",
+    "global": "All projects",
+    "project": "This project"
+  },
+  "frictions": {
+    "pill": "Frictions · {count} open"
+  },
+  "roster": {
+    "unsaved": "unsaved",
+    "providerLine": "{provider} · {model}",
+    "runsToday": "runs today",
+    "clean": "clean",
+    "liveSessions": "{count, plural, one {# session live} other {# sessions live}}",
+    "addAgent": "Add agent",
+    "addAgentHint": "A name and a CLI are all it takes — everything runs with sensible defaults.",
+    "namePlaceholder": "e.g. Fast builder",
+    "adding": "Adding…",
+    "createFailed": "Could not create this agent. Try again.",
+    "createFailedConnection": "Could not create this agent. Check the connection and try again."
+  },
+  "inventory": {
+    "kicker": "CLIS ON THIS MACHINE",
+    "row": "{provider} · {status}",
+    "checking": "checking…",
+    "ready": "ready",
+    "notInstalled": "not installed"
+  },
+  "cli": {
+    "hintChecking": "Checking whether {cli} is ready on this machine.",
+    "hintReady": "{cli} is ready to use on this machine.",
+    "hintMissing": "{cli} was not detected. Install or sign in to the CLI before running this agent.",
+    "srChecking": " — checking availability",
+    "srReady": " — ready to use",
+    "srMissing": " — not detected"
+  },
+  "identity": {
+    "nameKicker": "NAME",
+    "cliKicker": "CLI",
+    "modelKicker": "MODEL",
+    "retryKicker": "RETRY ESCALATION",
+    "nameAria": "Name",
+    "modelAria": "Model",
+    "retryNone": "None",
+    "retryStronger": "Stronger model",
+    "retryStrongerHint": "no other agent uses this CLI",
+    "retryOtherCli": "Other CLI",
+    "retryOtherCliHint": "always tried as a last resort — attempt 3 without a stronger model, attempt 4 with one.",
+    "chooseAgent": "Choose an agent",
+    "candidate": "{name} — {model}"
+  },
+  "numbers": {
+    "label": "The numbers",
+    "meta": "last 14 days, all projects",
+    "metaEmpty": "last 14 days, all projects — no run in the period",
+    "sampleTitle": "{completed}/{terminal} terminal runs in {days, plural, one {# day} other {# days}}",
+    "openUsage": "open usage →",
+    "captions": {
+      "runs": "RUNS",
+      "clean": "CLEAN",
+      "median": "MEDIAN",
+      "cost": "COST",
+      "escalations": "ESCALATIONS"
+    },
+    "sparkline": "runs / day · ",
+    "sparklineFailed": "red = failed"
+  },
+  "persona": {
+    "label": "Persona",
+    "meta": "prepended to every prompt this agent runs — empty means none",
+    "aria": "Persona",
+    "counter": "{count} / {max}"
+  },
+  "cliOptions": {
+    "label": "CLI options",
+    "meta": "apply to the sessions that produce code — reviews keep their posture",
+    "kickerSuffix": {
+      "effort": " — how much the agent thinks per turn",
+      "permissionMode": " — what it may touch without asking"
+    }
+  },
+  "whereHeWorks": {
+    "label": "Where he works",
+    "meta": "the default agent for each kind of task — this agent is highlighted",
+    "allRoles": "all roles →",
+    "thisAgent": "this agent",
+    "footnote": "Full Auto and Night runs follow these defaults; a manual dispatch can always pick another agent.",
+    "tiles": {
+      "build": "BUILD",
+      "bugFix": "BUG FIX",
+      "review": "REVIEW",
+      "mergeFix": "MERGE FIX",
+      "chatAndSpec": "CHAT & SPEC"
+    }
+  },
+  "assignments": {
+    "label": "Task assignments",
+    "intro": "Choose which named agent Arij should use automatically for each task. Leave a role on its default unless it needs a specialist.",
+    "createFirst": "Create an agent first — then you can assign it to a task.",
+    "clearToGlobal": "Use the all-projects assignment",
+    "clearToDefault": "Use the Arij default",
+    "agentMeta": "{provider} · {model}",
+    "updateFailed": "Could not update this assignment.",
+    "updateFailedRetry": "Could not update this assignment. Try again."
+  },
+  "editor": {
+    "empty": "No agents yet — create your first one on the left.",
+    "saveFailed": "Could not save this agent. Try again.",
+    "saveFailedConnection": "Could not save this agent. Check the connection and try again.",
+    "deleteFailed": "Could not delete this agent. Try again.",
+    "deleteFailedConnection": "Could not delete this agent. Check the connection and try again.",
+    "created": "created {age}",
+    "deleteAgent": "Delete agent",
+    "discard": "Discard",
+    "deleteTitle": "Delete this agent?",
+    "deleteDescription": "\"{name}\" will be removed. Assignments pointing at it fall back to the Arij default."
+  },
+  "prompts": {
+    "rolePromptsLabel": "Role prompts",
+    "rolePromptsMeta": "what each role does when it runs — the current values already work",
+    "promptPlaceholder": "Describe how this role should behave",
+    "instructionsAria": "{role} instructions",
+    "resetToGlobal": "Reset to all projects",
+    "reviewAgentsLabel": "Review agents",
+    "reviewAgentsMeta": "the four built-in reviews, plus your own",
+    "included": "Included",
+    "builtinNote": "Built-in review instructions are editable from the role prompts above.",
+    "reviewNameAria": "Review agent name",
+    "reviewInstructionsAria": "Review agent instructions",
+    "reviewPlaceholder": "Describe what this reviewer should check",
+    "sharedAcrossProjects": "Shared across projects",
+    "editableHere": "Editable here",
+    "addReviewAgent": "Add review agent",
+    "newReviewNameAria": "New review agent name",
+    "newAgentNamePlaceholder": "New agent name",
+    "newReviewInstructionsAria": "New review agent instructions",
+    "saveReviewFailed": "Could not save this review agent. Try again.",
+    "saveReviewFailedConnection": "Could not save this review agent. Check the connection and try again.",
+    "deleteReviewFailed": "Could not delete this review agent. Try again.",
+    "deleteReviewFailedConnection": "Could not delete this review agent. Check the connection and try again.",
+    "createReviewFailed": "Could not create this review agent. Check its name and try again.",
+    "createReviewFailedConnection": "Could not create this review agent. Check the connection and try again."
+  },
+  "limits": {
+    "runtimeLabel": "Runtime",
+    "runtimeMeta": "what the scheduler enforces, not what an agent can do",
+    "segregationTitle": "Reviewer must differ from builder",
+    "segregationBody": "When enabled, review agents avoid the CLI that built the ticket, when another CLI is available. An explicitly picked named agent always wins. Applies globally.",
+    "maxConcurrentTitle": "Max concurrent agents",
+    "maxConcurrentProjectBody": "How many batch agents (builds, reviews, merges, QA) may run at once for this project. Extra launches wait in a queue. 0 means no limit; leave empty to inherit the global default ({fallback}).",
+    "maxConcurrentGlobalBody": "Default cap on batch agents (builds, reviews, merges, QA) running at once per project. Extra launches wait in a queue. 0 means no limit; leave empty for the built-in default ({fallback}).",
+    "saveFailed": "Could not save — try again.",
+    "inEffect": "In effect: {value}{origin, select, inherited { (inherited)} builtin { (built-in)} other {}}{saved, select, yes { · saved} other {}}",
+    "reviewBounceLabel": "Review bounce",
+    "reviewBounceBody": "Review → dev bounces per epic that reached review (from the ticket activity log). Over 100% means epics bounced more than once on average.",
+    "reviewBounceEmpty": "No epic has reached review yet.",
+    "statsFailed": "Failed to load stats",
+    "columns": {
+      "project": "PROJECT",
+      "epicsReviewed": "EPICS REVIEWED",
+      "bounces": "BOUNCES",
+      "rate": "RATE"
+    }
+  }
+}

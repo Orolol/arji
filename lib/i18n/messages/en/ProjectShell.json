@@ -1,0 +1,11 @@
+{
+  "actions": {
+    "new": "New",
+    "newEpicManual": "New Epic (manual)",
+    "newEpicChat": "New Epic (via chat)",
+    "newBug": "New Bug",
+    "nightRun": "Night run",
+    "sync": "Sync from arji.json",
+    "syncTitle": "Import from arji.json (overrides DB)"
+  }
+}

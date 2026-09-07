@@ -1,5 +1,6 @@
 "use client";
 
+import { useLocale, useTranslations } from "next-intl";
 /**
  * One comment in the CONVERSATION band (frame 6a, lines 264-267).
  *
@@ -20,13 +21,15 @@ import { Mono, QuietLink } from "@/components/piscine";
 import { cn } from "@/lib/utils";
 import { commentPreview, isLongComment } from "@/lib/kanban/activity-feed";
 import type { TicketComment } from "@/hooks/useTicketComments";
-import { timeAgo } from "@/lib/utils/format-date";
+import { formatRelative } from "@/lib/i18n/format";
 
 export interface CommentBubbleProps {
   comment: TicketComment;
 }
 
 export function CommentBubble({ comment }: CommentBubbleProps) {
+  const t = useTranslations("Ticket");
+  const locale = useLocale();
   const [expanded, setExpanded] = useState(false);
   const isUser = comment.author === "user";
   const long = isLongComment(comment.content);
@@ -42,7 +45,7 @@ export function CommentBubble({ comment }: CommentBubbleProps) {
       )}
     >
       <Mono as="span" size={10} tone="muted" className="mb-1 block">
-        {`${isUser ? "you" : "agent"} · ${timeAgo(comment.createdAt)}`}
+        {`${isUser ? t("comment.you") : t("comment.agent")} · ${formatRelative(comment.createdAt, { locale })}`}
       </Mono>
       <p className="m-0 text-[13px] leading-[1.5] whitespace-pre-wrap text-foreground">
         {body}
@@ -58,7 +61,7 @@ export function CommentBubble({ comment }: CommentBubbleProps) {
           testId="ticket-comment-expand"
           className="mt-1"
         >
-          {expanded ? "moins" : "voir tout"}
+          {expanded ? t("comment.collapse") : t("comment.expand")}
         </QuietLink>
       ) : null}
     </div>

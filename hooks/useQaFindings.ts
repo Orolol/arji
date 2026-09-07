@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { useCallback, useMemo, useRef, useState } from "react";
 
 import { usePolling } from "@/hooks/usePolling";
@@ -35,6 +37,7 @@ export function useQaFindings(
   error: string | null;
   refresh: () => Promise<void>;
 } {
+  const tErrors = useTranslations("ClientErrors");
   const [data, setData] = useState<QaPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -73,7 +76,7 @@ export function useQaFindings(
       if (!res.ok) {
         if (stale()) return;
         appliedSeqRef.current = requestSeq;
-        setError(`Failed to load QA (${res.status})`);
+        setError(tErrors("qaHttp", { status: res.status }));
         return;
       }
       const body = await res.json();
@@ -88,11 +91,11 @@ export function useQaFindings(
     } catch {
       if (stale()) return;
       appliedSeqRef.current = requestSeq;
-      setError("Failed to load QA");
+      setError(tErrors("failedToLoadQA"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [tErrors]);
 
   /**
    * Re-read after a confirmed write. The bump is the point: it invalidates

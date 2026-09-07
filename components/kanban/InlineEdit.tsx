@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { useTranslations } from "next-intl";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { MarkdownContent } from "@/components/chat/MarkdownContent";
@@ -38,6 +39,7 @@ export function InlineEdit({
   id,
   "aria-labelledby": ariaLabelledBy,
 }: InlineEditProps) {
+  const t = useTranslations("Kanban");
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(value);
   const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
@@ -116,7 +118,9 @@ export function InlineEdit({
         {value ? (
           markdown ? <MarkdownContent content={value} /> : value
         ) : (
-          <span className="italic text-muted-foreground">Click to edit</span>
+          <span className="italic text-muted-foreground">
+            {t("inlineEdit.empty")}
+          </span>
         )}
       </div>
     );

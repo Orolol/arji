@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { MentionTextarea } from "@/components/documents/MentionTextarea";
 
 interface SpecEditorProps {
@@ -25,6 +27,8 @@ export function SpecEditor({
   onChange,
   disabled,
 }: SpecEditorProps) {
+  const t = useTranslations("Spec");
+
   return (
     // MentionTextarea wraps its field in a `relative flex-1 min-w-0 w-full`
     // div (it anchors the @-mention popover). That div is not ours to edit, so
@@ -37,7 +41,7 @@ export function SpecEditor({
         value={value}
         onValueChange={onChange}
         disabled={disabled}
-        placeholder="Écris la spec du projet en markdown…"
+        placeholder={t("editor.placeholder")}
         className="h-full min-h-0 w-full resize-none overflow-y-auto rounded-none border-0 bg-transparent p-0 font-mono text-[12.5px] leading-[1.7] shadow-none placeholder:text-muted-foreground focus-visible:border-0 focus-visible:ring-0"
       />
     </div>

@@ -22,6 +22,7 @@
  */
 
 import { Check } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import {
@@ -61,12 +62,13 @@ export function DependenciesBand({
   saving = false,
   error = null,
 }: DependenciesBandProps) {
+  const t = useTranslations("Ticket");
   const editable = Boolean(onToggleWaitsOn);
 
   return (
     <StrataBand stratum="next" density="rail" gap={8} className="shrink-0">
       <BandHeader
-        label="Dependencies"
+        label={t("dependencies.label")}
         stratum="next"
         // `standalone` hugs the underline to the word, which only works while
         // the header has nothing on its right. With the editor it must span
@@ -77,7 +79,7 @@ export function DependenciesBand({
           editable ? (
             <span data-testid="ticket-dependency-editor">
               <SelectPill
-                label="Edit"
+                label={t("dependencies.edit")}
                 tone="ink"
                 fill="card"
                 // No other ticket in the project = nothing to depend on. The
@@ -114,13 +116,15 @@ export function DependenciesBand({
         }
       />
       <DependencyRow
-        relation="BLOCKS"
+        slug="blocks"
+        relation={t("dependencies.blocks")}
         items={blocks}
         tone={tone}
         onOpenTicket={onOpenTicket}
       />
       <DependencyRow
-        relation="WAITS ON"
+        slug="waits-on"
+        relation={t("dependencies.waitsOn")}
         items={waitsOn}
         tone={tone}
         onOpenTicket={onOpenTicket}
@@ -138,11 +142,18 @@ export function DependenciesBand({
 }
 
 function DependencyRow({
+  slug,
   relation,
   items,
   tone,
   onOpenTicket,
 }: {
+  /**
+   * The relation's stable identity, for the test hook. Separate from the
+   * printed `relation` on purpose: the label is catalogue copy now, so
+   * deriving the testid from it would rename the hook in every language.
+   */
+  slug: string;
   relation: string;
   items: DependencyRowItem[];
   tone: ProjectTone;
@@ -151,7 +162,7 @@ function DependencyRow({
   return (
     <div
       className="flex flex-wrap items-center gap-2"
-      data-testid={`ticket-dependency-${relation.toLowerCase().replace(/\s+/g, "-")}`}
+      data-testid={`ticket-dependency-${slug}`}
     >
       {/* The fixed 52px is what aligns BLOCKS with WAITS ON. */}
       <Mono size={10} tone="next-mid" className="w-[52px] shrink-0">

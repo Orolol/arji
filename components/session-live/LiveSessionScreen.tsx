@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { XCircle } from "lucide-react";
 
 import {
@@ -65,10 +66,6 @@ export interface LiveSessionScreenProps {
   onRetryPrompt: () => void;
 }
 
-/** Verbatim, minus the four words that pointed at a tab that no longer exists. */
-const SILENT_FAILURE_COPY =
-  "This session failed before Arij could record an error message: the process exited (or was lost) without writing stderr or text. Whatever it did produce is kept in the live log above.";
-
 export function LiveSessionScreen({
   projectId,
   sessionId,
@@ -91,6 +88,7 @@ export function LiveSessionScreen({
   promptState,
   onRetryPrompt,
 }: LiveSessionScreenProps) {
+  const t = useTranslations("SessionLive");
   const { ticket, project, diff } = useSessionFiles(
     projectId,
     sessionId,
@@ -119,7 +117,7 @@ export function LiveSessionScreen({
           {session.error && (
             <StrataBand stratum="card" density="full" gap={9} className="shrink-0">
               <BandHeader
-                label="Error"
+                label={t("screen.errorLabel")}
                 stratum="neutral"
                 labelSize={12}
                 standalone
@@ -149,7 +147,7 @@ export function LiveSessionScreen({
           {!session.error && session.status === "failed" && (
             <StrataBand stratum="card" density="full" gap={9} className="shrink-0">
               <BandHeader
-                label="Failed — no error message captured"
+                label={t("screen.failedNoMessage")}
                 stratum="neutral"
                 labelSize={12}
                 standalone
@@ -162,8 +160,10 @@ export function LiveSessionScreen({
                   />
                 }
               />
+              {/* Verbatim, minus the four words that pointed at a tab that
+                  no longer exists. */}
               <p className="font-sans text-[12.5px] leading-relaxed text-muted-foreground">
-                {SILENT_FAILURE_COPY}
+                {t("screen.silentFailure")}
               </p>
             </StrataBand>
           )}

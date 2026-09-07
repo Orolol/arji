@@ -1,5 +1,8 @@
 "use client";
 
+import { useLocale, useTranslations } from "next-intl";
+import { formatDateTime } from "@/lib/i18n/format";
+import type { TranslationKey } from "@/lib/i18n/catalogue";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { AlertTriangle, FileText, Moon, RotateCcw, Sparkles } from "lucide-react";
@@ -70,17 +73,25 @@ interface MemoryPanelProps {
   className?: string;
 }
 
-function sourceLabel(source: MemoryWriteSource | null | undefined): string {
-  switch (source) {
-    case "manual":
-      return "Manual edit";
-    case "dreaming":
-      return "Dreaming";
-    case "distill":
-      return "Session distillation";
-    default:
-      return "Unknown";
-  }
+/**
+ * The provenance word per write source. A module-scope map of catalogue KEY
+ * REFERENCES rather than a `t(\`sources.${source}\`)` — an id → key choice is
+ * always an explicit map (`lib/i18n/catalogue.ts`, pattern 3).
+ */
+const SOURCE_COPY: Record<
+  MemoryWriteSource | "unknown",
+  { labelKey: TranslationKey }
+> = {
+  manual: { labelKey: "Spec.memory.sources.manual" },
+  dreaming: { labelKey: "Spec.memory.sources.dreaming" },
+  distill: { labelKey: "Spec.memory.sources.distill" },
+  unknown: { labelKey: "Spec.memory.sources.unknown" },
+};
+
+function sourceLabelKey(
+  source: MemoryWriteSource | null | undefined,
+): TranslationKey {
+  return SOURCE_COPY[source ?? "unknown"].labelKey;
 }
 
 /**
@@ -116,6 +127,11 @@ export function MemoryPanel({
   mode,
   className,
 }: MemoryPanelProps) {
+  const locale = useLocale();
+  const t = useTranslations("Spec");
+  // The provenance table holds full dotted paths, so it resolves through the
+  // namespace-less translator.
+  const tKey = useTranslations();
   const hookParams = useParams();
   const router = useRouter();
   const projectId = propsProjectId || (hookParams?.projectId as string) || "";
@@ -187,7 +203,7 @@ export function MemoryPanel({
       .then(async (res) => {
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
-          throw new Error(data?.error || "Failed to load project memory.");
+          throw new Error(data?.error || t("memory.errors.load"));
         }
         return data as { data: MemoryEnvelope };
       })
@@ -197,7 +213,7 @@ export function MemoryPanel({
         setLoaded(true);
       })
       .catch((err: Error) => {
-        if (!cancelled) setError(err?.message || "Failed to load project memory.");
+        if (!cancelled) setError(err?.message || t("memory.errors.load"));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -205,7 +221,7 @@ export function MemoryPanel({
     return () => {
       cancelled = true;
     };
-  }, [projectId, applyEnvelope]);
+  }, [projectId, applyEnvelope, t]);
 
   const refetchMemory = useCallback(() => {
     if (!projectId) return;
@@ -282,13 +298,13 @@ export function MemoryPanel({
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(data.error || "Failed to save project memory.");
+        setError(data.error || t("memory.errors.save"));
         return;
       }
       applyEnvelope(data.data as MemoryEnvelope, false);
-      setMessage("Project memory saved.");
+      setMessage(t("memory.saved"));
     } catch {
-      setError("Failed to save project memory.");
+      setError(t("memory.errors.save"));
     } finally {
       setSaving(false);
     }
@@ -306,13 +322,13 @@ export function MemoryPanel({
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(data.error || "Failed to restore the memory snapshot.");
+        setError(data.error || t("memory.errors.restore"));
         return;
       }
       applyEnvelope(data.data as MemoryEnvelope, false);
-      setMessage("Restored the memory to the pre-dream snapshot.");
+      setMessage(t("memory.restored"));
     } catch {
-      setError("Failed to restore the memory snapshot.");
+      setError(t("memory.errors.restore"));
     } finally {
       setRestoring(false);
     }
@@ -331,21 +347,21 @@ export function MemoryPanel({
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(data.error || "Failed to start the dreaming session.");
+        setError(data.error || t("memory.errors.dream"));
         return;
       }
       const dreamSessionId = data.data?.sessionId;
       if (!dreamSessionId) {
         setMessage(
           data.data?.reason
-            ? `Nothing to dream about: ${data.data.reason}.`
-            : "Nothing to dream about yet."
+            ? t("memory.nothingToDreamReason", { reason: data.data.reason })
+            : t("memory.nothingToDream")
         );
         return;
       }
       router.push(`/projects/${projectId}/sessions/${dreamSessionId}`);
     } catch {
-      setError("Failed to start the dreaming session.");
+      setError(t("memory.errors.dream"));
     } finally {
       setDreaming(false);
     }
@@ -354,7 +370,7 @@ export function MemoryPanel({
   function handleInsertSkeleton() {
     if (!safeContent.trim()) {
       setContent(DREAMING_MEMORY_TEMPLATE);
-      setMessage("Inserted the 4-sections Dreaming skeleton.");
+      setMessage(t("memory.skeletonInserted"));
       return;
     }
     const missing = DREAMING_MEMORY_SECTIONS.filter((section) =>
@@ -364,9 +380,11 @@ export function MemoryPanel({
       const toAppend = missing.map((title) => `## ${title}\n\n- `).join("\n\n");
       const separator = safeContent.endsWith("\n\n") ? "" : safeContent.endsWith("\n") ? "\n" : "\n\n";
       setContent(`${safeContent}${separator}${toAppend}`);
-      setMessage(`Appended missing Dreaming section(s): ${missing.join(", ")}.`);
+      setMessage(
+        t("memory.sectionsAppended", { sections: missing.join(", ") })
+      );
     } else {
-      setMessage("All 4 required Dreaming sections are already present.");
+      setMessage(t("memory.allSectionsPresent"));
     }
   }
 
@@ -406,17 +424,20 @@ export function MemoryPanel({
           document heading, which is also what pins the accessible structure
           the existing suite asserts.
         */}
-        <h3 className="sr-only">Project memory</h3>
+        <h3 className="sr-only">{t("memory.heading")}</h3>
 
         <BandHeader
           stratum="live"
-          label="Memory"
+          label={t("memory.label")}
           labelSize={12}
-          meta="ce que les agents ont appris"
+          meta={t("memory.helper")}
           right={
             <span data-testid="memory-cap-indicator">
               <Mono size={10.5} tone={capTone}>
-                {`${estimatedTokens} / ${PROJECT_MEMORY_MAX_TOKENS}`}
+                {t("memory.capIndicator", {
+                  tokens: estimatedTokens,
+                  max: PROJECT_MEMORY_MAX_TOKENS,
+                })}
               </Mono>
             </span>
           }
@@ -435,14 +456,12 @@ export function MemoryPanel({
                 className="shrink-0 text-strata-live-deep"
               />
               <span className="text-[12px] text-foreground">
-                A{" "}
                 {pendingWriter.agentType === "memory_distill"
-                  ? "distillation"
-                  : "Dreaming"}{" "}
-                rewrite is currently in progress.
+                  ? t("memory.pendingWriter.distill")
+                  : t("memory.pendingWriter.dreaming")}
               </span>
               <span className="text-[12px] text-muted-foreground">
-                The editor is in read-only mode.
+                {t("memory.pendingWriter.readOnly")}
               </span>
               <QuietLink
                 tone="live"
@@ -450,7 +469,7 @@ export function MemoryPanel({
                 className="ml-auto"
                 href={`/projects/${projectId}/sessions/${pendingWriter.sessionId}`}
               >
-                View session
+                {t("memory.pendingWriter.viewSession")}
               </QuietLink>
             </SurfaceCard>
           </div>
@@ -469,9 +488,7 @@ export function MemoryPanel({
                 className="mt-[2px] shrink-0 text-destructive"
               />
               <span className="text-[12px] text-foreground">
-                The memory was updated in the background while you were editing.
-                Your unsaved changes are preserved. You can review and save them,
-                or click Discard to reload the latest version.
+                {t("memory.conflictNotice")}
               </span>
             </SurfaceCard>
           </div>
@@ -479,12 +496,11 @@ export function MemoryPanel({
 
         {loading ? (
           <p className="text-[12.5px] text-muted-foreground">
-            Loading project memory...
+            {t("memory.loading")}
           </p>
         ) : !loaded ? (
           <p className="text-[12.5px] text-destructive">
-            {error ?? "Failed to load project memory."} Reload the page to try
-            again.
+            {error ?? t("memory.errors.load")} {t("memory.reloadHint")}
           </p>
         ) : (
           <div className="flex min-h-0 flex-1 flex-col gap-[9px]">
@@ -501,8 +517,10 @@ export function MemoryPanel({
                 />
                 <span className="min-w-0 text-[12px] text-muted-foreground">
                   {!safeContent.trim()
-                    ? "No project memory yet. Start with the 4 Dreaming sections:"
-                    : `Missing Dreaming section(s): ${missingSections.join(", ")}.`}
+                    ? t("memory.skeleton.empty")
+                    : t("memory.skeleton.missing", {
+                        sections: missingSections.join(", "),
+                      })}
                 </span>
                 <PillButton
                   variant="outline"
@@ -512,8 +530,8 @@ export function MemoryPanel({
                   onClick={handleInsertSkeleton}
                 >
                   {!safeContent.trim()
-                    ? "Use 4-sections template"
-                    : "Append missing sections"}
+                    ? t("memory.skeleton.useTemplate")
+                    : t("memory.skeleton.append")}
                 </PillButton>
               </div>
             )}
@@ -531,7 +549,7 @@ export function MemoryPanel({
                     setMessage(null);
                   }}
                   disabled={!!pendingWriter || saving || restoring}
-                  placeholder="No project memory yet. Write durable conventions here, or distill them from a completed session."
+                  placeholder={t("memory.editorPlaceholder")}
                   className="h-full min-h-0 flex-1 resize-none overflow-y-auto rounded-none border-0 bg-transparent p-0 font-mono text-[12.5px] leading-[1.6] shadow-none focus-visible:border-0 focus-visible:ring-0"
                 />
               </SurfaceCard>
@@ -548,7 +566,7 @@ export function MemoryPanel({
                     <SpecPreview markdown={safeContent} />
                   ) : (
                     <p className="text-[12.5px] text-muted-foreground">
-                      No project memory yet.
+                      {t("memory.emptyPreview")}
                     </p>
                   )}
                 </SurfaceCard>
@@ -562,16 +580,19 @@ export function MemoryPanel({
                 className="flex flex-none flex-wrap items-center gap-[8px] rounded-[10px] border-[1.5px] border-dashed border-border-strong px-[11px] py-[9px]"
               >
                 <span className="text-[12px] text-muted-foreground">
-                  A pre-dream snapshot exists
                   {archive.updatedAt
-                    ? ` (from ${new Date(archive.updatedAt).toLocaleString()})`
-                    : ""}
-                  .
+                    ? t("memory.archive.existsAt", {
+                        date: formatDateTime(archive.updatedAt, {
+                          locale,
+                          style: "dateTimeSeconds",
+                        }),
+                      })
+                    : t("memory.archive.exists")}
                 </span>
                 {confirmingRestore ? (
                   <div className="ml-auto flex items-center gap-[6px]">
                     <span className="text-[11.5px] font-semibold text-foreground">
-                      Replace with snapshot?
+                      {t("memory.archive.confirmQuestion")}
                     </span>
                     <PillButton
                       variant="filled"
@@ -579,9 +600,9 @@ export function MemoryPanel({
                       onClick={handleRestore}
                       disabled={restoring || saving || dirty}
                       pending={restoring}
-                      pendingLabel="Restoring..."
+                      pendingLabel={t("memory.archive.restorePending")}
                     >
-                      Confirm
+                      {t("memory.archive.confirm")}
                     </PillButton>
                     <PillButton
                       variant="outline"
@@ -590,7 +611,7 @@ export function MemoryPanel({
                       onClick={() => setConfirmingRestore(false)}
                       disabled={restoring}
                     >
-                      Cancel
+                      {t("memory.archive.cancel")}
                     </PillButton>
                   </div>
                 ) : (
@@ -604,11 +625,11 @@ export function MemoryPanel({
                     disabled={restoring || saving || dirty || !!pendingWriter}
                     title={
                       dirty
-                        ? "Save or discard your edits first — restoring replaces the memory with the snapshot"
-                        : "Restore the memory to the pre-dream snapshot"
+                        ? t("memory.archive.restoreBlockedTitle")
+                        : t("memory.archive.restoreTitle")
                     }
                   >
-                    Restore snapshot
+                    {t("memory.archive.restore")}
                   </PillButton>
                 )}
               </div>
@@ -630,11 +651,15 @@ export function MemoryPanel({
                   UPPERCASE TRACKED mono labels only.
                 */}
                 <Mono size={11} tone="live-mid" clamp={1}>
-                  {`${sourceLabel(provenance?.source)}${
-                    provenanceStamp
-                      ? ` · ${new Date(provenanceStamp).toLocaleString()}`
-                      : ""
-                  }`}
+                  {provenanceStamp
+                    ? t("memory.provenance", {
+                        source: tKey(sourceLabelKey(provenance?.source)),
+                        stamp: formatDateTime(provenanceStamp, {
+                          locale,
+                          style: "dateTimeSeconds",
+                        }),
+                      })
+                    : tKey(sourceLabelKey(provenance?.source))}
                 </Mono>
                 {provenance?.sessionId && (
                   <QuietLink
@@ -643,7 +668,7 @@ export function MemoryPanel({
                     className="shrink-0"
                     href={`/projects/${projectId}/sessions/${provenance.sessionId}`}
                   >
-                    view session
+                    {t("memory.viewSession")}
                   </QuietLink>
                 )}
               </div>
@@ -660,9 +685,9 @@ export function MemoryPanel({
                       setBackgroundUpdateConflict(false);
                     }}
                     disabled={saving}
-                    title="Restore the saved memory, discarding your edits"
+                    title={t("memory.discardTitle")}
                   >
-                    Discard
+                    {t("memory.discard")}
                   </PillButton>
                 )}
                 <PillButton
@@ -673,14 +698,14 @@ export function MemoryPanel({
                   onClick={handleDream}
                   disabled={dreaming || saving || dirty || !!pendingWriter}
                   pending={dreaming}
-                  pendingLabel="Dreaming..."
+                  pendingLabel={t("memory.dreamPending")}
                   title={
                     dirty
-                      ? "Save or discard your edits first — the agent rewrites the SAVED memory"
-                      : "Rewrite this memory from the recent sessions of every ticket"
+                      ? t("memory.dreamBlockedTitle")
+                      : t("memory.dreamTitle")
                   }
                 >
-                  Dream
+                  {t("memory.dream")}
                 </PillButton>
                 {/* The one filled button in this row. */}
                 <PillButton
@@ -689,9 +714,9 @@ export function MemoryPanel({
                   onClick={handleSave}
                   disabled={saving || overCap || !dirty || !!pendingWriter}
                   pending={saving}
-                  pendingLabel="Saving..."
+                  pendingLabel={t("memory.savePending")}
                 >
-                  Save memory
+                  {t("memory.save")}
                 </PillButton>
               </div>
             </div>
@@ -703,15 +728,18 @@ export function MemoryPanel({
             the same #a63a1a as `text-destructive` below it. */}
         {approachingCap && (
           <p className="flex-none text-[12px] text-strata-land-deep">
-            Approaching the {PROJECT_MEMORY_MAX_TOKENS}-token cap (
-            {estimatedTokens}/{PROJECT_MEMORY_MAX_TOKENS}).
+            {t("memory.approachingCap", {
+              tokens: estimatedTokens,
+              max: PROJECT_MEMORY_MAX_TOKENS,
+            })}
           </p>
         )}
         {overCap && (
           <p className="flex-none text-[12px] text-destructive">
-            Over the {PROJECT_MEMORY_MAX_TOKENS}-token cap (
-            {estimatedTokens}/{PROJECT_MEMORY_MAX_TOKENS}). Trim the content to
-            save.
+            {t("memory.overCap", {
+              tokens: estimatedTokens,
+              max: PROJECT_MEMORY_MAX_TOKENS,
+            })}
           </p>
         )}
         {message && (

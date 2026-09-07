@@ -109,7 +109,7 @@ function session(
 }
 
 async function load(): Promise<QaPayload> {
-  const res = await GET();
+  const res = await GET(new Request("http://localhost/api/qa/findings"));
   const body = await res.json();
   expect(body.error).toBeUndefined();
   return body.data as QaPayload;
@@ -295,7 +295,7 @@ describe("GET /api/qa/findings — runs", () => {
       lastNonEmptyText: "x".repeat(300 * 1024),
     });
 
-    const res = await GET();
+    const res = await GET(new Request("http://localhost/api/qa/findings"));
     const raw = await res.text();
     expect(raw).not.toContain("SECRET-PROMPT-MARKER");
 

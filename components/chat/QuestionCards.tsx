@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Send, Check, ChevronLeft, ChevronRight } from "lucide-react";
 import type { QuestionData } from "@/lib/claude/spawn";
@@ -12,6 +13,7 @@ interface QuestionCardsProps {
 }
 
 export function QuestionCards({ questions, onSubmit, disabled }: QuestionCardsProps) {
+  const t = useTranslations("ChatLegacy");
   const [currentIdx, setCurrentIdx] = useState(0);
   // selections[questionIdx] = set of selected option indices
   const [selections, setSelections] = useState<Map<number, Set<number>>>(
@@ -61,7 +63,12 @@ export function QuestionCards({ questions, onSubmit, disabled }: QuestionCardsPr
       {/* Step indicator */}
       {questions.length > 1 && (
         <div className="flex items-center justify-between text-[12px] text-muted-foreground">
-          <span>Question {currentIdx + 1} of {questions.length}</span>
+          <span>
+            {t("questions.step", {
+              current: currentIdx + 1,
+              total: questions.length,
+            })}
+          </span>
           <div className="flex gap-1">
             {questions.map((_, i) => (
               <div
@@ -142,7 +149,7 @@ export function QuestionCards({ questions, onSubmit, disabled }: QuestionCardsPr
               className="w-full"
             >
               <Send className="h-3 w-3 mr-2" />
-              Submit Answers
+              {t("questions.submit")}
             </Button>
           ) : (
             <Button
@@ -152,7 +159,7 @@ export function QuestionCards({ questions, onSubmit, disabled }: QuestionCardsPr
               disabled={disabled || !currentAnswered}
               className="w-full"
             >
-              Next
+              {t("questions.next")}
               <ChevronRight className="h-4 w-4 ml-1" />
             </Button>
           )}

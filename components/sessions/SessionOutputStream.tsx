@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { usePolling } from "@/hooks/usePolling";
 import type {
@@ -42,7 +43,10 @@ interface SessionOutputStreamProps {
   /** While the session runs, the stream tails itself from its own cursor. */
   isRunning: boolean;
   emptyLabel: string;
-  /** Shown instead of `emptyLabel` while the session is still writing. */
+  /**
+   * Shown instead of `emptyLabel` while the session is still writing.
+   * Defaults to the catalogue's `stream.waiting` when the caller omits it.
+   */
   waitingLabel?: string;
 }
 
@@ -106,8 +110,9 @@ export function SessionOutputStream({
   fallback,
   isRunning,
   emptyLabel,
-  waitingLabel = "Waiting for agent output...",
+  waitingLabel,
 }: SessionOutputStreamProps) {
+  const t = useTranslations("Sessions");
   const [chunks, setChunks] = useState<BoundedSessionChunk[]>(seed?.chunks ?? []);
   const [hasMore, setHasMore] = useState(seed?.hasMore ?? false);
   const [loading, setLoading] = useState(false);
@@ -145,21 +150,17 @@ export function SessionOutputStream({
       cursor.current = page.nextAfter;
       cursorOffset.current = page.nextOffset ?? 0;
       setHasMore(page.hasMore);
-      setError(
-        page.chunkStreamsUnavailable
-          ? "This session's output could not be read."
-          : null
-      );
+      setError(page.chunkStreamsUnavailable ? t("stream.unreadable") : null);
       if (Array.isArray(page.chunks) && page.chunks.length > 0) {
         setChunks((current) => [...current, ...page.chunks]);
       }
     } catch {
-      setError("Could not load more output.");
+      setError(t("stream.loadMoreError"));
     } finally {
       inFlight.current = false;
       setLoading(false);
     }
-  }, [projectId, sessionId, streamType]);
+  }, [projectId, sessionId, streamType, t]);
 
   // A running session appends as it writes; a finished one waits for a click.
   usePolling(loadMore, 3000, isRunning && !unavailable, { immediate: false });
@@ -167,9 +168,7 @@ export function SessionOutputStream({
   if (unavailable) {
     return (
       <p className="text-[13px] text-destructive/90" data-testid={`stream-unavailable-${streamType}`}>
-        This session&apos;s {streamType} output could not be read — the record
-        may be damaged. This is not the same as a session that produced no
-        output.
+        {t("stream.unavailable", { stream: streamType })}
       </p>
     );
   }
@@ -178,7 +177,7 @@ export function SessionOutputStream({
     if (fallback) return <>{fallback}</>;
     return (
       <p className="text-[13px] text-muted-foreground">
-        {isRunning ? waitingLabel : emptyLabel}
+        {isRunning ? waitingLabel ?? t("stream.waiting") : emptyLabel}
       </p>
     );
   }
@@ -216,10 +215,8 @@ export function SessionOutputStream({
       </div>
       {truncatedCount > 0 && (
         <p className="text-[11.5px] text-meta" data-testid={`stream-truncated-${streamType}`}>
-          {truncatedCount === 1
-            ? "One oversized chunk is shown in part."
-            : `${truncatedCount} oversized chunks are shown in part.`}
-          {hasMore ? " Load more to continue reading it." : ""}
+          {t("stream.truncated", { count: truncatedCount })}
+          {hasMore ? ` ${t("stream.loadMoreHint")}` : ""}
         </p>
       )}
       {error && <p className="text-[12px] text-destructive">{error}</p>}
@@ -232,7 +229,7 @@ export function SessionOutputStream({
           disabled={loading}
           data-testid={`stream-load-more-${streamType}`}
         >
-          {loading ? "Loading..." : "Load more output"}
+          {loading ? t("stream.loading") : t("stream.loadMore")}
         </Button>
       )}
     </div>

@@ -287,7 +287,7 @@ describe("Release history — inspect mode", () => {
     await user.click(
       within(
         screen.getByTestId(`release-history-tickets-${releaseId}`)
-      ).getByText("voir le changelog →")
+      ).getByText("view the changelog →")
     );
     return user;
   }
@@ -303,7 +303,7 @@ describe("Release history — inspect mode", () => {
     expect(screen.getByTestId("release-version-pill").textContent).toBe("v0.4.2");
     expect(screen.getByText("published")).toBeInTheDocument();
 
-    await user.click(screen.getByText("← revenir au brouillon"));
+    await user.click(screen.getByText("← back to draft"));
     expect(screen.getByText("Next release")).toBeInTheDocument();
   });
 
@@ -370,7 +370,7 @@ describe("Release history — inspect mode", () => {
   it("summarises the recorded tag and branch, dropping the null clauses", async () => {
     await openInspect("r1");
     expect(
-      screen.getByText("2 tickets · tag v0.4.2 sur release/v0.4.2")
+      screen.getByText("2 tickets · tag v0.4.2 on release/v0.4.2")
     ).toBeInTheDocument();
   });
 });

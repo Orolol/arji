@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { BandHeader, CheckMark, Mono, StrataBand } from "@/components/piscine";
 import {
   DEFAULT_NIGHT_CIRCUIT_BREAKER,
@@ -34,23 +36,24 @@ export interface NightRunsBandProps {
 }
 
 export function NightRunsBand({ draft }: NightRunsBandProps) {
+  const t = useTranslations("Settings");
+
   return (
     <SettingsSection id="night-runs" testId="night-settings">
       <StrataBand stratum="next">
         <BandHeader
           stratum="next"
-          label="Night runs"
+          label={t("nightRuns.label")}
           meta={
             <span className="font-sans text-[11.5px] leading-normal">
-              les vagues nocturnes — le matin, tout est dans Your turn ou Ready
-              to land
+              {t("nightRuns.meta")}
             </span>
           }
         />
 
         <div className="flex flex-wrap items-end gap-[20px]">
           <SettingField
-            kicker="BUDGET / NUIT"
+            kicker={t("nightRuns.budget")}
             stratum="next"
             htmlFor="night-cost-cap"
             width={170}
@@ -63,7 +66,7 @@ export function NightRunsBand({ draft }: NightRunsBandProps) {
               min={0}
               step="0.5"
               // Empty is unlimited — a cost cap of zero would stop every wave.
-              placeholder="Unlimited"
+              placeholder={t("nightRuns.budgetPlaceholder")}
               value={draft.text(NIGHT_COST_CAP_SETTING_KEY)}
               onChange={(event) =>
                 draft.set(NIGHT_COST_CAP_SETTING_KEY, event.target.value)
@@ -72,7 +75,7 @@ export function NightRunsBand({ draft }: NightRunsBandProps) {
           </SettingField>
 
           <SettingField
-            kicker="ÉCHECS D'AFFILÉE AVANT ARRÊT"
+            kicker={t("nightRuns.circuitBreaker")}
             stratum="next"
             htmlFor="night-circuit-breaker"
             width={190}
@@ -101,27 +104,26 @@ export function NightRunsBand({ draft }: NightRunsBandProps) {
                 onChange={(next) =>
                   draft.set(DREAMING_AFTER_NIGHT_RUN_SETTING_KEY, next)
                 }
-                label="Dream après chaque night run"
+                label={t("nightRuns.dream")}
                 testId="dream-after-night-run"
               />
             }
             off={!draft.flag(DREAMING_AFTER_NIGHT_RUN_SETTING_KEY)}
-            label="Dream après chaque night run"
+            label={t("nightRuns.dream")}
           />
         </div>
 
         <Mono size={10.5} tone="next-mid" as="div">
-          la fenêtre et les vagues sont propres à chaque projet — elles se
-          règlent dans ses routines
+          {t("nightRuns.perProject")}
         </Mono>
         <SettingRow
           toggle={<CheckMark checked shape="disc" tone="live" />}
-          label="Sauter les dépendants d'un epic échoué"
-          suffix="· halt, défaut de chaque run"
+          label={t("nightRuns.skipDependents")}
+          suffix={t("nightRuns.skipDependentsSuffix")}
           suffixTone="next-mid"
         />
         <Mono size={10.5} tone="next-mid" as="div">
-          ces valeurs sont les défauts — chaque run peut les redéfinir
+          {t("nightRuns.defaults")}
         </Mono>
       </StrataBand>
     </SettingsSection>

@@ -162,10 +162,10 @@ describe("PromptAnatomyBand", () => {
   it("collapses to its label line plus one sentence when there are no rows", () => {
     render(<PromptAnatomyBand projectId="proj-1" rows={[]} />);
 
-    expect(screen.getByText("Anatomie du prompt")).toBeInTheDocument();
+    expect(screen.getByText("Prompt anatomy")).toBeInTheDocument();
     expect(screen.getByTestId("prompt-anatomy-legend")).toBeInTheDocument();
     expect(screen.getByTestId("prompt-anatomy-empty")).toHaveTextContent(
-      "Aucune session n'a encore enregistré son prompt — la première dispatche remplira ce tableau.",
+      "No session has recorded its prompt yet — the first dispatch will fill this table.",
     );
     expect(screen.queryAllByTestId("prompt-bar-row")).toHaveLength(0);
   });
@@ -173,8 +173,8 @@ describe("PromptAnatomyBand", () => {
   it("ships the corrected colour words in the footnote", () => {
     render(<PromptAnatomyBand projectId="proj-1" rows={[OPUS_BUILDER]} />);
 
-    expect(screen.getByText(/vert tilleul/)).toBeInTheDocument();
+    expect(screen.getByText(/linden green/)).toBeInTheDocument();
     expect(screen.getByText(/turquoise/)).toBeInTheDocument();
-    expect(screen.queryByText(/\(jaune\)/)).toBeNull();
+    expect(screen.queryByText(/\(yellow\)/)).toBeNull();
   });
 });

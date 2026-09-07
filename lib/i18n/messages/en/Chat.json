@@ -1,0 +1,80 @@
+{
+  "panes": {
+    "label": "Chat pane",
+    "conversations": "Conversations",
+    "thread": "Thread",
+    "context": "Context"
+  },
+  "roster": {
+    "ticketsCreated": "{count, plural, one {# ticket created in this conversation} other {# tickets created in this conversation}}",
+    "sessionWarm": "session warm",
+    "sessionCold": "session cold",
+    "sessionLinked": "session linked",
+    "restartSession": "Restart persistent chat session",
+    "newConversation": "New conversation",
+    "newBrainstorm": "Brainstorm",
+    "newEpic": "New Epic",
+    "knows": {
+      "label": "THE CHAT KNOWS",
+      "body": "project spec, memory, open tickets — cite a doc with"
+    }
+  },
+  "thread": {
+    "paneLabel": "Conversation thread",
+    "typing": "{agent} is writing…",
+    "typingAgentFallback": "The agent",
+    "emptyEpic": "Describe your epic idea and I'll help you structure it with user stories and acceptance criteria.",
+    "emptyBrainstorm": "Start a conversation to brainstorm your project with Claude",
+    "createEpic": "Create Epic & Generate Stories",
+    "createEpicPending": "Creating…",
+    "generateSpec": "Generate Spec & Plan",
+    "generateSpecPending": "Generating…"
+  },
+  "composer": {
+    "placeholder": "Write — ⏎ sends, ⇧⏎ new line, @ cites a doc",
+    "label": "Write a message",
+    "attachImage": "Attach an image"
+  },
+  "epicCard": {
+    "stamp": "EPIC",
+    "stampDraft": "EPIC · DRAFT",
+    "stories": "{count, plural, one {# story} other {# stories}}",
+    "storiesWithAc": "{count, plural, one {# story} other {# stories}} · {ac} AC",
+    "acceptanceCriteria": "{count} AC",
+    "sendToDev": "Send to dev",
+    "sendToDevPending": "Sending…",
+    "editStories": "Edit stories",
+    "backlog": "Backlog",
+    "createPending": "Creating…",
+    "sentToDev": "Sent to dev",
+    "createdInBacklog": "Epic created in the backlog",
+    "buildNotStarted": "Epic created, but the build did not start",
+    "createFailed": "Failed to create the epic",
+    "buildFailed": "Failed to launch the build"
+  },
+  "placement": {
+    "createdInTodoRanked": "created in To Do · #{rank}",
+    "createdInTodo": "created in To Do",
+    "createdInBacklog": "created in Backlog",
+    "todoRanked": "To Do #{rank}",
+    "todo": "To Do",
+    "backlog": "Backlog"
+  },
+  "context": {
+    "label": "Context",
+    "spec": "Project spec",
+    "memory": "Memory"
+  },
+  "createdHere": {
+    "label": "Created in this chat"
+  },
+  "towardSpec": {
+    "label": "Toward the spec",
+    "body": "This decision belongs in the spec.",
+    "propose": "Propose the addition",
+    "proposePending": "Sending…",
+    "viewSpec": "view the spec →",
+    "proposalSent": "Proposal sent to the spec",
+    "proposalFailed": "Failed to propose the spec addition"
+  }
+}

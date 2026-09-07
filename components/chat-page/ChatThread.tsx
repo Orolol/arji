@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 
 import { QuestionCards } from "@/components/chat/QuestionCards";
 import { ImageLightbox, type LightboxImage } from "@/components/shared/ImageLightbox";
@@ -103,13 +104,15 @@ export function ChatThread({
   emptyMessage,
   footer,
 }: ChatThreadProps) {
+  const t = useTranslations("Chat");
   const scrollRef = useFeedAutoScroll(messages.length);
   const [lightboxImage, setLightboxImage] = useState<LightboxImage | null>(
     null,
   );
 
   const typingLabel =
-    streamStatus || `${agentLabel || "L'agent"} rédige…`;
+    streamStatus ||
+    t("thread.typing", { agent: agentLabel || t("thread.typingAgentFallback") });
 
   return (
     <div

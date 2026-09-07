@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { useTheme } from "next-themes";
 import { Sun, Moon } from "lucide-react";
 import { useSyncExternalStore } from "react";
@@ -13,6 +14,7 @@ const isClient = () => true;
 const isServer = () => false;
 
 export function ThemeToggle() {
+  const t = useTranslations("Shared");
   const { theme, setTheme } = useTheme();
   const mounted = useSyncExternalStore(subscribeToNothing, isClient, isServer);
 
@@ -22,7 +24,7 @@ export function ThemeToggle() {
     <button
       onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
       className="flex items-center justify-center w-[34px] h-[34px] rounded-[9px] hover:bg-sidebar-accent text-muted-foreground hover:text-foreground transition-colors"
-      title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+      title={theme === "dark" ? t("switchToLight") : t("switchToDark")}
     >
       {theme === "dark" ? (
         <Sun className="h-5 w-5" />

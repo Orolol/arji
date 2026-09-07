@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 
 import { GhostInputPill, PillButton } from "@/components/piscine";
 import {
@@ -56,6 +57,7 @@ export function DismissDialog({
   onConfirm,
   pending = false,
 }: DismissDialogProps) {
+  const t = useTranslations("Qa");
   const [reason, setReason] = useState("");
 
   /*
@@ -90,7 +92,7 @@ export function DismissDialog({
       >
         <DialogHeader>
           <DialogTitle className="font-display text-[15px] font-bold text-foreground">
-            Dismiss ce finding
+            {t("dismissDialog.title")}
           </DialogTitle>
         </DialogHeader>
 
@@ -111,11 +113,11 @@ export function DismissDialog({
           value={reason}
           onChange={setReason}
           onSubmit={submit}
-          placeholder="Pourquoi ? une ligne suffit…"
+          placeholder={t("dismissDialog.reasonPlaceholder")}
           fill="field"
           width="flex"
           disabled={pending}
-          aria-label="Pourquoi ? une ligne suffit…"
+          aria-label={t("dismissDialog.reasonPlaceholder")}
           data-testid="qa-dismiss-reason"
         />
 
@@ -127,7 +129,7 @@ export function DismissDialog({
             onClick={() => onOpenChange(false)}
             data-testid="qa-dismiss-cancel"
           >
-            Annuler
+            {t("dismissDialog.cancel")}
           </PillButton>
           <PillButton
             variant="filled"
@@ -135,10 +137,10 @@ export function DismissDialog({
             onClick={submit}
             disabled={reason.trim().length === 0}
             pending={pending}
-            pendingLabel="Dismiss…"
+            pendingLabel={t("dismissDialog.pending")}
             data-testid="qa-dismiss-confirm"
           >
-            Dismiss
+            {t("dismissDialog.confirm")}
           </PillButton>
         </DialogFooter>
       </DialogContent>

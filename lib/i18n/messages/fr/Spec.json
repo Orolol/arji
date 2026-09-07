@@ -1,0 +1,45 @@
+{
+  "footer": {
+    "unsaved": "non sauvegardé",
+    "saved": "sauvegardé {age}",
+    "line": "markdown · {words} mots · {state}"
+  },
+  "band": {
+    "helper": "injectée dans chaque prompt d'agent",
+    "tabs": {
+      "edit": "Écrire",
+      "preview": "Prévisualiser"
+    },
+    "save": "Enregistrer",
+    "savePending": "Enregistrement…"
+  },
+  "editor": {
+    "placeholder": "Écris la spec du projet en markdown…"
+  },
+  "docs": {
+    "more": "{count} autres →",
+    "dropZone": "Déposer un doc — cité avec @ dans le chat",
+    "suffix": {
+      "converted": "· converti"
+    },
+    "errors": {
+      "importFile": "Échec de l'import de {name}.",
+      "import": "Échec de l'import du document."
+    }
+  },
+  "anatomy": {
+    "label": "Anatomie du prompt",
+    "helper": "ce que chaque agent reçoit au départ de session, en tokens",
+    "note": "La spec (vert tilleul) et la mémoire (turquoise) pèsent dans <em>chaque</em> session de <em>chaque</em> agent — élaguer ici paie partout. Le blanc en fin de barre : ce que l'agent n'a pas reçu (pas de docs cités).",
+    "empty": "Aucune session n'a encore enregistré son prompt — la première dispatche remplira ce tableau."
+  },
+  "suggestion": {
+    "label": "Suggestion d'agent"
+  },
+  "memory": {
+    "helper": "ce que les agents ont appris"
+  },
+  "page": {
+    "regenerate": "Régénérer par chat"
+  }
+}

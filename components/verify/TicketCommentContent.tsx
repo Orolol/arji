@@ -1,6 +1,7 @@
 "use client";
 
 import { CheckCircle2, FlaskConical, XCircle } from "lucide-react";
+import { useTranslations } from "next-intl";
 import type { RegressionFailureReason } from "@/lib/verify/regression-constants";
 import { MarkdownContent } from "@/components/chat/MarkdownContent";
 import {
@@ -55,6 +56,8 @@ function RegressionReportBlock({
   testFiles: string[];
   detail: string | null;
 }) {
+  const t = useTranslations("Verify");
+
   return (
     <div
       data-testid="regression-report-block"
@@ -67,34 +70,42 @@ function RegressionReportBlock({
       <div className="flex items-center gap-2">
         <FlaskConical className="h-4 w-4 text-muted-foreground" />
         <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Verify — regression test (red → green)
+          {t("report.heading")}
         </span>
         {passed ? (
           <span className="ml-auto flex items-center gap-1 text-xs font-medium text-emerald-600 dark:text-emerald-400">
             <CheckCircle2 className="h-3.5 w-3.5" />
-            PASSED
+            {t("report.passed")}
           </span>
         ) : (
           <span className="ml-auto flex items-center gap-1 text-xs font-medium text-red-600 dark:text-red-400">
             <XCircle className="h-3.5 w-3.5" />
-            FAILED
+            {t("report.failed")}
           </span>
         )}
       </div>
 
       {!passed && (
         <p className="text-xs">
-          <span className="text-muted-foreground">Reason: </span>
+          <span className="text-muted-foreground">{t("report.reason")}</span>
+          {/*
+            `regressionReasonLabel` is deliberately NOT extracted: the same
+            table writes the PERSISTED verify comment
+            (`formatRegressionReportComment`), which ships to the ticket
+            thread and back into later agent prompts. Translating it would
+            fork that vocabulary between the stored comment and this block —
+            the exclusion `lib/documents/import.ts` documents.
+          */}
           {regressionReasonLabel(reason ?? "command_error")}
         </p>
       )}
 
       <div className="text-xs">
-        <span className="text-muted-foreground">Test files detected:</span>{" "}
+        <span className="text-muted-foreground">{t("report.testFiles")}</span>{" "}
         {testFiles.length > 0 ? (
           <span className="font-mono">{testFiles.join(", ")}</span>
         ) : (
-          <span className="italic text-muted-foreground">none</span>
+          <span className="italic text-muted-foreground">{t("report.none")}</span>
         )}
       </div>
 

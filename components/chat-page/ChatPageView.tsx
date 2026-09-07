@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Sparkles } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { PillButton, projectTone } from "@/components/piscine";
 import { ToastStack } from "@/components/notifications/ToastStack";
@@ -440,6 +441,14 @@ function ChatWorkspace({
     refresh: refreshConversations,
   } = useConversations(projectId);
 
+  const t = useTranslations("Chat");
+  /*
+    `placement.ts` is a pattern-3 table of FULL dotted keys read by a module a
+    hook cannot reach, so it resolves through the namespace-less translator —
+    the same split `components/piscine/TopBar.tsx` makes for `NAV_CATEGORIES`.
+  */
+  const tKey = useTranslations();
+
   const {
     messages,
     loading,
@@ -652,14 +661,14 @@ function ChatWorkspace({
       const seeded = createdMeta.get(epicId);
       const readableId = row?.readableId ?? seeded?.readableId ?? null;
       const placement =
-        longPlacement(row?.status ?? null, row?.rank ?? null) ??
-        longPlacement(seeded?.status ?? null, null);
+        longPlacement(row?.status ?? null, row?.rank ?? null, tKey) ??
+        longPlacement(seeded?.status ?? null, null, tKey);
       return { readableId, placement };
     },
-    [ticketsById, createdMeta],
+    [ticketsById, createdMeta, tKey],
   );
 
-  /* ---- "Créé dans ce chat" --------------------------------------------- */
+  /* ---- the CREATED IN THIS CHAT rail ----------------------------------- */
 
   const createdHere: CreatedHereEntry[] = useMemo(() => {
     const ids: string[] = [];
@@ -685,8 +694,8 @@ function ChatWorkspace({
         readableId: row?.readableId ?? seeded?.readableId ?? null,
         title: row?.title ?? parsedTitle ?? null,
         placement:
-          shortPlacement(row?.status ?? null, row?.rank ?? null) ??
-          shortPlacement(seeded?.status ?? null, null),
+          shortPlacement(row?.status ?? null, row?.rank ?? null, tKey) ??
+          shortPlacement(seeded?.status ?? null, null, tKey),
       };
     });
   }, [
@@ -695,6 +704,7 @@ function ChatWorkspace({
     ticketsById,
     createdMeta,
     epicsByMessage,
+    tKey,
   ]);
 
   const ticketCounts = useMemo(() => {
@@ -783,7 +793,7 @@ function ChatWorkspace({
     [activeId, hasMessages, updateConversation],
   );
 
-  /* ---- "Proposer l'ajout" ---------------------------------------------- */
+  /* ---- the TOWARD THE SPEC proposal ------------------------------------ */
 
   const [proposing, setProposing] = useState(false);
   const [specHref, setSpecHref] = useState<string | null>(null);
@@ -796,7 +806,13 @@ function ChatWorkspace({
 
     setProposing(true);
     try {
-      const instruction = `Intègre à la spec la décision prise dans cette conversation :\n${lastAssistant.content.slice(0, 4000)}`;
+      // AGENT-FACING, so it is NOT a catalogue key and never follows the
+      // interface locale (lib/i18n/catalogue.ts, §5) — a model reads it, not a
+      // user. Pinned to English for the same reason the prompt builders are:
+      // the specification it is asking to edit is English, as is the project
+      // memory injected alongside it, and a French instruction over English
+      // context is exactly the mix that degrades the rewrite.
+      const instruction = `Integrate into the spec the decision made in this conversation:\n${lastAssistant.content.slice(0, 4000)}`;
       const res = await fetch(`/api/projects/${projectId}/spec/update`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -807,17 +823,17 @@ function ChatWorkspace({
         // 409 SPEC_UPDATE_PENDING and 400 (stale named agent) both carry a
         // readable `error`. Neither is retried: a second rewrite would race
         // the first, last-write-wins.
-        onToast("error", body.error || "Failed to propose the spec addition");
+        onToast("error", body.error || t("towardSpec.proposalFailed"));
         return;
       }
       setSpecHref(`/projects/${projectId}/spec`);
-      onToast("success", "Proposition envoyée à la spec");
+      onToast("success", t("towardSpec.proposalSent"));
     } catch {
-      onToast("error", "Failed to propose the spec addition");
+      onToast("error", t("towardSpec.proposalFailed"));
     } finally {
       setProposing(false);
     }
-  }, [messages, projectId, onToast]);
+  }, [messages, projectId, onToast, t]);
 
   /* ---- the fallback epic path ------------------------------------------ */
 
@@ -848,10 +864,10 @@ function ChatWorkspace({
             size="sm"
             icon={Sparkles}
             pending={epicCreating}
-            pendingLabel="Création…"
+            pendingLabel={t("thread.createEpicPending")}
             onClick={() => void handleCreateEpicFallback()}
           >
-            Create Epic &amp; Generate Stories
+            {t("thread.createEpic")}
           </PillButton>
         ) : null}
         {isBrainstorm ? (
@@ -860,18 +876,18 @@ function ChatWorkspace({
             size="sm"
             icon={Sparkles}
             pending={generatingSpec}
-            pendingLabel="Génération…"
+            pendingLabel={t("thread.generateSpecPending")}
             onClick={generateSpec}
           >
-            Generate Spec &amp; Plan
+            {t("thread.generateSpec")}
           </PillButton>
         ) : null}
       </div>
     ) : null;
 
   const emptyMessage = isEpicCreation
-    ? "Describe your epic idea and I'll help you structure it with user stories and acceptance criteria."
-    : "Start a conversation to brainstorm your project with Claude";
+    ? t("thread.emptyEpic")
+    : t("thread.emptyBrainstorm");
 
   return (
     <div className={CHAT_BODY_CLASS}>
@@ -895,7 +911,7 @@ function ChatWorkspace({
         ref={threadPaneRef}
         data-testid="chat-thread-pane"
         tabIndex={-1}
-        aria-label="Fil de la conversation"
+        aria-label={t("thread.paneLabel")}
         className={cn(THREAD_PANE_CLASS, chatPaneClass(pane, "thread"))}
       >
         <ChatThread

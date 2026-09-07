@@ -1,0 +1,71 @@
+{
+  "mcp": {
+    "heading": "MCP servers",
+    "intro": "Extra MCP servers (Godot, Confluence, Playwright…) handed to agent sessions and CLI chat conversations alongside Arij's own tool channel.",
+    "scopeProject": "These are scoped to this project; global servers are inherited below.",
+    "scopeGlobal": "These are global — every project's sessions get them.",
+    "strictConfig": "Arij runs agents with strict MCP config, so servers configured in your own <code>~/.claude.json</code> or <code>.mcp.json</code> are ignored: declare them here instead.",
+    "notChatMode": "Not used by the OpenAI-compatible chat mode — it is an HTTP endpoint, not an MCP host, and keeps its own built-in board tools.",
+    "emptyProject": "No project MCP servers yet.",
+    "emptyGlobal": "No global MCP servers yet."
+  },
+  "health": {
+    "neverTested": "Never tested",
+    "ok": "OK — {when}",
+    "failed": "Failed — {when}"
+  },
+  "message": {
+    "loadFailed": "Failed to load MCP servers.",
+    "requestFailed": "The request failed.",
+    "testFailed": "The connection test failed.",
+    "testConnected": "Connected — {count} tool(s): {tools}",
+    "testNoTools": "none",
+    "testRefused": "Failed — {reason}",
+    "testNoReason": "no reason given"
+  },
+  "server": {
+    "disabled": "disabled",
+    "agentTypes": "types: {list}",
+    "tools": "tools: {list}",
+    "secrets": "secrets: {list}",
+    "test": "Test",
+    "edit": "Edit",
+    "disable": "Disable",
+    "enable": "Enable",
+    "delete": "Delete",
+    "unsupportedProviders": "Not honoured by {providers} — those CLIs only read a user-global MCP registry, so they receive global servers only. Secrets for those providers are stored in the CLI's own config file, readable by the agent."
+  },
+  "inherited": {
+    "heading": "Inherited global servers",
+    "empty": "No global MCP servers are configured.",
+    "badge": "global",
+    "overridden": "overridden here",
+    "overriddenExcept": "overridden here — except on {providers}",
+    "disableForProject": "Disable for this project",
+    "partialDisable": "Disabling this here will not affect {providers} — a per-project entry cannot reach a user-global MCP registry, so their sessions keep loading this server. Delete or disable it globally to stop it everywhere.",
+    "note": "Inherited servers are read-only here — edit them in the global settings. To change one for this project only, disable it or add a local server with the same name: a project entry takes precedence — on the providers that read per-spawn config."
+  },
+  "form": {
+    "add": "Add MCP server",
+    "name": "Name (lowercase, [a-z0-9_-])",
+    "transport": "Transport",
+    "transportStdio": "stdio",
+    "transportHttp": "http",
+    "command": "Command",
+    "args": "Arguments (one per line)",
+    "url": "URL",
+    "usageHint": "Usage hint — one line telling the agent what this server is for",
+    "agentTypes": "Agent types (one per line) — blank means every type, chat included",
+    "agentTypesPlaceholder": "ticket_build\nreview_security\nchat",
+    "toolAllowlist": "Allowed tools (one per line) — blank means every tool the server exposes",
+    "toolAllowlistPlaceholder": "list_nodes\nrun_scene",
+    "secretsHeaders": "Headers (KEY=value, one per line)",
+    "secretsEnv": "Environment (KEY=value, one per line)",
+    "secretsNote": "— write-only. Leave blank to keep the stored values.",
+    "secretsPlaceholder": "unchanged — type a line to replace a value",
+    "enabled": "Enabled",
+    "save": "Save",
+    "create": "Create",
+    "cancel": "Cancel"
+  }
+}

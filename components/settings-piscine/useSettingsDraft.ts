@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslations } from "next-intl";
 
 import {
   SETTING_FIELDS,
@@ -25,6 +26,14 @@ import {
  *
  * `agent_max_concurrent` has a second editor (`LimitsView`), which is why the
  * hook re-reads on mount and caches nothing across navigations.
+ *
+ * ITS FOUR SENTENCES COME FROM THE CATALOGUE, resolved HERE. This is a hook,
+ * so it runs inside a render and may hold a translator — what it may not do is
+ * hoist one to module scope, which is why the refusal a `SETTING_FIELDS` spec
+ * returns is a KEY (`errorKey`) and this is where the key becomes a sentence.
+ * The namespace-less translator is the one that takes those full dotted paths.
+ * A message the SERVER wrote (`payload.error`) is passed through untouched:
+ * the route composed it, not the catalogue.
  */
 export interface SettingsDraft {
   /** The first GET has landed (successfully or not). */
@@ -52,9 +61,13 @@ export interface SettingsDraft {
   setMessage: (message: string | null, tone?: "muted" | "danger") => void;
 }
 
-const LOAD_FAILED_MESSAGE = "impossible de lire les réglages — recharge la page";
-
 export function useSettingsDraft(): SettingsDraft {
+  const t = useTranslations();
+  const loadFailedMessage = t("Settings.draft.loadFailed");
+  const savedMessage = t("Settings.draft.saved");
+  const saveRefusedMessage = t("Settings.draft.saveRefused");
+  const saveOfflineMessage = t("Settings.draft.saveOffline");
+
   const [data, setData] = useState<SettingsData>({});
   const [defaults, setDefaults] = useState<SettingsData>({});
   const [loaded, setLoaded] = useState(false);
@@ -90,13 +103,13 @@ export function useSettingsDraft(): SettingsDraft {
         // Never render built-in defaults as if they were stored values.
         setLoaded(true);
         setLoadFailed(true);
-        setMessageState(LOAD_FAILED_MESSAGE);
+        setMessageState(loadFailedMessage);
         setMessageTone("danger");
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [loadFailedMessage]);
 
   const value = useCallback(
     (key: string): EditorValue =>
@@ -141,11 +154,11 @@ export function useSettingsDraft(): SettingsDraft {
       const spec = SETTING_FIELDS[key];
       if (!spec) continue;
       const parsed = spec.parse(draft[key]);
-      if ("error" in parsed) {
+      if ("errorKey" in parsed) {
         // Refuse the whole batch, exactly as the route does, and keep the
         // user's text on screen: a reformatted value next to a failure would
         // imply something that was never persisted.
-        setMessageState(parsed.error);
+        setMessageState(t(parsed.errorKey, parsed.errorValues));
         setMessageTone("danger");
         return;
       }
@@ -171,9 +184,7 @@ export function useSettingsDraft(): SettingsDraft {
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         setMessageState(
-          typeof payload?.error === "string"
-            ? payload.error
-            : "Failed to save the settings. Check the server response and retry.",
+          typeof payload?.error === "string" ? payload.error : saveRefusedMessage,
         );
         setMessageTone("danger");
         return;
@@ -182,15 +193,15 @@ export function useSettingsDraft(): SettingsDraft {
       // clamped breaker, a re-joined pattern list and reformatted verify JSON.
       setData((current) => ({ ...current, ...body }));
       setDraft({});
-      setMessageState("Saved");
+      setMessageState(savedMessage);
       setMessageTone("muted");
     } catch {
-      setMessageState("Failed to save the settings. Check your connection and retry.");
+      setMessageState(saveOfflineMessage);
       setMessageTone("danger");
     } finally {
       setSaving(false);
     }
-  }, [draft]);
+  }, [draft, t, savedMessage, saveRefusedMessage, saveOfflineMessage]);
 
   return {
     loaded,

@@ -1,0 +1,23 @@
+{
+  "page": {
+    "heading": "Documents",
+    "description": "What agents can cite: specs, audits, notes. Mentionable with @name in the chat.",
+    "empty": "No documents uploaded yet",
+    "unknownMimeType": "unknown",
+    "closePreview": "Close document preview",
+    "delete": "Delete {name}",
+    "deleting": "Deleting...",
+    "loadFailed": "Failed to load documents.",
+    "deleteFailed": "Failed to delete \"{name}\"."
+  },
+  "size": {
+    "unknown": "n/a",
+    "bytes": "{value} B",
+    "kilobytes": "{value} KB",
+    "megabytes": "{value} MB"
+  },
+  "mentions": {
+    "label": "Mentions",
+    "hint": "Type <token>@DOC_NAME</token> in a ticket or the chat: the document travels with the prompt."
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "deviceFlow": {
+    "expired": "This code has expired. Start the connection again to get a new one.",
+    "unreadableStart": "GitHub did not return a usable code. Try again.",
+    "unreadablePoll": "GitHub confirmed the connection but the response could not be read. Try again.",
+    "unreachable": "Could not reach Arij. Check that the server is running, then try again.",
+    "fallbackPoll": "The GitHub connection failed. Try again."
+  },
+  "connect": {
+    "question": "Connect this project to <repo>{ownerRepo}</repo>?",
+    "connect": "Connect",
+    "connecting": "Connecting...",
+    "dismiss": "Dismiss",
+    "detecting": "Detecting remote...",
+    "detectError": "Could not detect a GitHub remote for this project.",
+    "connectError": "Failed to connect this project to the detected GitHub repository."
+  },
+  "pr": {
+    "draft": "Draft",
+    "open": "Open",
+    "closed": "Closed",
+    "merged": "Merged"
+  },
+  "repo": {
+    "label": "Repository",
+    "notConnected": "not connected",
+    "localRepo": "local repo",
+    "noRepository": "This project has no local git repository, so there is no branch to compare, fetch or push. Attach a directory or import from GitHub, and the branch counters, worktrees and pull requests appear here.",
+    "fetch": "Fetch",
+    "push": "Push {branch}",
+    "fetched": "fetched {age}",
+    "neverFetched": "never fetched",
+    "ahead": "{count} to push",
+    "behind": "{count} behind",
+    "worktrees": "{count, plural, one {# worktree} other {# worktrees}}"
+  }
+}

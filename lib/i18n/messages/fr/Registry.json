@@ -1,0 +1,54 @@
+{
+  "columns": {
+    "title": "Titre",
+    "state": "État",
+    "priority": "Priorité",
+    "activity": "Dernière activité",
+    "cost": "Coût",
+    "project": "Projet",
+    "group": "Groupe"
+  },
+  "sortOptions": {
+    "activity": "activité",
+    "priority": "priorité",
+    "cost": "coût",
+    "title": "titre",
+    "state": "état"
+  },
+  "filters": {
+    "project": "Projet : {name}",
+    "projectAll": "Tous les projets",
+    "status": "État : {name}",
+    "statusAll": "Tous les états"
+  },
+  "table": {
+    "sortHint": "Trier dans chaque groupe",
+    "showAll": "tout montrer ↓",
+    "more": "+ {count, plural, one {# autre} other {# autres}}",
+    "moreDone": "+ {count, plural, one {# autre} other {# autres}} done",
+    "moreReleased": "+ {count, plural, one {# autre} other {# autres}} released",
+    "moreBacklog": "+ {count, plural, one {# autre} other {# autres}} en backlog"
+  },
+  "footer": {
+    "status": "{tickets, plural, one {# ticket} other {# tickets}} · {projects, plural, one {# projet} other {# projets}}",
+    "cost30d": "coût total 30j :",
+    "exportHint": "Exporte {count, plural, one {le ticket chargé} other {les # tickets chargés}}"
+  },
+  "activity": {
+    "branchUnknown": "branche"
+  },
+  "newTicket": {
+    "band": "Nouveau ticket",
+    "fieldTitle": "Titre",
+    "titlePlaceholder": "Ce que le ticket doit livrer",
+    "descriptionPlaceholder": "Contexte, contraintes, critères — optionnel",
+    "fieldProject": "Projet",
+    "projectNone": "Aucun projet",
+    "fieldPriority": "Priorité",
+    "fieldColumn": "Colonne",
+    "submit": "Créer le ticket",
+    "submitPending": "Création…",
+    "refused": "Création refusée ({status})",
+    "unreachable": "Création impossible — le serveur n'a pas répondu"
+  }
+}

@@ -2,14 +2,14 @@
 
 import * as React from "react";
 import { RotateCcw } from "lucide-react";
+import { useLocale, useTranslations } from "next-intl";
 
 import { Mono, PillButton, SurfaceCard } from "@/components/piscine";
 import type { Conversation } from "@/hooks/useConversations";
 import { isPersistentChatProvider } from "@/lib/agent-config/constants";
 import { resolveLegacyConversationLabel } from "@/lib/chat/parity-contract";
 import type { DeskProject } from "@/lib/control-desk/types";
-
-import { relativeAge } from "./relative-age";
+import { formatRelative } from "@/lib/i18n/format";
 
 /**
  * One row of the 300px conversation roster (frame 11a, left column).
@@ -49,8 +49,11 @@ export function ConversationRosterCard({
     conversation.label,
   );
   const shortName = project?.shortName?.toUpperCase() ?? "—";
-  const age = relativeAge(conversation.createdAt, now);
-  const meta = `${shortName} · ${agentLabel} · ${age ?? "—"}`;
+  const locale = useLocale();
+  const t = useTranslations("Chat");
+  // An unreadable timestamp is an em dash upstream of the join, never a guess.
+  const age = formatRelative(conversation.createdAt, { locale, now }) || "—";
+  const meta = `${shortName} · ${agentLabel} · ${age}`;
 
   const persistent = isPersistentChatProvider(conversation.provider);
   const hot = conversation.persistentSessionState === "hot";
@@ -81,9 +84,7 @@ export function ConversationRosterCard({
       {active && ticketCount > 0 ? (
         // Never "0 tickets": an empty count is a line that does not exist.
         <span className="line-clamp-1 text-[12px] text-muted-foreground">
-          {`${ticketCount} ticket${ticketCount === 1 ? "" : "s"} créé${
-            ticketCount === 1 ? "" : "s"
-          } dans cette conversation`}
+          {t("roster.ticketsCreated", { count: ticketCount })}
         </span>
       ) : null}
 
@@ -99,13 +100,13 @@ export function ConversationRosterCard({
             // is the WORD, never a colour.
             <span data-testid="persistent-session-state">
               <Mono size={10} tone="muted">
-                {hot ? "session warm" : "session cold"}
+                {hot ? t("roster.sessionWarm") : t("roster.sessionCold")}
               </Mono>
             </span>
           ) : (
             <span data-testid="linked-session-state">
               <Mono size={10} tone="muted">
-                session linked
+                {t("roster.sessionLinked")}
               </Mono>
             </span>
           )}
@@ -118,11 +119,11 @@ export function ConversationRosterCard({
               outlineTone="neutral"
               iconOnly
               icon={RotateCcw}
-              aria-label="Restart persistent chat session"
+              aria-label={t("roster.restartSession")}
               className="ml-auto h-[24px] w-[24px]"
               onClick={onRestartPersistentSession}
             >
-              Restart persistent chat session
+              {t("roster.restartSession")}
             </PillButton>
           ) : null}
         </div>

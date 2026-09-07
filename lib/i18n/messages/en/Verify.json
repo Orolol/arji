@@ -1,0 +1,10 @@
+{
+  "report": {
+    "heading": "Verify — regression test (red → green)",
+    "passed": "PASSED",
+    "failed": "FAILED",
+    "reason": "Reason: ",
+    "testFiles": "Test files detected:",
+    "none": "none"
+  }
+}

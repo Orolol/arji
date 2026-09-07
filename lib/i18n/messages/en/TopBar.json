@@ -1,0 +1,49 @@
+{
+  "home": "Now — control desk",
+  "newProject": "New project",
+  "loading": "…",
+  "pills": {
+    "now": "Now",
+    "chat": "Chat"
+  },
+  "search": {
+    "title": "Search — ⌘K",
+    "shortcut": "⌘K"
+  },
+  "inbox": "Inbox",
+  "auto": {
+    "label": "Auto",
+    "title": "Full Auto",
+    "titleArmed": "Full Auto · {armed}/{total} projects"
+  },
+  "new": {
+    "label": "New",
+    "title": "New ticket"
+  },
+  "menu": {
+    "planned": "planned",
+    "needsProject": "pick a project",
+    "plannedTitle": "{label} — screen under construction ({href})",
+    "needsProjectTitle": "{label} — pick a project first"
+  },
+  "digest": {
+    "kicker": "THIS MORNING",
+    "shipped": "{count} landed today",
+    "blocking": "{count} blocked by a finding",
+    "ready": "{count} ready to land",
+    "waiting": "{count} waiting on you",
+    "empty": "Nothing to report.",
+    "open": "open the digest →"
+  },
+  "live": {
+    "kicker": "RIGHT NOW",
+    "empty": "No agent running.",
+    "agent": "{label} × {count}",
+    "nightRuns": "night run · {count, plural, one {# session} other {# sessions}}"
+  },
+  "status": {
+    "blocking": "{count} blocking",
+    "live": "{count} live",
+    "usage": "{amount} today"
+  }
+}

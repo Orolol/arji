@@ -1,6 +1,7 @@
 "use client";
 
 import { useId, useState } from "react";
+import { useTranslations } from "next-intl";
 
 import {
   FieldKicker,
@@ -11,9 +12,12 @@ import {
 } from "@/components/piscine";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import type { NamedAgent } from "@/hooks/useAgentConfig";
-import type { AgentProvider } from "@/lib/agent-config/constants";
+import {
+  PROVIDER_LABELS,
+  type AgentProvider,
+} from "@/lib/agent-config/constants";
 
-import { CliDropdown, providerAvailabilityHint } from "./CliDropdown";
+import { CliDropdown, providerAvailabilityHintKey } from "./CliDropdown";
 import { FieldBoxInput } from "./FieldBox";
 
 /**
@@ -62,6 +66,9 @@ export function AgentIdentityCard({
   onModelChange,
   onEscalatesToChange,
 }: AgentIdentityCardProps) {
+  const t = useTranslations("AgentsWorkshop");
+  // Namespace-less, for the availability hint's KEY REFERENCE.
+  const tKey = useTranslations();
   const uid = useId();
   // "Stronger model" is chosen before a target is picked; the segment must
   // stay lit while the menu is open. Remounted per agent by the caller's key.
@@ -77,23 +84,23 @@ export function AgentIdentityCard({
     escalatesTo || strongerPending ? "stronger" : "none";
 
   const retryOptions: SegmentedControlOption<RetryMode>[] = [
-    { value: "none", label: "None", flex: 1 },
+    { value: "none", label: t("identity.retryNone"), flex: 1 },
     {
       value: "stronger",
-      label: "Stronger model",
+      label: t("identity.retryStronger"),
       flex: 1.4,
       disabled: candidates.length === 0,
       hint:
         candidates.length === 0
-          ? "aucun autre agent n'utilise ce CLI"
+          ? t("identity.retryStrongerHint")
           : undefined,
     },
     {
       value: "other-cli",
-      label: "Other CLI",
+      label: t("identity.retryOtherCli"),
       flex: 1.2,
       disabled: true,
-      hint: "toujours tenté en dernier recours — tentative 3 sans modèle plus fort, tentative 4 avec.",
+      hint: t("identity.retryOtherCliHint"),
     },
   ];
 
@@ -107,21 +114,21 @@ export function AgentIdentityCard({
       <div className="flex flex-wrap items-end gap-x-[22px] gap-y-[14px]">
         <div className="flex min-w-[180px] flex-1 flex-col gap-[5px] lg:w-[280px] lg:flex-none">
           <FieldKicker stratum="card" size={10}>
-            NAME
+            {t("identity.nameKicker")}
           </FieldKicker>
           <FieldBoxInput
             id={`${uid}-name`}
             value={name}
             onChange={(event) => onNameChange(event.target.value)}
-            aria-label="Name"
-            placeholder="Agent name"
+            aria-label={t("identity.nameAria")}
+            placeholder={t("common.agentNamePlaceholder")}
             disabled={disabled}
           />
         </div>
 
         <div className="flex min-w-[150px] flex-1 flex-col gap-[5px] lg:w-[200px] lg:flex-none">
           <FieldKicker stratum="card" size={10}>
-            CLI
+            {t("identity.cliKicker")}
           </FieldKicker>
           <CliDropdown
             id={`${uid}-cli`}
@@ -133,32 +140,34 @@ export function AgentIdentityCard({
             aria-describedby={`${uid}-cli-hint`}
           />
           <span id={`${uid}-cli-hint`} className="sr-only">
-            {providerAvailabilityHint(
-              provider,
-              !!availability[provider],
-              availabilityLoading,
+            {tKey(
+              providerAvailabilityHintKey(
+                !!availability[provider],
+                availabilityLoading,
+              ),
+              { cli: PROVIDER_LABELS[provider] },
             )}
           </span>
         </div>
 
         <div className="flex min-w-[150px] flex-1 flex-col gap-[5px] lg:w-[220px] lg:flex-none">
           <FieldKicker stratum="card" size={10}>
-            MODEL
+            {t("identity.modelKicker")}
           </FieldKicker>
           <FieldBoxInput
             mono
             id={`${uid}-model`}
             value={model}
             onChange={(event) => onModelChange(event.target.value)}
-            aria-label="Model"
-            placeholder="CLI default"
+            aria-label={t("identity.modelAria")}
+            placeholder={t("common.cliDefault")}
             disabled={disabled}
           />
         </div>
 
         <div className="flex min-w-[240px] flex-1 flex-col gap-[5px]">
           <FieldKicker stratum="card" size={10}>
-            RETRY ESCALATION
+            {t("identity.retryKicker")}
           </FieldKicker>
           <div className="flex items-center gap-2">
             <SegmentedControl<RetryMode>
@@ -183,17 +192,17 @@ export function AgentIdentityCard({
                 tone="ink"
                 fill="card"
                 disabled={disabled}
-                label={target ? target.name : "Choose an agent"}
+                label={target ? target.name : t("identity.chooseAgent")}
               >
                 {candidates.map((candidate) => (
                   <DropdownMenuItem
                     key={candidate.id}
                     onSelect={() => onEscalatesToChange(candidate.id)}
                   >
-                    {candidate.name}
-                    {candidate.model
-                      ? ` — ${candidate.model}`
-                      : " — CLI default"}
+                    {t("identity.candidate", {
+                      name: candidate.name,
+                      model: candidate.model || t("common.cliDefault"),
+                    })}
                   </DropdownMenuItem>
                 ))}
               </SelectPill>

@@ -272,7 +272,7 @@ describe("YOUR TURN — a coral row folds instead of running off the screen", ()
    */
   it("lets the reply field wrap onto its own line rather than floor the row", () => {
     renderYourTurn();
-    const field = screen.getByLabelText("Répondre à l'agent") as HTMLElement;
+    const field = screen.getByLabelText("Reply to the agent") as HTMLElement;
 
     expect(hasBaseUtility(field, "max-w-[300px]")).toBe(true);
     expect(
@@ -294,16 +294,16 @@ describe("YOUR TURN — a coral row folds instead of running off the screen", ()
   it("keeps every coral control named and enabled", () => {
     renderYourTurn();
 
-    expect(screen.getByRole("textbox", { name: "Répondre à l'agent" })).toBeEnabled();
+    expect(screen.getByRole("textbox", { name: "Reply to the agent" })).toBeEnabled();
     for (const name of [
       "Send to dev",
       "Retry",
       "Log",
       "Resolve with agent",
       "Diff",
-      "Écarter cette question",
-      "Écarter cet échec",
-      "Écarter ce conflit",
+      "Dismiss this question",
+      "Dismiss this failure",
+      "Dismiss this conflict",
     ]) {
       expect(screen.getByRole("button", { name })).toBeEnabled();
     }

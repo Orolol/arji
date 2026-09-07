@@ -372,7 +372,7 @@ describe("live session — the log is the screen", () => {
     });
     render(<SessionDetailPage />);
 
-    await userEvent.click(await screen.findByText("Réponse"));
+    await userEvent.click(await screen.findByText("Response"));
 
     const pane = await screen.findByTestId("stream-response");
     const line = within(pane).getByTestId("chunk-prune-marker");
@@ -411,7 +411,7 @@ describe("live session — the log is the screen", () => {
     });
     render(<SessionDetailPage />);
 
-    await userEvent.click(await screen.findByText("Réponse"));
+    await userEvent.click(await screen.findByText("Response"));
 
     const pane = await screen.findByTestId("stream-response");
     const line = within(pane).getByTestId("chunk-elision-marker");
@@ -427,18 +427,18 @@ describe("live session — the two performance workarounds", () => {
     const user = userEvent.setup();
     render(<SessionDetailPage />);
 
-    await screen.findByText("Prompt composé");
+    await screen.findByText("Composed prompt");
     expect(calls(fetchMock, "include=prompt")).toHaveLength(0);
 
-    await user.click(screen.getByText("voir le prompt exact →"));
+    await user.click(screen.getByText("see the exact prompt →"));
     await waitFor(() => {
       expect(calls(fetchMock, "include=prompt")).toHaveLength(1);
     });
     expect(screen.getByText("THE EXACT PROMPT")).toBeInTheDocument();
 
     // Closing and reopening must not re-fetch it.
-    await user.click(screen.getByText("voir le prompt exact →"));
-    await user.click(screen.getByText("voir le prompt exact →"));
+    await user.click(screen.getByText("see the exact prompt →"));
+    await user.click(screen.getByText("see the exact prompt →"));
     expect(calls(fetchMock, "include=prompt")).toHaveLength(1);
   });
 
@@ -453,8 +453,8 @@ describe("live session — the two performance workarounds", () => {
     const user = userEvent.setup();
     render(<SessionDetailPage />);
 
-    await screen.findByText("Prompt composé");
-    await user.click(screen.getByText("voir le prompt exact →"));
+    await screen.findByText("Composed prompt");
+    await user.click(screen.getByText("see the exact prompt →"));
 
     const line = await screen.findByTestId("prompt-elision-marker");
     expect(line).toHaveTextContent("4,856,320 bytes elided");
@@ -471,8 +471,8 @@ describe("live session — the two performance workarounds", () => {
     const user = userEvent.setup();
     render(<SessionDetailPage />);
 
-    await screen.findByText("Prompt composé");
-    await user.click(screen.getByText("voir le prompt exact →"));
+    await screen.findByText("Composed prompt");
+    await user.click(screen.getByText("see the exact prompt →"));
 
     expect(await screen.findByText("THE EXACT PROMPT")).toBeInTheDocument();
     expect(screen.queryByTestId("prompt-elision-marker")).toBeNull();
@@ -659,7 +659,7 @@ describe("live session — collapsing rather than fabricating", () => {
     installFetch({ session: { ...mockSession, agentType: "chat" } });
     const { container } = render(<SessionDetailPage />);
 
-    expect(await screen.findByText("Ensuite")).toBeInTheDocument();
+    expect(await screen.findByText("Next")).toBeInTheDocument();
     expect(
       container.querySelector("[data-slot='pipeline-chain']")
     ).toBeNull();
@@ -672,7 +672,7 @@ describe("live session — collapsing rather than fabricating", () => {
     render(<SessionDetailPage />);
 
     await screen.findByText("Session");
-    expect(screen.queryByText("Ensuite")).not.toBeInTheDocument();
+    expect(screen.queryByText("Next")).not.toBeInTheDocument();
   });
 
   it("omits the WORKTREE card when there is neither branch nor path", async () => {

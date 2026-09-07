@@ -144,9 +144,9 @@ describe("Settings — BUDGET band copy", () => {
     const band = await screen.findByTestId("usage-settings");
     // Nothing in lib/auto-mode/* reads a spend cap; the tile that used to say
     // otherwise is documented as display-only.
-    expect(band.textContent).not.toContain("se mettent en pause");
+    expect(band.textContent).not.toContain("pauses Full Auto and the night runs");
     expect(band).toHaveTextContent(
-      "rien ne met Full Auto ni les night runs en pause automatiquement"
+      "nothing pauses Full Auto or the night runs automatically"
     );
   });
 });

@@ -1,3 +1,4 @@
+import type { TranslationKey } from "@/lib/i18n/catalogue";
 import type { ProjectTone } from "@/lib/piscine/tokens";
 
 /**
@@ -41,11 +42,22 @@ export function agentTone(agentId: string): ProjectTone {
  * Where an assignment or a prompt comes from. The same three strings the
  * agent-config sheet used, kept in ONE place now that the assignments tiles,
  * the assignments page and the prompts page all render them.
+ *
+ * A MODULE-SCOPE COPY TABLE, so it holds catalogue KEY REFERENCES and the
+ * caller resolves them with the namespace-less translator
+ * (`lib/i18n/catalogue.ts`, pattern 3): `t(sourceLabelKey(source))`.
  */
-export function sourceLabel(
+const SOURCE_LABELS: Record<
+  "builtin" | "global" | "project",
+  { labelKey: TranslationKey }
+> = {
+  builtin: { labelKey: "AgentsWorkshop.source.builtin" },
+  global: { labelKey: "AgentsWorkshop.source.global" },
+  project: { labelKey: "AgentsWorkshop.source.project" },
+};
+
+export function sourceLabelKey(
   source: "builtin" | "global" | "project",
-): string {
-  if (source === "project") return "This project";
-  if (source === "global") return "All projects";
-  return "Arij default";
+): TranslationKey {
+  return SOURCE_LABELS[source].labelKey;
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import { useLocale, useTranslations } from "next-intl";
 import { Check, ExternalLink, Tag, Upload } from "lucide-react";
 
 import {
@@ -11,7 +12,7 @@ import {
   pillButtonVariants,
   type ProjectTone,
 } from "@/components/piscine";
-import { timeAgo } from "@/lib/utils/format-date";
+import { formatRelative } from "@/lib/i18n/format";
 import { cn } from "@/lib/utils";
 
 import { ChangelogAgentPopover } from "./ChangelogAgentPopover";
@@ -21,6 +22,7 @@ import { VersionPill } from "./VersionPill";
 import {
   parseEpicIds,
   releaseState,
+  RELEASE_STATE_KEYS,
   ticketExclusionReason,
   type ReleaseEpic,
   type ReleaseRow,
@@ -106,6 +108,9 @@ export function NextReleaseBand({
   publishError,
   onPublish,
 }: NextReleaseBandProps) {
+  const locale = useLocale();
+  const t = useTranslations("Releases");
+  const all = useTranslations();
   const inspecting = inspectRelease !== null;
   // Only reached after loading: an unknown candidate list is not an empty one.
   const composeEmpty = !inspecting && !loading && candidates.length === 0;
@@ -116,19 +121,19 @@ export function NextReleaseBand({
     <BandHeader
       stratum="land"
       labelSize={12}
-      label={inspecting ? "Release" : "Next release"}
+      label={inspecting ? t("next.inspectLabel") : t("next.label")}
       meta={
         inspectRelease ? (
           <span className="inline-flex items-baseline gap-[10px]">
-            {releaseState(inspectRelease)}
+            {all(RELEASE_STATE_KEYS[releaseState(inspectRelease)])}
             <QuietLink tone="next" size={11.5} onClick={onLeaveInspect}>
-              ← revenir au brouillon
+              {t("next.backToDraft")}
             </QuietLink>
           </span>
         ) : composeEmpty ? (
-          "No completed epics available for release"
+          t("next.noCandidates")
         ) : (
-          "draft"
+          t("next.draft")
         )
       }
       right={
@@ -153,9 +158,32 @@ export function NextReleaseBand({
 
   const rowCount = inspectRelease ? inspectEpics.length : candidates.length;
 
+  /**
+   * `3 tickets · tag v0.4.2 on release/v0.4.2`, dropping each null clause.
+   *
+   * Local to the band on purpose: the sentence is composed from parts, and
+   * `lib/i18n/catalogue.ts` wants every key a literal at a real call site
+   * rather than a translator threaded through a module-scope helper.
+   */
+  function inspectSummary(release: ReleaseRow): string {
+    const count = parseEpicIds(release).length;
+    if (release.gitTag && release.releaseBranch) {
+      return t("summary.tagAndBranch", {
+        count,
+        tag: release.gitTag,
+        branch: release.releaseBranch,
+      });
+    }
+    if (release.gitTag) return t("summary.tagOnly", { count, tag: release.gitTag });
+    if (release.releaseBranch) {
+      return t("summary.branchOnly", { count, branch: release.releaseBranch });
+    }
+    return t("summary.ticketsOnly", { count });
+  }
+
   const footerSummary = inspectRelease
     ? inspectSummary(inspectRelease)
-    : `${selectedCount} ticket${selectedCount === 1 ? "" : "s"} · tag v${version} sur release/v${version}`;
+    : t("summary.compose", { count: selectedCount, version });
 
   return (
     <StrataBand stratum="land" gap={11} className={bandClass}>
@@ -181,10 +209,12 @@ export function NextReleaseBand({
                   epic={epic}
                   tone={tone}
                   checked={isChecked(epic)}
-                  reason={ticketExclusionReason(epic)}
+                  reason={ticketExclusionReason(epic, (count) => t("next.storiesLeft", { count }))}
                   // There is no mergedAt column; for a `done` epic updatedAt IS
                   // the transition timestamp. An unknown one is an em-dash.
-                  meta={`merged ${timeAgo(epic.updatedAt ?? null) || "—"}`}
+                  meta={t("next.merged", {
+                    age: formatRelative(epic.updatedAt, { locale }) || "—",
+                  })}
                   onToggle={() => onToggleEpic(epic.id)}
                 />
               ))}
@@ -192,7 +222,9 @@ export function NextReleaseBand({
       ) : null}
 
       <ChangelogCard
-        caption={inspecting ? "CHANGELOG" : "CHANGELOG — GÉNÉRÉ À LA CRÉATION"}
+        caption={
+          inspecting ? t("next.changelog") : t("next.changelogCompose")
+        }
         markdown={inspectRelease ? inspectRelease.changelog : changelogPreview}
         right={
           inspecting ? undefined : (
@@ -239,7 +271,7 @@ export function NextReleaseBand({
                 )}
               >
                 <ExternalLink size={13} aria-hidden="true" />
-                View on GitHub
+                {t("next.viewOnGitHub")}
               </a>
             ) : null}
             {canPublish ? (
@@ -248,13 +280,13 @@ export function NextReleaseBand({
                 size="lg"
                 icon={Upload}
                 pending={isPublishing}
-                pendingLabel="Publishing…"
+                pendingLabel={t("next.publishing")}
                 disabled={isPublishing}
                 onClick={onPublish}
                 data-testid="release-publish-button"
                 className={`h-[31px] px-[15px] ${inspectRelease.githubReleaseUrl ? "" : "ml-auto"}`}
               >
-                Publish
+                {t("next.publish")}
               </PillButton>
             ) : null}
           </>
@@ -271,7 +303,7 @@ export function NextReleaseBand({
                 data-testid="release-github-draft-toggle"
                 className="ml-auto h-[31px] px-[14px]"
               >
-                GitHub draft
+                {t("next.githubDraft")}
               </PillButton>
             ) : null}
             <PillButton
@@ -279,29 +311,17 @@ export function NextReleaseBand({
               size="lg"
               icon={Tag}
               pending={creating}
-              pendingLabel="Creating…"
+              pendingLabel={t("next.creating")}
               disabled={creating || !version.trim() || selectedCount === 0}
               onClick={onCreate}
               data-testid="release-create-button"
               className={`h-[31px] px-[15px] ${showGitHubToggle ? "" : "ml-auto"}`}
             >
-              Create release
+              {t("next.create")}
             </PillButton>
           </>
         )}
       </div>
     </StrataBand>
   );
-}
-
-/** `3 tickets · tag v0.4.2 sur release/v0.4.2`, dropping each null clause. */
-function inspectSummary(release: ReleaseRow): string {
-  const count = parseEpicIds(release).length;
-  const head = `${count} ticket${count === 1 ? "" : "s"}`;
-  if (release.gitTag && release.releaseBranch) {
-    return `${head} · tag ${release.gitTag} sur ${release.releaseBranch}`;
-  }
-  if (release.gitTag) return `${head} · tag ${release.gitTag}`;
-  if (release.releaseBranch) return `${head} · sur ${release.releaseBranch}`;
-  return head;
 }

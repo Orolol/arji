@@ -1,5 +1,7 @@
 import { PROVIDER_LABELS } from "@/lib/agent-config/constants";
 import { projectTone, type ProjectTone } from "@/components/piscine";
+import { formatDateTime } from "@/lib/i18n/format";
+import type { UiLocale } from "@/lib/i18n/locales";
 
 /**
  * Pure formatting helpers for the Usage observatory.
@@ -15,14 +17,8 @@ export function providerLabel(provider: string): string {
 }
 
 /** Local wall clock, 24h — the report's own generation time. */
-export function formatClock(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
+export function formatClock(iso: string, locale: UiLocale): string {
+  return formatDateTime(iso, { locale, style: "clock" }) || "—";
 }
 
 /** "3d 2h" / "4h 12m" / "12m" — coarse by design, never seconds-accurate. */
@@ -52,52 +48,35 @@ export function numberOrDash(value: number | null): string {
   return value === null ? "—" : String(value);
 }
 
-/** Age of a snapshot: "less than a minute" / "42m" / "5h" / "62d". */
-export function formatRelativeAge(ms: number): string {
-  const minutes = Math.floor(ms / 60000);
-  if (minutes < 1) return "less than a minute";
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h`;
-  return `${Math.floor(hours / 24)}d`;
-}
-
-export const MONTH_LABELS = [
-  "Jan",
-  "Feb",
-  "Mar",
-  "Apr",
-  "May",
-  "Jun",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
-];
+/*
+ * The snapshot age ("polled 42m ago") and the day labels ("Aug 18") used to
+ * be formatted here in English by hand; both now come from the shared family
+ * — `formatRelative` and `formatDayLabel` in lib/i18n/format.ts.
+ */
 
 /**
- * "2026-08-18" -> "Aug 18". Parsed by hand: `new Date("2026-08-18")` is UTC
- * midnight and would render the previous day west of Greenwich, while these
- * keys are already local calendar dates.
+ * The five shapes `windowLabel` picks between, ALREADY RESOLVED by the card
+ * that draws them — a pure helper takes phrases, never a translator
+ * (`lib/i18n/catalogue.ts`, pattern 3).
  */
-export function formatDayLabel(date: string): string {
-  const [year, month, day] = date.split("-").map(Number);
-  if (!year || !month || !day || month < 1 || month > 12) return date;
-  return `${MONTH_LABELS[month - 1]} ${day}`;
+export interface WindowLabelCopy {
+  unknown: string;
+  weekly: string;
+  days: (count: number) => string;
+  hours: (count: number) => string;
+  minutes: (count: number) => string;
 }
 
 /**
  * Window label derived from what the provider actually emitted — never
  * asserted. Unknown window size gets the neutral "WINDOW".
  */
-export function windowLabel(windowMinutes: number | null): string {
-  if (windowMinutes === null) return "WINDOW";
-  if (windowMinutes === 10080) return "WEEKLY";
-  if (windowMinutes % 1440 === 0) return `${windowMinutes / 1440}D WINDOW`;
-  if (windowMinutes % 60 === 0) return `${windowMinutes / 60}H WINDOW`;
-  return `${windowMinutes}MIN WINDOW`;
+export function windowLabel(windowMinutes: number | null, copy: WindowLabelCopy): string {
+  if (windowMinutes === null) return copy.unknown;
+  if (windowMinutes === 10080) return copy.weekly;
+  if (windowMinutes % 1440 === 0) return copy.days(windowMinutes / 1440);
+  if (windowMinutes % 60 === 0) return copy.hours(windowMinutes / 60);
+  return copy.minutes(windowMinutes);
 }
 
 /**

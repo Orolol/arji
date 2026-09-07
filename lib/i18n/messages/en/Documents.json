@@ -1,0 +1,36 @@
+{
+  "scan": {
+    "trigger": "Scan the project",
+    "title": "Scan the project",
+    "description": "Documents found in the repository (pdf, md, txt, doc, docx). The .git, node_modules, dist and build directories are skipped. Tick the files to import.",
+    "running": "Scanning…",
+    "truncated": "List truncated to the first 500 files.",
+    "empty": "No document found in the project.",
+    "selectAll": "Select all",
+    "selectFile": "Select {path}",
+    "alreadyImported": "already imported",
+    "counts": "{count, plural, one {# document found} other {# documents found}} · {selected, plural, other {# selected}}",
+    "rescan": "Rescan",
+    "import": "{count, plural, =0 {Import selection} other {Import selection (#)}}",
+    "imported": "{count, plural, one {# document imported.} other {# documents imported.}}",
+    "skippedEntry": "{path} — {reason}",
+    "missingSources": "{count, plural, one {# already-imported document matches no file in the repository — it stays available in Arij.} other {# already-imported documents match no file in the repository — they stay available in Arij.}}"
+  },
+  "upload": {
+    "uploading": "Uploading...",
+    "prompt": "Drag & drop files here, or click to select",
+    "formats": "PDF, DOCX, MD, TXT, and images"
+  },
+  "viewer": {
+    "imageDocument": "Image Document",
+    "filesystemPath": "Filesystem path: {path}",
+    "missingPath": "(missing path)"
+  },
+  "errors": {
+    "scanHttp": "Scan failed (HTTP {status}).",
+    "scanUnreachable": "Scan failed: could not reach the server.",
+    "importHttp": "Import failed (HTTP {status}).",
+    "importUnreachable": "Import failed: could not reach the server.",
+    "uploadFailed": "Failed to upload \"{name}\" (HTTP {status})"
+  }
+}

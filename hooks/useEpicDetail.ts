@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { useState, useEffect, useCallback, useRef } from "react";
 import { usePolling } from "@/hooks/usePolling";
 import { useProjectEvents } from "@/hooks/useProjectEvents";
@@ -43,6 +45,7 @@ interface EpicDetail {
 }
 
 export function useEpicDetail(projectId: string, epicId: string | null) {
+  const tErrors = useTranslations("ClientErrors");
   const [epic, setEpic] = useState<EpicDetail | null>(null);
   const [userStories, setUserStories] = useState<UserStory[]>([]);
   const [verificationState, setVerificationState] = useState<{
@@ -156,7 +159,7 @@ export function useEpicDetail(projectId: string, epicId: string | null) {
 
   const updateEpic = useCallback(
     async (updates: Partial<EpicDetail>): Promise<{ ok: boolean; error?: string }> => {
-      if (!epicId) return { ok: false, error: "No ticket selected" };
+      if (!epicId) return { ok: false, error: tErrors("noTicketSelected") };
       try {
         const res = await fetch(`/api/projects/${projectId}/epics/${epicId}`, {
           method: "PATCH",
@@ -169,16 +172,16 @@ export function useEpicDetail(projectId: string, epicId: string | null) {
           // surface its message instead of applying an optimistic state.
           return {
             ok: false,
-            error: data.error || "The update was rejected",
+            error: data.error || tErrors("theUpdateWasRejected"),
           };
         }
         setEpic((prev) => (prev ? { ...prev, ...updates } : null));
         return { ok: true };
       } catch {
-        return { ok: false, error: "Network error — the update was not applied" };
+        return { ok: false, error: tErrors("networkErrorTheUpdateWasNotApplied") };
       }
     },
-    [projectId, epicId]
+    [projectId, epicId, tErrors]
   );
 
   const addUserStory = useCallback(

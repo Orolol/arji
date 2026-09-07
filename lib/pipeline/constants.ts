@@ -1,3 +1,4 @@
+import type { TranslationKey } from "@/lib/i18n/catalogue";
 /**
  * Client-safe constants for the autonomous pipeline (build → review →
  * auto-fix). Kept free of any database / server import so client components
@@ -322,12 +323,12 @@ export function isPipelineRunActive(state: PipelineState): boolean {
   return !PIPELINE_TERMINAL_STATES.includes(state);
 }
 
-export const PIPELINE_STAGE_LABELS: Record<PipelineStage, string> = {
-  build: "Build",
-  grading: "Grading",
-  review: "Review",
-  fix: "Fix",
-  forensic: "Forensic",
+export const PIPELINE_STAGE_LABEL_KEYS: Record<PipelineStage, TranslationKey> = {
+  build: "Kanban.pipelineStages.build",
+  grading: "Kanban.pipelineStages.grading",
+  review: "Kanban.pipelineStages.review",
+  fix: "Kanban.pipelineStages.fix",
+  forensic: "Kanban.pipelineStages.forensic",
 };
 
 /* ------------------------------------------------------------------ */

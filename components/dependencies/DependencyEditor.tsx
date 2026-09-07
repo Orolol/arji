@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -31,6 +32,7 @@ export function DependencyEditor({
   epicId,
   projectEpics,
 }: DependencyEditorProps) {
+  const t = useTranslations("Dependencies");
   const {
     predecessors,
     successors,
@@ -92,23 +94,23 @@ export function DependencyEditor({
     return (
       <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
         <Loader2 className="h-3 w-3 animate-spin" />
-        Loading dependencies...
+        {t("loading")}
       </div>
     );
   }
 
   return (
     <div className="space-y-3">
-      <h4 className="text-sm font-medium">Dependencies</h4>
+      <h4 className="text-sm font-medium">{t("heading")}</h4>
 
       {/* Predecessors (depends on) */}
       <div className="space-y-1">
         <p className="text-xs text-muted-foreground">
-          Depends on ({selectedPredecessorIds.length})
+          {t("dependsOn", { count: selectedPredecessorIds.length })}
         </p>
         {selectedPredecessorIds.length === 0 && (
           <p className="text-xs text-muted-foreground italic">
-            No predecessors — this epic can start independently.
+            {t("noPredecessors")}
           </p>
         )}
         {selectedPredecessorIds.map((depId) => {
@@ -123,7 +125,7 @@ export function DependencyEditor({
                 {depEpic?.title || depId}
               </span>
               <Badge variant="outline" className="text-[10px] shrink-0">
-                {depEpic?.status || "unknown"}
+                {depEpic?.status || t("unknownStatus")}
               </Badge>
               <Button
                 variant="ghost"
@@ -144,7 +146,7 @@ export function DependencyEditor({
         <div className="flex gap-2">
           <Select value={addingId} onValueChange={setAddingId}>
             <SelectTrigger className="h-7 text-xs flex-1">
-              <SelectValue placeholder="Add predecessor..." />
+              <SelectValue placeholder={t("addPlaceholder")} />
             </SelectTrigger>
             <SelectContent>
               {availableEpics.map((e) => (
@@ -182,7 +184,7 @@ export function DependencyEditor({
       {successors.length > 0 && (
         <div className="space-y-1">
           <p className="text-xs text-muted-foreground">
-            Depended on by ({successors.length})
+            {t("dependedOnBy", { count: successors.length })}
           </p>
           {successors.map((s) => {
             const succEpic = epicLookup.get(s.ticketId);
@@ -196,7 +198,7 @@ export function DependencyEditor({
                   {succEpic?.title || s.ticketId}
                 </span>
                 <Badge variant="outline" className="text-[10px] shrink-0">
-                  {succEpic?.status || "unknown"}
+                  {succEpic?.status || t("unknownStatus")}
                 </Badge>
               </div>
             );

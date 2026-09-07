@@ -190,7 +190,7 @@ describe("TODAY tile", () => {
     expect(screen.getByTestId("desk-today-landed")).toHaveTextContent("—");
     expect(screen.getByTestId("desk-today-failed")).toHaveTextContent("—");
     expect(screen.getByTestId("desk-today-tile")).toHaveTextContent(
-      "— · — projets · — sessions",
+      "— · — projects · — sessions",
     );
   });
 
@@ -207,7 +207,7 @@ describe("TODAY tile", () => {
     expect(screen.getByTestId("desk-today-landed")).toHaveTextContent("7");
     expect(screen.getByTestId("desk-today-failed")).toHaveTextContent("1");
     expect(screen.getByTestId("desk-today-tile")).toHaveTextContent(
-      "$11.40 · 3 projets · 14 sessions",
+      "$11.40 · 3 projects · 14 sessions",
     );
   });
 
@@ -216,7 +216,7 @@ describe("TODAY tile", () => {
       today: { ticketsShipped: 1, failedSessions: 0, costUsd: 1, projects: 1, sessions: 1 },
     });
     expect(screen.getByTestId("desk-today-tile")).toHaveTextContent(
-      "$1.00 · 1 projet · 1 session",
+      "$1.00 · 1 project · 1 session",
     );
   });
 

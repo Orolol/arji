@@ -5,7 +5,6 @@ import userEvent from "@testing-library/user-event";
 import { EpicCreateDialog } from "@/components/kanban/EpicCreateDialog";
 import {
   EPIC_TITLE_MAX_LENGTH,
-  EPIC_TITLE_TOO_LONG,
 } from "@/lib/epics/manual-epic-form";
 
 describe("EpicCreateDialog", () => {
@@ -194,7 +193,7 @@ describe("EpicCreateDialog", () => {
 
     await waitFor(() =>
       expect(screen.getByTestId("epic-title-error")).toHaveTextContent(
-        EPIC_TITLE_TOO_LONG,
+        "Title must be 200 characters or fewer",
       ),
     );
     expect(fetchMock).not.toHaveBeenCalled();

@@ -520,6 +520,8 @@ function capPromptCommentBody(content: string): string {
   if (content.length <= PROMPT_COMMENT_MAX_CHARS) return content;
   const omitted =
     content.length - PROMPT_COMMENT_HEAD_CHARS - PROMPT_COMMENT_TAIL_CHARS;
+  // Agent-facing: this marker is part of the prompt, so its numeral is pinned
+  // to "en-US" and never follows the interface locale (lib/i18n/format.ts).
   return (
     `${content.slice(0, PROMPT_COMMENT_HEAD_CHARS)}\n\n` +
     `_[… ${omitted.toLocaleString("en-US")} characters of this comment omitted …]_\n\n` +

@@ -21,6 +21,7 @@ import {
   resolveClaudePermissionMode,
 } from "@/lib/providers/options-registry";
 import { PROVIDER_OPTIONS } from "@/lib/agent-config/constants";
+import { catalogueValue } from "@/lib/i18n/catalogue";
 
 function keysFor(provider: string): string[] {
   return getProviderOptionDefinitions(provider).map((d) => d.key);
@@ -37,8 +38,14 @@ describe("registry shape", () => {
     for (const provider of PROVIDER_OPTIONS) {
       for (const definition of getProviderOptionDefinitions(provider)) {
         expect(definition.key).toMatch(/^[a-z][a-z0-9_]*$/);
-        expect(definition.label.length).toBeGreaterThan(0);
-        expect(definition.hint.length).toBeGreaterThan(0);
+        // The label and the hint are catalogue KEY REFERENCES: a key that
+        // resolves to itself is a string the catalogue does not define.
+        const label = catalogueValue("en", definition.labelKey);
+        const hint = catalogueValue("en", definition.hintKey);
+        expect(label).not.toBe(definition.labelKey);
+        expect(hint).not.toBe(definition.hintKey);
+        expect(label.length).toBeGreaterThan(0);
+        expect(hint.length).toBeGreaterThan(0);
         expect(["select", "bool", "number", "text"]).toContain(definition.type);
         expect(definition.default).toBeDefined();
         if (definition.type === "select") {
@@ -413,14 +420,33 @@ describe("filterProviderOptionsForAgentType", () => {
 });
 
 describe("describeProviderOptions", () => {
+  /** What the session card prints for a row: catalogue word, else raw text. */
+  function rendered(
+    rows: ReturnType<typeof describeProviderOptions>,
+  ): Array<{ key: string; label: string; value: string }> {
+    return rows.map((row) => ({
+      key: row.key,
+      label: row.labelKey
+        ? catalogueValue("en", row.labelKey)
+        : row.fallbackLabel,
+      value: row.valueKey
+        ? catalogueValue("en", row.valueKey)
+        : row.fallbackValue,
+    }));
+  }
+
   it("labels known options and keeps unknown ones readable", () => {
     expect(
-      describeProviderOptions("oh-my-pi", { thinking: "high", advisor: true }),
+      rendered(
+        describeProviderOptions("oh-my-pi", { thinking: "high", advisor: true }),
+      ),
     ).toEqual([
       { key: "thinking", label: "Thinking", value: "High" },
       { key: "advisor", label: "Advisor", value: "on" },
     ]);
-    expect(describeProviderOptions("oh-my-pi", { retired: "x" })).toEqual([
+    // An option the registry no longer declares keeps its key and its stored
+    // value: both are data, and neither has a catalogue word to resolve.
+    expect(rendered(describeProviderOptions("oh-my-pi", { retired: "x" }))).toEqual([
       { key: "retired", label: "retired", value: "x" },
     ]);
     expect(describeProviderOptions("oh-my-pi", null)).toEqual([]);

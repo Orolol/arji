@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { Play } from "lucide-react";
 
 import { IdentityChip, Mono, PillButton, projectTone } from "@/components/piscine";
@@ -43,6 +44,8 @@ export function RunQaPassButton({
   pending = false,
   className,
 }: RunQaPassButtonProps) {
+  const t = useTranslations("Qa");
+
   return (
     <PickerPopover
       trigger={
@@ -52,17 +55,17 @@ export function RunQaPassButton({
           icon={Play}
           disabled={targets.length === 0}
           pending={pending}
-          pendingLabel="Dispatch…"
+          pendingLabel={t("runPass.pending")}
           data-testid="qa-run-pass"
           className={className}
         >
-          Run QA pass
+          {t("runPass.label")}
         </PillButton>
       }
       items={targets}
       keyOf={(target) => target.epicId}
       onSelect={(target) => void onRun(target)}
-      emptyLabel="Aucun ticket en review pour l'instant."
+      emptyLabel={t("runPass.emptyLabel")}
       width={320}
       testId="qa-run-pass-menu"
       itemTestId="qa-run-pass-target"

@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import {
   CheckMark,
   IdentityChip,
@@ -49,6 +51,8 @@ export function ReleaseTicketRow({
   onToggle,
   readOnly = false,
 }: ReleaseTicketRowProps) {
+  const t = useTranslations("Releases");
+
   return (
     <div className="contents" data-testid={`release-ticket-row-${epic.id}`}>
       <SurfaceCard
@@ -95,7 +99,7 @@ export function ReleaseTicketRow({
           </Mono>
         ) : (
           <Mono size={10.5} tone="muted" className="shrink-0">
-            not included
+            {t("ticketRow.notIncluded")}
           </Mono>
         )}
       </SurfaceCard>

@@ -46,13 +46,13 @@ export async function POST(
   }
   if (relativePaths.length === 0) {
     return NextResponse.json(
-      { error: "Aucun fichier sélectionné." },
+      { error: "No files selected." },
       { status: 400 }
     );
   }
   if (relativePaths.length > DOCUMENT_IMPORT_MAX_FILES) {
     return NextResponse.json(
-      { error: `Trop de fichiers (max ${DOCUMENT_IMPORT_MAX_FILES}).` },
+      { error: `Too many files (max ${DOCUMENT_IMPORT_MAX_FILES}).` },
       { status: 400 }
     );
   }

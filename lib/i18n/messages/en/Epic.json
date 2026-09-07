@@ -1,0 +1,11 @@
+{
+  "actions": {
+    "sendToDev": "Send to Dev",
+    "codeReview": "Code Review",
+    "approve": "Approve",
+    "locked": "Another agent is already running for this task.",
+    "sendToDevError": "Failed to send to dev",
+    "reviewError": "Failed to dispatch review",
+    "approveError": "Failed to approve"
+  }
+}

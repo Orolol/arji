@@ -1,5 +1,6 @@
 "use client";
 
+import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { UploadZone } from "@/components/documents/UploadZone";
@@ -8,7 +9,7 @@ import { DocumentViewer } from "@/components/documents/DocumentViewer";
 import { Button } from "@/components/ui/button";
 import { FileText, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { timeAgo } from "@/lib/utils/format-date";
+import { formatRelative } from "@/lib/i18n/format";
 import { isInternalMemoryDocKind } from "@/lib/documents/memory-constants";
 
 interface Doc {
@@ -23,6 +24,8 @@ interface Doc {
 }
 
 export default function DocumentsPage() {
+  const locale = useLocale();
+  const t = useTranslations("ProjectDocuments");
   const params = useParams();
   const projectId = params.projectId as string;
   const [documents, setDocuments] = useState<Doc[]>([]);
@@ -35,7 +38,7 @@ export default function DocumentsPage() {
     const res = await fetch(`/api/projects/${projectId}/documents`);
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      setError(data.error || "Failed to load documents.");
+      setError(data.error || t("page.loadFailed"));
       return;
     }
     // The learned project memory and its pre-dream snapshot live in the same
@@ -48,7 +51,7 @@ export default function DocumentsPage() {
     ).filter((doc) => !isInternalMemoryDocKind(doc.kind)) as Doc[];
     setDocuments(docs);
     setSelectedDoc((prev) => (prev && !docs.some((doc) => doc.id === prev.id) ? null : prev));
-  }, [projectId]);
+  }, [projectId, t]);
 
   useEffect(() => {
     loadDocs();
@@ -69,7 +72,9 @@ export default function DocumentsPage() {
       );
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(data.error || `Failed to delete "${doc.originalFilename}".`);
+        setError(
+          data.error || t("page.deleteFailed", { name: doc.originalFilename })
+        );
         return;
       }
 
@@ -82,21 +87,23 @@ export default function DocumentsPage() {
     }
   }
 
+  // The figures stay exactly as `toFixed` prints them — they are passed as
+  // strings so the unit, not the number, is what the catalogue localises.
   function formatSize(bytes: number | null): string {
-    if (typeof bytes !== "number" || Number.isNaN(bytes)) return "n/a";
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    if (typeof bytes !== "number" || Number.isNaN(bytes)) return t("size.unknown");
+    if (bytes < 1024) return t("size.bytes", { value: String(bytes) });
+    if (bytes < 1024 * 1024)
+      return t("size.kilobytes", { value: (bytes / 1024).toFixed(1) });
+    return t("size.megabytes", { value: (bytes / (1024 * 1024)).toFixed(1) });
   }
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex flex-none items-start gap-[16px] px-[26px] pb-[18px] pt-[24px]">
         <div className="flex flex-col gap-[5px]">
-          <h2 className="text-[19px] font-semibold">Documents</h2>
+          <h2 className="text-[19px] font-semibold">{t("page.heading")}</h2>
           <p className="text-[13px] text-muted-foreground">
-            What agents can cite: specs, audits, notes. Mentionable with @name
-            in the chat.
+            {t("page.description")}
           </p>
         </div>
         <div className="ml-auto">
@@ -127,7 +134,7 @@ export default function DocumentsPage() {
                   </span>
                   <span className="font-mono text-[11px] text-meta">
                     {formatSize(doc.sizeBytes)}
-                    {doc.createdAt ? ` · ${timeAgo(doc.createdAt)}` : ""}
+                    {doc.createdAt ? ` · ${formatRelative(doc.createdAt, { locale })}` : ""}
                   </span>
                 </button>
                 <span className="w-fit rounded-full bg-band px-[9px] py-[3px] text-[11.5px] text-muted-foreground">
@@ -136,11 +143,11 @@ export default function DocumentsPage() {
                 <Button
                   variant="ghost"
                   size="sm"
-                  aria-label={`Delete ${doc.originalFilename}`}
+                  aria-label={t("page.delete", { name: doc.originalFilename })}
                   title={
                     deletingId === doc.id
-                      ? "Deleting..."
-                      : `Delete ${doc.originalFilename}`
+                      ? t("page.deleting")
+                      : t("page.delete", { name: doc.originalFilename })
                   }
                   className="absolute right-[10px] top-[10px] h-[26px] w-[26px] p-0 text-meta hover:text-destructive"
                   onClick={() => handleDelete(doc)}
@@ -156,7 +163,7 @@ export default function DocumentsPage() {
 
           {documents.length === 0 && (
             <p className="text-[13px] text-muted-foreground">
-              No documents uploaded yet
+              {t("page.empty")}
             </p>
           )}
           {error && <p className="text-[13px] text-destructive">{error}</p>}
@@ -168,12 +175,12 @@ export default function DocumentsPage() {
                   {selectedDoc.originalFilename}
                 </span>
                 <span className="font-mono text-[11px] text-meta">
-                  {selectedDoc.mimeType || "unknown"}
+                  {selectedDoc.mimeType || t("page.unknownMimeType")}
                 </span>
                 <Button
                   variant="ghost"
                   size="sm"
-                  aria-label="Close document preview"
+                  aria-label={t("page.closePreview")}
                   className="ml-auto h-[26px] w-[26px] p-0 text-meta"
                   onClick={() => setSelectedDoc(null)}
                 >
@@ -192,14 +199,16 @@ export default function DocumentsPage() {
         <aside className="hidden w-[340px] flex-none flex-col gap-[16px] lg:flex">
           <div className="flex flex-col gap-[10px] rounded-[12px] border border-border p-[16px]">
             <span className="text-[11.5px] uppercase tracking-[.08em] text-meta">
-              Mentions
+              {t("mentions.label")}
             </span>
             <span className="text-[13.5px] leading-[1.55] text-muted-foreground">
-              Type{" "}
-              <span className="font-mono text-[12.5px] text-foreground">
-                @DOC_NAME
-              </span>{" "}
-              in a ticket or the chat: the document travels with the prompt.
+              {t.rich("mentions.hint", {
+                token: (chunks) => (
+                  <span className="font-mono text-[12.5px] text-foreground">
+                    {chunks}
+                  </span>
+                ),
+              })}
             </span>
           </div>
         </aside>

@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { useCallback, useRef, useState } from "react";
 
 /**
@@ -45,6 +47,7 @@ export function useBoardMerge(
   projectId: string,
   { onMerged, onResolveDispatched }: UseBoardMergeOptions = {}
 ) {
+  const tErrors = useTranslations("ClientErrors");
   const [stateByEpic, setStateByEpic] = useState<
     Record<string, BoardMergeState>
   >({});
@@ -90,7 +93,7 @@ export function useBoardMerge(
 
           if (!res.ok || data.error) {
             patch(epicId, {
-              error: data.error || "Failed to merge",
+              error: data.error || tErrors("failedToMerge"),
               // 409 + mergeFailed is git's refusal; anything else is a guard.
               conflict: data.mergeFailed === true,
             });
@@ -100,10 +103,10 @@ export function useBoardMerge(
           patch(epicId, {});
           onMerged?.(epicId);
         } catch {
-          patch(epicId, { error: "Failed to merge" });
+          patch(epicId, { error: tErrors("failedToMerge") });
         }
       }),
-    [projectId, run, patch, onMerged]
+    [projectId, run, patch, onMerged, tErrors]
   );
 
   const resolveMerge = useCallback(
@@ -126,7 +129,7 @@ export function useBoardMerge(
             // identically on the next click, so the card falls back to the
             // readiness signal for the reason instead.
             patch(epicId, {
-              error: data.error || "Failed to resolve the merge",
+              error: data.error || tErrors("failedToResolveTheMerge"),
               conflict: data.mergeFailed === true,
             });
             return;
@@ -141,10 +144,10 @@ export function useBoardMerge(
             onResolveDispatched?.(epicId, data.data.sessionId);
           }
         } catch {
-          patch(epicId, { error: "Failed to resolve the merge" });
+          patch(epicId, { error: tErrors("failedToResolveTheMerge") });
         }
       }),
-    [projectId, run, patch, onMerged, onResolveDispatched]
+    [projectId, run, patch, onMerged, onResolveDispatched, tErrors]
   );
 
   /**

@@ -1,8 +1,10 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { PRIORITY_COLORS, PRIORITY_LABELS } from "@/lib/types/kanban";
+import { PRIORITY_COLORS, PRIORITY_LABEL_KEYS } from "@/lib/types/kanban";
 
 interface PriorityBadgeProps {
   priority: number;
@@ -17,8 +19,8 @@ interface PriorityBadgeProps {
  * is pure noise on a dense board: below priority 1 the badge is nothing.
  */
 export function PriorityBadge({ priority, className }: PriorityBadgeProps) {
+  const tKey = useTranslations();
   if (!Number.isFinite(priority) || priority <= 0) return null;
-
   return (
     <Badge
       data-testid={`priority-badge-${priority}`}
@@ -28,7 +30,7 @@ export function PriorityBadge({ priority, className }: PriorityBadgeProps) {
         className
       )}
     >
-      {PRIORITY_LABELS[priority] || PRIORITY_LABELS[1]}
+      {tKey(PRIORITY_LABEL_KEYS[priority] || PRIORITY_LABEL_KEYS[1])}
     </Badge>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useId } from "react";
+import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
 import { InlineEdit } from "@/components/kanban/InlineEdit";
 import {
@@ -49,6 +50,8 @@ interface StoryDetailPanelProps {
 }
 
 export function StoryDetailPanel({ story, onUpdate }: StoryDetailPanelProps) {
+  // Namespace-less: the status table below holds full dotted paths.
+  const t = useTranslations();
   // Generated rather than static: the panel is a component, and two mounted
   // copies sharing hard-coded ids would point every label at the first one.
   const fieldId = useId();
@@ -57,6 +60,9 @@ export function StoryDetailPanel({ story, onUpdate }: StoryDetailPanelProps) {
   const descriptionLabelId = `${descriptionId}-label`;
   const criteriaId = `${fieldId}-acceptance-criteria`;
   const criteriaLabelId = `${criteriaId}-label`;
+  // An unknown status keeps rendering its raw value, exactly as before.
+  const statusLabelKey =
+    USER_STORY_STATUS_LABELS[story.status as UserStoryStatus]?.labelKey;
 
   return (
     <div className="p-6 space-y-6">
@@ -76,7 +82,7 @@ export function StoryDetailPanel({ story, onUpdate }: StoryDetailPanelProps) {
             htmlFor={statusId}
             className="text-xs text-muted-foreground block mb-1"
           >
-            Status
+            {t("Story.detail.status")}
           </label>
           <Select
             value={story.status}
@@ -88,7 +94,7 @@ export function StoryDetailPanel({ story, onUpdate }: StoryDetailPanelProps) {
             <SelectContent>
               {USER_STORY_STATUSES.map((s) => (
                 <SelectItem key={s} value={s}>
-                  {USER_STORY_STATUS_LABELS[s]}
+                  {t(USER_STORY_STATUS_LABELS[s].labelKey)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -107,7 +113,7 @@ export function StoryDetailPanel({ story, onUpdate }: StoryDetailPanelProps) {
             &nbsp;
           </span>
           <Badge className={STATUS_COLORS[story.status] || STATUS_COLORS.todo}>
-            {USER_STORY_STATUS_LABELS[story.status as UserStoryStatus] || story.status}
+            {statusLabelKey ? t(statusLabelKey) : story.status}
           </Badge>
         </div>
       </div>
@@ -115,7 +121,9 @@ export function StoryDetailPanel({ story, onUpdate }: StoryDetailPanelProps) {
       {/* Epic info */}
       {story.epic && (
         <div className="bg-muted/30 rounded-lg p-3 space-y-1">
-          <p className="text-xs text-muted-foreground">Parent Epic</p>
+          <p className="text-xs text-muted-foreground">
+            {t("Story.detail.parentEpic")}
+          </p>
           <p className="text-sm font-medium">{story.epic.title}</p>
           {story.epic.branchName && (
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground font-mono">
@@ -133,7 +141,7 @@ export function StoryDetailPanel({ story, onUpdate }: StoryDetailPanelProps) {
           htmlFor={descriptionId}
           className="text-xs text-muted-foreground block mb-1"
         >
-          Description
+          {t("Story.detail.description")}
         </label>
         <InlineEdit
           id={descriptionId}
@@ -152,7 +160,7 @@ export function StoryDetailPanel({ story, onUpdate }: StoryDetailPanelProps) {
           htmlFor={criteriaId}
           className="text-xs text-muted-foreground block mb-1"
         >
-          Acceptance Criteria
+          {t("Story.detail.acceptanceCriteria")}
         </label>
         <InlineEdit
           id={criteriaId}

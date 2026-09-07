@@ -9,7 +9,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 
-import { UpNextBand, chipLabel, chipRank } from "@/components/desk/UpNextBand";
+import { UpNextBand, chipRank } from "@/components/desk/UpNextBand";
 import { deriveProjects } from "@/lib/control-desk/aggregate";
 import type { DeskQueueTicket } from "@/lib/control-desk/types";
 
@@ -51,7 +51,7 @@ describe("band header", () => {
   it("carries the hint instead of a counter — deliberately", () => {
     renderBand([{ projectId: "p1", tickets: [ticket({ epicId: "1" })] }]);
     expect(screen.getByText("Up next")).toBeInTheDocument();
-    expect(screen.getByText("l'ordre où Full Auto va piocher")).toBeInTheDocument();
+    expect(screen.getByText("the order Full Auto picks from")).toBeInTheDocument();
   });
 
   it("collapses to the label line when nothing is queued anywhere", () => {
@@ -59,7 +59,9 @@ describe("band header", () => {
     expect(screen.getByText("Up next")).toBeInTheDocument();
     expect(screen.queryByTestId("desk-up-next-row")).not.toBeInTheDocument();
     // No queue, no promise about an order.
-    expect(screen.queryByText("l'ordre où Full Auto va piocher")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("the order Full Auto picks from"),
+    ).not.toBeInTheDocument();
   });
 });
 
@@ -92,10 +94,10 @@ describe("queue chips", () => {
       },
     ]);
     const chip = screen.getByTestId("desk-queue-chip");
-    expect(chip).toHaveTextContent("ARJ-125 bloqué");
+    expect(chip).toHaveTextContent("ARJ-125 blocked");
     expect(chip).toHaveAttribute("data-rank", "3");
     // The prerequisite is named, resolved server-side from the whole project.
-    expect(chip).toHaveAttribute("title", "Bloqué par ARJ-131");
+    expect(chip).toHaveAttribute("title", "Blocked by ARJ-131");
   });
 
   it("labels a ticket waiting on the user", () => {
@@ -105,11 +107,14 @@ describe("queue chips", () => {
         tickets: [ticket({ epicId: "9", rank: null, awaitingReply: true })],
       },
     ]);
-    expect(screen.getByTestId("desk-queue-chip")).toHaveTextContent("ARJ-9 en attente");
+    expect(screen.getByTestId("desk-queue-chip")).toHaveTextContent("ARJ-9 waiting");
   });
 
   it("marks a storyless feature as spec", () => {
-    expect(chipLabel(ticket({ epicId: "31", specOnly: true }))).toBe(
+    renderBand([
+      { projectId: "p1", tickets: [ticket({ epicId: "31", specOnly: true })] },
+    ]);
+    expect(screen.getByTestId("desk-queue-chip")).toHaveTextContent(
       "ARJ-31 Inline review findings · spec",
     );
   });

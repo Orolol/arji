@@ -1,5 +1,6 @@
 "use client";
 
+import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 import { GitMerge, RefreshCw } from "lucide-react";
 
@@ -8,7 +9,7 @@ import { PrBadge } from "@/components/github/PrBadge";
 import { useGitHubConfig } from "@/hooks/useGitHubConfig";
 import { useGitStatus } from "@/hooks/useGitStatus";
 import { useWorktrees } from "@/hooks/useWorktrees";
-import { timeAgo } from "@/lib/utils/format-date";
+import { formatRelative } from "@/lib/i18n/format";
 
 /**
  * Repository state, on Git Sync.
@@ -52,6 +53,8 @@ export function RepoStrataBand({
   gitRepoPath,
   defaultBranch,
 }: RepoStrataBandProps) {
+  const locale = useLocale();
+  const t = useTranslations("Github");
   const config = useGitHubConfig(projectId);
   const repo = ownerRepo ?? config.ownerRepo;
   const enabled = Boolean(gitRepoPath);
@@ -98,29 +101,33 @@ export function RepoStrataBand({
   if (!enabled) {
     return (
       <StrataBand stratum="feed" density="full" gap={8}>
-        <BandHeader label="Repository" stratum="feed" meta="not connected" />
+        <BandHeader
+          label={t("repo.label")}
+          stratum="feed"
+          meta={t("repo.notConnected")}
+        />
         <p
           data-testid="repo-not-configured"
           className="font-sans text-[13px] leading-[1.55] text-muted-foreground"
         >
-          This project has no local git repository, so there is no branch to
-          compare, fetch or push. Attach a directory or import from GitHub, and
-          the branch counters, worktrees and pull requests appear here.
+          {t("repo.noRepository")}
         </p>
       </StrataBand>
     );
   }
 
   const fetchedLabel = lastFetchedAt
-    ? `fetched ${timeAgo(new Date(lastFetchedAt).toISOString())}`
-    : "never fetched";
+    ? t("repo.fetched", { age: formatRelative(lastFetchedAt, { locale }) })
+    : t("repo.neverFetched");
 
   return (
     <StrataBand stratum="feed" density="full" gap={10}>
       <BandHeader
-        label="Repository"
+        label={t("repo.label")}
         stratum="feed"
-        meta={repo ?? gitRepoPath?.split("/").filter(Boolean).pop() ?? "local repo"}
+        meta={
+          repo ?? gitRepoPath?.split("/").filter(Boolean).pop() ?? t("repo.localRepo")
+        }
         right={
           <div className="flex items-center gap-2">
             <PillButton
@@ -136,7 +143,7 @@ export function RepoStrataBand({
                 void refreshWorktrees();
               }}
             >
-              Fetch
+              {t("repo.fetch")}
             </PillButton>
             <PillButton
               variant="filled"
@@ -146,7 +153,7 @@ export function RepoStrataBand({
               disabled={pushing || ahead === 0}
               onClick={() => void push()}
             >
-              {`Push ${branch}`}
+              {t("repo.push", { branch })}
             </PillButton>
           </div>
         }
@@ -166,15 +173,17 @@ export function RepoStrataBand({
           <>
             <Mono size={11.5} tone="muted">{`${branch} · ${fetchedLabel}`}</Mono>
             <span data-testid="repo-ahead">
-              <Mono size={11.5} tone="feed-deep">{`↑ ${ahead} to push`}</Mono>
+              {/* The arrow is frame furniture and stays inline; only the
+                  words resolve from the catalogue. */}
+              <Mono size={11.5} tone="feed-deep">{`↑ ${t("repo.ahead", { count: ahead })}`}</Mono>
             </span>
             <span data-testid="repo-behind">
-              <Mono size={11.5} tone="feed-deep">{`↓ ${behind} behind`}</Mono>
+              <Mono size={11.5} tone="feed-deep">{`↓ ${t("repo.behind", { count: behind })}`}</Mono>
             </span>
             {worktreeCount !== null ? (
               <span data-testid="repo-worktrees">
                 <Mono size={11.5} tone="muted">
-                  {`${worktreeCount} ${worktreeCount === 1 ? "worktree" : "worktrees"}`}
+                  {t("repo.worktrees", { count: worktreeCount })}
                 </Mono>
               </span>
             ) : null}

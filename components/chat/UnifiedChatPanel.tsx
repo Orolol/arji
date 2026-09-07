@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import {
   MessageSquare,
   PanelRightClose,
@@ -71,6 +72,7 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
     { projectId, children, onEpicCreated, onExpandedChange },
     ref,
   ) {
+    const t = useTranslations("ChatLegacy");
     const router = useRouter();
     const [, forceConversationRefresh] = useState(0);
 
@@ -175,6 +177,9 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
       }
     }, [activeId, setActiveId, tabConversations]);
 
+    // The default `label` below is PERSISTED on the conversation row and read
+    // back on every later render, so it stays out of the catalogue: a
+    // translated default would write one locale's word into the database.
     const createNewConversationTab = useCallback(
       async (options?: { type?: string; label?: string }) => {
         const created = await createConversation({
@@ -329,7 +334,7 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
         <div className="min-h-0 flex-1 overflow-auto">
           {isEpicCreation && !hasMessages && !loading && (
             <div className="px-[18px] py-8 text-center text-[13.5px] text-muted-foreground">
-              Describe your epic idea and I&apos;ll help you structure it with user stories and acceptance criteria.
+              {t("panel.epicIntro")}
             </div>
           )}
           <MessageList
@@ -361,7 +366,9 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
           projectId={projectId}
           onSend={sendMessage}
           disabled={isCurrentConversationBusy || !activeConversation}
-          placeholder={isEpicCreation ? "Describe your epic idea..." : "Ask a question..."}
+          placeholder={
+            isEpicCreation ? t("input.epicPlaceholder") : t("input.placeholder")
+          }
           attachmentsDisabled={activeProvider === OPENAI_COMPATIBLE_PROVIDER}
         />
       </div>
@@ -413,7 +420,7 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
 
           <button
             type="button"
-            aria-label="Resize panel"
+            aria-label={t("panel.resize")}
             data-testid="panel-divider"
             onMouseDown={startDrag}
             onDoubleClick={resetPanelRatio}
@@ -436,7 +443,7 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
                   size="icon"
                   className="h-7 w-7 text-meta"
                   onClick={() => setPanelState("collapsed")}
-                  aria-label="Collapse panel"
+                  aria-label={t("panel.collapse")}
                 >
                   <PanelRightClose className="h-4 w-4" />
                 </Button>
@@ -446,7 +453,7 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
                   size="icon"
                   className="h-7 w-7 text-meta"
                   onClick={() => setPanelState("hidden")}
-                  aria-label="Hide panel"
+                  aria-label={t("panel.hide")}
                 >
                   <EyeOff className="h-4 w-4" />
                 </Button>
@@ -471,12 +478,12 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
               "relative flex h-full w-[44px] shrink-0 items-center justify-center border-l border-border bg-card text-meta transition-colors hover:bg-band hover:text-foreground",
               hasActiveAgents && "bg-agent-bg text-agent",
             )}
-            aria-label="Open chat panel"
+            aria-label={t("panel.open")}
             data-testid="collapsed-chat-strip"
           >
             <span className="flex flex-col items-center gap-2 text-[11.5px] font-medium uppercase tracking-[0.14em] [writing-mode:vertical-rl]">
               <MessageSquare className="h-4 w-4 [writing-mode:horizontal-tb]" />
-              Chat
+              {t("panel.stripLabel")}
             </span>
             {hasActiveAgents && (
               <span
@@ -497,7 +504,7 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
           type="button"
           onClick={() => setPanelState("collapsed")}
           className="absolute right-2 top-2 z-30 rounded-full border border-border bg-card p-1.5 text-meta shadow-[0_1px_2px_rgba(36,33,29,.04)] hover:text-foreground"
-          aria-label="Show chat strip"
+          aria-label={t("panel.showStrip")}
         >
           <PanelRightOpen className="h-4 w-4" />
         </button>

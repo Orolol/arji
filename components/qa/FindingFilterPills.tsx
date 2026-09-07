@@ -1,5 +1,8 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
+import type { TranslationKey } from "@/lib/i18n/catalogue";
 import { cn } from "@/lib/utils";
 
 /**
@@ -20,10 +23,15 @@ export interface FindingFilterPillsProps {
   className?: string;
 }
 
-const OPTIONS: ReadonlyArray<{ id: FindingFilter; label: string }> = [
-  { id: "all", label: "All" },
-  { id: "blocking", label: "Blocking" },
-  { id: "security", label: "Security" },
+/**
+ * A module-scope copy table, so it holds catalogue KEY REFERENCES and the
+ * control resolves them at render with the namespace-less translator
+ * (`lib/i18n/catalogue.ts`, pattern 3).
+ */
+const OPTIONS: ReadonlyArray<{ id: FindingFilter; labelKey: TranslationKey }> = [
+  { id: "all", labelKey: "Qa.filters.all" },
+  { id: "blocking", labelKey: "Qa.filters.blocking" },
+  { id: "security", labelKey: "Qa.filters.security" },
 ];
 
 export function FindingFilterPills({
@@ -31,6 +39,8 @@ export function FindingFilterPills({
   onChange,
   className,
 }: FindingFilterPillsProps) {
+  const t = useTranslations();
+
   return (
     <div className={cn("flex gap-[6px]", className)}>
       {OPTIONS.map((option) => {
@@ -52,7 +62,7 @@ export function FindingFilterPills({
                 : "bg-transparent font-medium text-strata-you-mid",
             )}
           >
-            {option.label}
+            {t(option.labelKey)}
           </button>
         );
       })}

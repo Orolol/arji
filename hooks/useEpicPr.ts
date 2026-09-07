@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { useState, useEffect, useCallback } from "react";
 
 interface PrData {
@@ -17,6 +19,7 @@ interface PrData {
 }
 
 export function useEpicPr(projectId: string, epicId: string | null) {
+  const tErrors = useTranslations("ClientErrors");
   const [pr, setPr] = useState<PrData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -60,17 +63,17 @@ export function useEpicPr(projectId: string, epicId: string | null) {
         );
         const data = await res.json();
         if (!res.ok) {
-          setError(data.error || "Failed to create PR");
+          setError(data.error || tErrors("failedToCreatePR"));
         } else {
           setPr(data.data?.pr ?? null);
         }
       } catch (e) {
-        setError(e instanceof Error ? e.message : "Failed to create PR");
+        setError(e instanceof Error ? e.message : tErrors("failedToCreatePR"));
       } finally {
         setLoading(false);
       }
     },
-    [projectId, epicId]
+    [projectId, epicId, tErrors]
   );
 
   const syncPr = useCallback(async () => {
@@ -84,16 +87,16 @@ export function useEpicPr(projectId: string, epicId: string | null) {
       );
       const data = await res.json();
       if (!res.ok) {
-        setError(data.error || "Failed to sync PR");
+        setError(data.error || tErrors("failedToSyncPR"));
       } else {
         setPr(data.data ?? null);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to sync PR");
+      setError(e instanceof Error ? e.message : tErrors("failedToSyncPR"));
     } finally {
       setLoading(false);
     }
-  }, [projectId, epicId]);
+  }, [projectId, epicId, tErrors]);
 
   const refresh = useCallback(async () => {
     await fetchPr();

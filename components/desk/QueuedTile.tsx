@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import {
   FieldKicker,
   IdentityChip,
@@ -31,6 +33,7 @@ export function QueuedTile({
   onOpenTicket,
   className,
 }: QueuedTileProps) {
+  const t = useTranslations("Desk");
   const visible = queued.slice(0, VISIBLE_ROWS);
   const overflow = queued.length - visible.length;
 
@@ -45,7 +48,7 @@ export function QueuedTile({
       )}
     >
       <FieldKicker stratum="live" size={10.5}>
-        {`QUEUED · ${queued.length}`}
+        {t("queued.label", { count: queued.length })}
       </FieldKicker>
 
       {visible.map((session) => {

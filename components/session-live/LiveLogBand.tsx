@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
+import { useTranslations } from "next-intl";
 import { ArrowDown, Pause } from "lucide-react";
 
 import {
@@ -12,6 +13,7 @@ import {
   SurfaceCard,
 } from "@/components/piscine";
 import { SessionOutputStream } from "@/components/sessions/SessionOutputStream";
+import type { TranslationKey } from "@/lib/i18n/catalogue";
 import { cn } from "@/lib/utils";
 
 import { SessionLogTail } from "./SessionLogTail";
@@ -27,7 +29,7 @@ import type { SessionDetail } from "./types";
  * both deliberate and both documented in the packet brief:
  *
  * 1. `tail off` — the frame only ever shows the on-state.
- * 2. A `Log | Réponse` segmented control, shown ONLY when the session is
+ * 2. A `Log | Response` segmented control, shown ONLY when the session is
  *    finished AND a response stream (or a pre-chunk-store `logs.result`)
  *    exists. Frame 8a has nowhere for the response, and silently dropping a
  *    shipped feature is worse than one extra control on a screen the frame
@@ -36,16 +38,14 @@ import type { SessionDetail } from "./types";
 
 type LogPane = "log" | "response";
 
-const PANE_OPTIONS = [
-  { value: "log" as const, label: "Log" },
-  { value: "response" as const, label: "Réponse" },
+/**
+ * A MODULE-SCOPE COPY TABLE, so it holds catalogue KEY REFERENCES and the band
+ * resolves them at render (`lib/i18n/catalogue.ts`, pattern 3).
+ */
+const PANE_OPTIONS: ReadonlyArray<{ value: LogPane; labelKey: TranslationKey }> = [
+  { value: "log", labelKey: "SessionLive.log.paneLog" },
+  { value: "response", labelKey: "SessionLive.log.paneResponse" },
 ];
-
-/** Verbatim, from the old Raw Logs tab. */
-const LOGS_UNAVAILABLE_COPY =
-  "This session's logs.json could not be read. The raw stream below is what the process actually wrote.";
-const LOGS_TRUNCATED_COPY =
-  "logs.json was too large to serve in full — the stream below is the same output, paged.";
 
 export interface LiveLogBandProps {
   projectId: string;
@@ -73,6 +73,7 @@ function TailToggle({
   on: boolean;
   onToggle: () => void;
 }) {
+  const t = useTranslations("SessionLive");
   const Icon = on ? ArrowDown : Pause;
 
   return (
@@ -88,7 +89,7 @@ function TailToggle({
       )}
     >
       <Icon width={12} height={12} aria-hidden="true" />
-      {on ? "tail on" : "tail off"}
+      {on ? t("log.tailOn") : t("log.tailOff")}
     </button>
   );
 }
@@ -100,6 +101,9 @@ export function LiveLogBand({
   isRunning,
   providerLabel,
 }: LiveLogBandProps) {
+  const t = useTranslations("SessionLive");
+  // Namespace-less, for the pane table's KEY REFERENCES.
+  const tKey = useTranslations();
   const [tailOn, setTailOn] = useState(true);
   const [pinKey, setPinKey] = useState(0);
   const [pane, setPane] = useState<LogPane>("log");
@@ -121,14 +125,18 @@ export function LiveLogBand({
   const showPanes = !isRunning && hasResponse;
   const activePane: LogPane = showPanes ? pane : "log";
 
-  const meta = `${providerLabel} · session #${session.id.slice(0, 6)}${
-    tailOn && activePane === "log" ? " · suit le flux" : ""
-  }`;
+  // Two explicit calls, never `t(condition ? a : b)`: the key has to be a
+  // literal at the call site for the coverage gate and the typed `t` to see it.
+  const metaValues = { provider: providerLabel, id: session.id.slice(0, 6) };
+  const meta =
+    tailOn && activePane === "log"
+      ? t("log.metaTailing", metaValues)
+      : t("log.meta", metaValues);
 
   return (
     <StrataBand stratum="live" density="full" gap={9} grow>
       <BandHeader
-        label="Live log"
+        label={t("log.label")}
         stratum="live"
         labelSize={12}
         meta={meta}
@@ -136,7 +144,10 @@ export function LiveLogBand({
           <div className="flex items-center gap-[12px]">
             {showPanes && (
               <SegmentedControl
-                options={PANE_OPTIONS}
+                options={PANE_OPTIONS.map(({ value, labelKey }) => ({
+                  value,
+                  label: tKey(labelKey),
+                }))}
                 value={activePane}
                 onChange={setPane}
                 chrome="filled"
@@ -159,12 +170,12 @@ export function LiveLogBand({
           sub-11px allowance is for UPPERCASE TRACKED mono labels only. */}
       {session.logsUnavailable && (
         <Mono size={11} tone="danger">
-          {LOGS_UNAVAILABLE_COPY}
+          {t("log.logsUnavailable")}
         </Mono>
       )}
       {session.logsTruncated && (
         <Mono size={11} tone="live-mid">
-          {LOGS_TRUNCATED_COPY}
+          {t("log.logsTruncated")}
         </Mono>
       )}
 
@@ -206,8 +217,8 @@ export function LiveLogBand({
             seed={responseSeed}
             unavailable={session.chunkStreamsUnavailable}
             isRunning={false}
-            waitingLabel="Waiting for agent to respond..."
-            emptyLabel="No response available"
+            waitingLabel={t("log.waitingResponse")}
+            emptyLabel={t("log.responseEmpty")}
             // Sessions predating the chunk store have no response stream;
             // their text only exists in logs.json.
             fallback={

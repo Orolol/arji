@@ -1,5 +1,6 @@
 "use client";
 
+import { useLocale, useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import {
@@ -13,10 +14,10 @@ import {
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useInbox, type InboxItem } from "@/hooks/useInbox";
-import { timeAgo } from "@/lib/utils/format-date";
+import { formatRelative } from "@/lib/i18n/format";
 import {
   isBuildableStatus,
-  COLUMN_LABELS,
+  COLUMN_LABEL_KEYS,
   type KanbanStatus,
 } from "@/lib/types/kanban";
 
@@ -46,11 +47,6 @@ function groupByProject(items: InboxItem[]): ProjectGroup[] {
   return groups;
 }
 
-function statusLabel(status: string | null): string {
-  if (!status) return "";
-  return COLUMN_LABELS[status as KanbanStatus] ?? status;
-}
-
 function InboxRow({
   item,
   onReply,
@@ -63,6 +59,9 @@ function InboxRow({
   ) => Promise<void>;
   onMarkRead: (epicId: string) => Promise<void>;
 }) {
+  const locale = useLocale();
+  const tKey = useTranslations();
+  const t = useTranslations("Inbox");
   const [replyText, setReplyText] = useState("");
   const [busy, setBusy] = useState<"reply" | "dispatch" | "read" | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -84,7 +83,7 @@ function InboxRow({
       await onReply(item, content);
       setReplyText("");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to post reply");
+      setError(e instanceof Error ? e.message : t("row.replyError"));
     } finally {
       setBusy(null);
     }
@@ -100,7 +99,7 @@ function InboxRow({
     try {
       await onMarkRead(item.epicId);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to mark as read");
+      setError(e instanceof Error ? e.message : t("row.markReadError"));
     } finally {
       setBusy(null);
     }
@@ -126,12 +125,12 @@ function InboxRow({
       );
       const body = await res.json().catch(() => ({}));
       if (!res.ok || body.error) {
-        throw new Error(body.error || "Failed to dispatch build agent");
+        throw new Error(body.error || t("row.dispatchError"));
       }
       setReplyText("");
       await onMarkRead(item.epicId);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to dispatch build agent");
+      setError(e instanceof Error ? e.message : t("row.dispatchError"));
     } finally {
       setBusy(null);
     }
@@ -156,7 +155,7 @@ function InboxRow({
             data-testid={`inbox-awaiting-badge-${item.epicId}`}
           >
             <MessageCircleQuestion className="h-3 w-3" />
-            Awaiting reply
+            {t("row.awaitingBadge")}
           </span>
         )}
         {!isPendingQuestion && item.unread && (
@@ -165,7 +164,7 @@ function InboxRow({
             data-testid={`inbox-unread-badge-${item.epicId}`}
           >
             <Mail className="h-3 w-3" />
-            Unread
+            {t("row.unreadBadge")}
           </span>
         )}
         {item.readableId && (
@@ -174,7 +173,7 @@ function InboxRow({
           </span>
         )}
         <span className="ml-auto text-xs text-muted-foreground shrink-0">
-          {statusLabel(item.status)}
+          {item.status ? (COLUMN_LABEL_KEYS[item.status as KanbanStatus] ? tKey(COLUMN_LABEL_KEYS[item.status as KanbanStatus]) : item.status) : ""}
         </span>
       </div>
 
@@ -193,7 +192,7 @@ function InboxRow({
       )}
       <p className="text-xs text-muted-foreground">
         {item.latestCommentAuthor ? `${item.latestCommentAuthor} · ` : ""}
-        {timeAgo(item.latestCommentCreatedAt)}
+        {formatRelative(item.latestCommentCreatedAt, { locale })}
       </p>
 
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
@@ -202,8 +201,8 @@ function InboxRow({
           onChange={(e) => setReplyText(e.target.value)}
           placeholder={
             isPendingQuestion
-              ? "Reply to the agent…"
-              : "Comment on this ticket (optional)…"
+              ? t("row.replyPlaceholder")
+              : t("row.commentPlaceholder")
           }
           rows={1}
           className="min-h-9 text-sm flex-1 min-w-0 resize-none"
@@ -219,7 +218,7 @@ function InboxRow({
               data-testid={`inbox-mark-read-${item.epicId}`}
             >
               <Check className="h-3.5 w-3.5 mr-1" />
-              {busy === "read" ? "Marking…" : "Mark as read"}
+              {busy === "read" ? t("row.markReadPending") : t("row.markRead")}
             </Button>
           )}
           <Button
@@ -231,10 +230,10 @@ function InboxRow({
           >
             <Send className="h-3.5 w-3.5 mr-1" />
             {busy === "reply"
-              ? "Sending…"
+              ? t("row.sendPending")
               : isPendingQuestion
-                ? "Reply"
-                : "Comment"}
+                ? t("row.reply")
+                : t("row.comment")}
           </Button>
           {canSendToDev && (
             <Button
@@ -244,7 +243,9 @@ function InboxRow({
               data-testid={`inbox-send-to-dev-${item.epicId}`}
             >
               <Hammer className="h-3.5 w-3.5 mr-1" />
-              {busy === "dispatch" ? "Dispatching…" : "Send to Dev"}
+              {busy === "dispatch"
+                ? t("row.dispatchPending")
+                : t("row.sendToDev")}
             </Button>
           )}
         </div>
@@ -262,6 +263,7 @@ function InboxRow({
 }
 
 export default function InboxPage() {
+  const t = useTranslations("Inbox");
   const { items, unreadMessageCount, awaitingReplyCount, loading, markRead, reply } =
     useInbox();
 
@@ -280,13 +282,12 @@ export default function InboxPage() {
       <div className="flex flex-wrap items-center gap-3">
         <Inbox className="h-6 w-6 text-muted-foreground shrink-0" />
         <div className="min-w-0">
-          <h1 className="text-xl font-bold">Inbox</h1>
+          <h1 className="text-xl font-bold">{t("title")}</h1>
           <p
             className="text-sm text-muted-foreground"
             data-testid="inbox-subtitle"
           >
-            Unread agent messages, across all projects. Only the questions
-            flagged below need an answer.
+            {t("subtitle")}
           </p>
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -295,7 +296,7 @@ export default function InboxPage() {
               className="text-sm text-muted-foreground"
               data-testid="inbox-count"
             >
-              {unreadMessageCount} unread
+              {t("counts.unread", { count: unreadMessageCount })}
             </span>
           )}
           {awaitingReplyCount > 0 && (
@@ -304,7 +305,7 @@ export default function InboxPage() {
               data-testid="inbox-awaiting-count"
             >
               <MessageCircleQuestion className="h-3.5 w-3.5" />
-              {awaitingReplyCount} awaiting your reply
+              {t("counts.awaiting", { count: awaitingReplyCount })}
             </span>
           )}
         </div>
@@ -312,14 +313,14 @@ export default function InboxPage() {
 
       {loading ? (
         <div className="py-12 text-center text-sm text-muted-foreground">
-          Loading…
+          {t("loading")}
         </div>
       ) : items.length === 0 ? (
         <div
           className="py-12 text-center text-sm text-muted-foreground"
           data-testid="inbox-empty"
         >
-          Inbox zero — no unread agent messages.
+          {t("empty")}
         </div>
       ) : (
         groups.map((group) => (

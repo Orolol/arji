@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 
 import {
   GhostInputPill,
@@ -35,6 +36,7 @@ export interface MonthlyCapTileProps {
 }
 
 export function MonthlyCapTile({ cap, onSaved }: MonthlyCapTileProps) {
+  const t = useTranslations("Usage");
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [message, setMessage] = useState<string | null>(null);
@@ -62,7 +64,7 @@ export function MonthlyCapTile({ cap, onSaved }: MonthlyCapTileProps) {
     if (raw !== "") {
       const parsed = Number(raw);
       if (!Number.isFinite(parsed) || parsed <= 0) {
-        setMessage("Le plafond doit être un montant positif.");
+        setMessage(t("cap.invalid"));
         return;
       }
       next = parsed;
@@ -76,7 +78,7 @@ export function MonthlyCapTile({ cap, onSaved }: MonthlyCapTileProps) {
         body: JSON.stringify({ usage_budget_usd_month: next }),
       });
       if (!response.ok) {
-        setMessage("Échec de l'enregistrement du plafond.");
+        setMessage(t("cap.saveFailed"));
         return;
       }
       setEditing(false);
@@ -85,7 +87,7 @@ export function MonthlyCapTile({ cap, onSaved }: MonthlyCapTileProps) {
       // route's live-quota re-poll would spawn two CLIs for nothing.
       onSaved();
     } catch {
-      setMessage("Échec de l'enregistrement du plafond.");
+      setMessage(t("cap.saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -99,7 +101,7 @@ export function MonthlyCapTile({ cap, onSaved }: MonthlyCapTileProps) {
     >
       <div className="flex items-baseline gap-[10px]">
         <Mono size={10} weight={700} tracking={0.08} uppercase tone="feed-deep">
-          PLAFOND MENSUEL
+          {t("cap.label")}
         </Mono>
 
         {editing ? (
@@ -168,7 +170,7 @@ export function MonthlyCapTile({ cap, onSaved }: MonthlyCapTileProps) {
          * it verbatim the day auto-mode reads the cap.
          */
         <span className="font-sans text-[11px] text-strata-feed-deep">
-          {`alerte à ${cap.alertPercent} %`}
+          {t("cap.alert", { percent: cap.alertPercent })}
         </span>
       ) : (
         <QuietLink
@@ -178,7 +180,7 @@ export function MonthlyCapTile({ cap, onSaved }: MonthlyCapTileProps) {
           className="self-start"
           testId="usage-cap-set"
         >
-          définir un plafond →
+          {t("cap.set")}
         </QuietLink>
       )}
 

@@ -278,7 +278,7 @@ describe("the chat thread pane — the element the phone hands focus to", () => 
     expect(
       pane.getAttribute("aria-label"),
       "the pane focus lands on has no accessible name",
-    ).toBe("Fil de la conversation");
+    ).toBe("Conversation thread");
   });
 
   it("paints a keyboard focus ring", async () => {

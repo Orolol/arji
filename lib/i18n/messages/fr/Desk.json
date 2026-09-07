@@ -1,0 +1,58 @@
+{
+  "today": {
+    "projects": "{count, plural, one {{value} projet} other {{value} projets}}"
+  },
+  "yourTurn": {
+    "hint": "↹ parcourir · ⏎ répondre",
+    "overflow": "+{count} de plus"
+  },
+  "rows": {
+    "replyPlaceholder": "Répondre à l'agent…",
+    "replyLabel": "Répondre à l'agent",
+    "conflictWithMain": "Conflit avec main",
+    "conflictMarkers": "Marqueurs de conflit commités",
+    "dismissQuestion": "Écarter cette question",
+    "dismissFailure": "Écarter cet échec",
+    "dismissConflict": "Écarter ce conflit"
+  },
+  "land": {
+    "agentBusy": "agent au travail",
+    "heldBack": "{count, plural, one {# autre bloqué par des findings ouverts →} other {# autres bloqués par des findings ouverts →}}"
+  },
+  "upNext": {
+    "hint": "l'ordre où Full Auto va piocher",
+    "chipBlocked": "{id} bloqué",
+    "chipAwaiting": "{id} en attente",
+    "blockedBy": "Bloqué par {ids}"
+  },
+  "composer": {
+    "label": "Décris une feature",
+    "placeholder": "Décris une feature — ⏎ rédige l'epic et ses stories, ⇧⏎ l'envoie direct en dev"
+  },
+  "palette": {
+    "dialogLabel": "Rechercher",
+    "inputLabel": "Chercher",
+    "placeholder": "Chercher un ticket, un projet, une session…",
+    "empty": "Rien ne correspond.",
+    "hintProject": "ouvrir le projet",
+    "hintSession": "{taskType} en cours",
+    "hintYourTurn": "votre tour",
+    "hintFailed": "échec",
+    "hintConflict": "conflit",
+    "hintReadyToLand": "prêt à livrer",
+    "hintUpNext": "à venir"
+  },
+  "toasts": {
+    "replySent": "Réponse envoyée",
+    "sentToDev": "Envoyé en dev",
+    "dismissFailed": "Impossible d'écarter ce signal",
+    "viewTicket": "Voir le ticket",
+    "ticketCreated": "Ticket créé dans le backlog : {title}",
+    "ticketCreatedAndDispatched": "Ticket créé et envoyé en dev : {title}",
+    "ticketCreatedDispatchFailed": "Ticket créé, mais le lancement du build a échoué : {reason}",
+    "ticketCreatedDispatchUnconfirmed": "Ticket créé, mais le lancement du build n'a pas pu être confirmé : {title}"
+  },
+  "projectDesk": {
+    "selectHint": "⌘-clic sur un ticket pour le sélectionner"
+  }
+}

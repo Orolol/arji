@@ -10,14 +10,38 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { NightRunSummaryDialog } from "@/components/night/NightRunSummaryDialog";
 import {
+  NIGHT_RUN_STATUS_LABEL_KEYS,
   formatNightRunCost,
   formatNightRunCounts,
   formatNightRunDuration,
   nightRunAbortKind,
   nightRunAbortSentence,
+  type NightRunAbortCopy,
+  type NightRunCountsCopy,
 } from "@/components/night/night-run-format";
+import { catalogueValue } from "@/lib/i18n/catalogue";
+import { translatorFor } from "@/lib/i18n/translator";
 import type { NightRunDetail } from "@/lib/night/constants";
 import type { TicketExecutionStatus } from "@/lib/dependencies/scheduler";
+
+// The formatters compose, they do not word: the phrases come resolved from
+// the caller, exactly as NightRunSummaryDialog supplies them. The status table
+// holds full dotted paths, so it resolves outside a namespace.
+const t = translatorFor("en", "NightRuns");
+const countsCopy: NightRunCountsCopy = {
+  bucket: (count, label) => t("counts.bucket", { count, label }),
+  statusLabel: (status) =>
+    catalogueValue("en", NIGHT_RUN_STATUS_LABEL_KEYS[status]),
+  none: t("counts.none"),
+};
+const abortCopy: NightRunAbortCopy = {
+  stopped: (wave) =>
+    wave == null ? t("abort.stopped") : t("abort.stoppedAtWave", { wave }),
+  other: (reason, wave) =>
+    wave == null
+      ? t("abort.other", { reason })
+      : t("abort.otherAtWave", { reason, wave }),
+};
 
 function counts(
   partial: Partial<Record<TicketExecutionStatus, number>>
@@ -418,12 +442,15 @@ describe("night-run formatters", () => {
   it("omits empty buckets and words outcomes for a human", () => {
     expect(
       formatNightRunCounts(
-        counts({ done: 5, asked: 1, failed: 2, skipped: 1 })
+        counts({ done: 5, asked: 1, failed: 2, skipped: 1 }),
+        countsCopy
       )
     ).toBe("5 to merge, 1 paused, 2 failed, 1 skipped");
-    expect(formatNightRunCounts(counts({ done: 3 }))).toBe("3 to merge");
-    expect(formatNightRunCounts(counts({}))).toBe("no epics");
-    expect(formatNightRunCounts(null)).toBe("no epics");
+    expect(formatNightRunCounts(counts({ done: 3 }), countsCopy)).toBe(
+      "3 to merge"
+    );
+    expect(formatNightRunCounts(counts({}), countsCopy)).toBe("no epics");
+    expect(formatNightRunCounts(null, countsCopy)).toBe("no epics");
   });
 
   it("prefixes a partial cost with ≥ and hides a zero total", () => {
@@ -455,16 +482,18 @@ describe("night-run formatters", () => {
   });
 
   it("words a user stop as a decision and an abort as an incident", () => {
-    expect(nightRunAbortSentence("stopped by user", 2)).toBe(
+    expect(nightRunAbortSentence("stopped by user", 2, abortCopy)).toBe(
       "You stopped this run (after wave 2). Epics already running were left to finish; the rest were skipped."
     );
-    expect(nightRunAbortSentence("cost cap reached: $20.10 of $20", 1)).toBe(
+    expect(
+      nightRunAbortSentence("cost cap reached: $20.10 of $20", 1, abortCopy)
+    ).toBe(
       "Run stopped early: cost cap reached: $20.10 of $20 (after wave 1). Remaining epics were skipped."
     );
     // No wave number known (aborted before the first launch).
-    expect(nightRunAbortSentence("stopped by user", null)).toBe(
+    expect(nightRunAbortSentence("stopped by user", null, abortCopy)).toBe(
       "You stopped this run. Epics already running were left to finish; the rest were skipped."
     );
-    expect(nightRunAbortSentence(null, 3)).toBeNull();
+    expect(nightRunAbortSentence(null, 3, abortCopy)).toBeNull();
   });
 });

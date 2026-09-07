@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 
 import {
   BandHeader,
@@ -11,6 +12,7 @@ import {
 import { useProjectEvents } from "@/hooks/useProjectEvents";
 import { PromptBarRow } from "@/components/spec/PromptBarRow";
 import type { PromptAnatomyRow } from "@/components/spec/spec-format";
+import type { TranslationKey } from "@/lib/i18n/catalogue";
 import type { PromptAnatomySegment } from "@/lib/tokens/estimator";
 
 interface PromptAnatomyBandProps {
@@ -23,14 +25,18 @@ interface PromptAnatomyBandProps {
 /**
  * The legend is a legend of the VOCABULARY, not of the current rows: PERSONA
  * stays listed even when no agent on screen has one.
+ *
+ * A module-scope copy table, so it holds catalogue KEY REFERENCES and the band
+ * resolves them at render with the namespace-less translator
+ * (`lib/i18n/catalogue.ts`, pattern 3).
  */
-const LEGEND: { key: PromptAnatomySegment; label: string }[] = [
-  { key: "system", label: "SYSTEM" },
-  { key: "persona", label: "PERSONA" },
-  { key: "spec", label: "SPEC" },
-  { key: "memory", label: "MEMORY" },
-  { key: "ticket", label: "TICKET / DIFF" },
-  { key: "docs", label: "DOCS" },
+const LEGEND: { key: PromptAnatomySegment; labelKey: TranslationKey }[] = [
+  { key: "system", labelKey: "Spec.anatomy.legend.system" },
+  { key: "persona", labelKey: "Spec.anatomy.legend.persona" },
+  { key: "spec", labelKey: "Spec.anatomy.legend.spec" },
+  { key: "memory", labelKey: "Spec.anatomy.legend.memory" },
+  { key: "ticket", labelKey: "Spec.anatomy.legend.ticket" },
+  { key: "docs", labelKey: "Spec.anatomy.legend.docs" },
 ];
 
 /**
@@ -50,6 +56,10 @@ export function PromptAnatomyBand({
   rows: rowsProp,
   className,
 }: PromptAnatomyBandProps) {
+  const t = useTranslations("Spec");
+  // The legend is a key-reference table, so it resolves through the
+  // namespace-less translator, which takes the full dotted path.
+  const tKey = useTranslations();
   const [fetched, setFetched] = useState<PromptAnatomyRow[]>([]);
   const controlled = rowsProp !== undefined;
   const rows = controlled ? rowsProp : fetched;
@@ -83,9 +93,9 @@ export function PromptAnatomyBand({
       className={`px-[18px] pt-[14px] pb-[15px] ${className ?? ""}`}
     >
       <div className="flex flex-wrap items-baseline gap-[12px]">
-        <BandHeader stratum="land" label="Anatomie du prompt" labelSize={12} />
+        <BandHeader stratum="land" label={t("anatomy.label")} labelSize={12} />
         <span className="text-[11.5px] text-strata-land-mid max-[1199px]:hidden">
-          ce que chaque agent reçoit au départ de session, en tokens
+          {t("anatomy.helper")}
         </span>
         <div
           data-testid="prompt-anatomy-legend"
@@ -102,7 +112,7 @@ export function PromptAnatomyBand({
                   uppercase TRACKED mono label, and the primitive is what
                   guarantees the tracking comes with the size. */}
               <FieldKicker size={9.5} stratum="land">
-                {item.label}
+                {tKey(item.labelKey)}
               </FieldKicker>
             </span>
           ))}
@@ -129,10 +139,9 @@ export function PromptAnatomyBand({
             in the sentence changes.
           */}
           <span className="text-[11.5px] text-strata-land-mid">
-            La spec (vert tilleul) et la mémoire (turquoise) pèsent dans{" "}
-            <em>chaque</em> session de <em>chaque</em> agent — élaguer ici paie
-            partout. Le blanc en fin de barre : ce que l&apos;agent n&apos;a pas
-            reçu (pas de docs cités).
+            {t.rich("anatomy.note", {
+              em: (chunks) => <em>{chunks}</em>,
+            })}
           </span>
         </>
       ) : (
@@ -143,8 +152,7 @@ export function PromptAnatomyBand({
           data-testid="prompt-anatomy-empty"
           className="text-[11.5px] text-strata-land-mid"
         >
-          Aucune session n&apos;a encore enregistré son prompt — la première
-          dispatche remplira ce tableau.
+          {t("anatomy.empty")}
         </span>
       )}
     </StrataBand>

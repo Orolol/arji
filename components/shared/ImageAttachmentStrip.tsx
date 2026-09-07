@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { Loader2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { PendingAttachment } from "@/hooks/useImageAttachments";
@@ -22,6 +23,7 @@ export function ImageAttachmentStrip({
   uploading = false,
   className,
 }: ImageAttachmentStripProps) {
+  const t = useTranslations("Shared");
   if (attachments.length === 0 && !uploading) return null;
 
   return (
@@ -40,7 +42,9 @@ export function ImageAttachmentStrip({
             onClick={() => onRemove(attachment.id)}
             className="absolute -top-1.5 -right-1.5 bg-destructive text-background rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
             type="button"
-            aria-label={`Remove ${attachment.fileName}`}
+            aria-label={t("imageAttachments.remove", {
+              fileName: attachment.fileName,
+            })}
           >
             <X className="h-3 w-3" />
           </button>
