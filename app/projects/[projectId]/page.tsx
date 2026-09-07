@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { ToastStack, type ToastItem } from "@/components/notifications/ToastStack";
@@ -55,6 +56,7 @@ import { useProjectEvents } from "@/hooks/useProjectEvents";
  */
 
 export default function ProjectDeskPage() {
+  const t = useTranslations("Desk");
   const params = useParams();
   const searchParams = useSearchParams();
   const projectId = params.projectId as string;
@@ -496,7 +498,7 @@ export default function ProjectDeskPage() {
                 onFinished={handleRefinementFinished}
               />
               <span className="ml-auto truncate text-[12.5px] text-muted-foreground">
-                ⌘-clic sur un ticket pour le sélectionner
+                {t("projectDesk.selectHint")}
               </span>
             </div>
 

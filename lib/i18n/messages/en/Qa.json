@@ -69,7 +69,15 @@
   },
   "verdicts": {
     "label": "Recent verdicts",
-    "meta": "7 days"
+    "meta": "7 days",
+    "unverifiable": "review unverifiable · findings never received",
+    "changesRequested": "changes requested · {count, plural, one {# finding} other {# findings}}",
+    "cleanNoFindings": "review clean · 0 findings",
+    "cleanWithFindings": "clean after review · {count, plural, one {# finding} other {# findings}} filed",
+    "noStructuredVerdict": "review with no structured verdict",
+    "outcomeLanded": "→ landed",
+    "outcomeReady": "→ ready",
+    "outcomeYourTurn": "→ your turn"
   },
   "rubric": {
     "label": "The rubric",

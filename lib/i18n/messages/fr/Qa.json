@@ -29,7 +29,9 @@
   },
   "verdicts": {
     "label": "Verdicts récents",
-    "meta": "7 jours"
+    "meta": "7 jours",
+    "unverifiable": "review unverifiable · findings jamais reçues",
+    "noStructuredVerdict": "review sans verdict structuré"
   },
   "rubric": {
     "label": "La rubrique",

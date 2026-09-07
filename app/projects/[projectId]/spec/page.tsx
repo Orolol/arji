@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { Sparkles } from "lucide-react";
@@ -41,6 +42,7 @@ export default function SpecPage({
   pollIntervalMs?: number;
   params?: Promise<{ projectId: string }>;
 } = {}) {
+  const t = useTranslations("Spec");
   const hookParams = useParams();
   const [resolvedProjectId, setResolvedProjectId] = useState<string>(
     (hookParams?.projectId as string) || ""
@@ -261,7 +263,7 @@ export default function SpecPage({
       onClick={() => setUpdateDialogOpen(true)}
       disabled={updateStatus === "running"}
     >
-      Régénérer par chat
+      {t("page.regenerate")}
     </PillButton>
   );
 

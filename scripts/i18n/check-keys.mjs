@@ -29,6 +29,22 @@
  *      that never appears inside a `t(...)` call, because the table is read
  *      by pure logic and the literal sits in the data.
  *
+ *   4. ANY string literal whose first dotted segment names a real namespace.
+ *      This is the catch-all, and it exists because rules 1-3 disagreed with
+ *      the pattern the catalogue header actually prescribes. A
+ *      `Record<Status, TranslationKey>` map — the header's own words for a
+ *      label map — holds its keys as plain VALUES, under property names like
+ *      `blocked`, not `blockedKey`; so did every key handed to a translator
+ *      received as a function parameter. Both are correct code and both
+ *      reported as orphans, which pushed two parallel bands into reshaping
+ *      working tables purely to satisfy this script. The tool was wrong, not
+ *      the code.
+ *
+ *      The cost is a slightly looser orphan signal: a key named in a string
+ *      the app never renders counts as referenced. That is worth it — a FALSE
+ *      ORPHAN is the expensive failure here, because it fails CI on correct
+ *      code and teaches people to contort around the gate.
+ *
  * An indirect call — `t(entry.labelKey)` — contributes nothing here, and
  * needs to contribute nothing: the literal it resolves lives in the table and
  * was counted there.
@@ -192,6 +208,12 @@ export function referencedKeys() {
         if (ts.isIdentifier(callee) && callee.text === "catalogueValue") {
           record(literalOf(node.arguments[1]));
         }
+      }
+      // Rule 4: any literal that addresses a namespace is a reference,
+      // wherever it sits — a `Record<Id, TranslationKey>` value, an array
+      // element, an argument to a helper taking a translator.
+      if (ts.isStringLiteralLike(node) && !ts.isImportDeclaration(node.parent)) {
+        record(asCatalogueKey(literalOf(node)));
       }
       // Pattern 3: a copy table's `…Key` field holding a full dotted path.
       if (

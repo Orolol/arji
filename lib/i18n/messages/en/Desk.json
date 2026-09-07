@@ -137,5 +137,8 @@
     "autoFailed": "Failed to change Full Auto",
     "autoOn": "Full Auto Mode is on",
     "autoOff": "Full Auto Mode is off"
+  },
+  "projectDesk": {
+    "selectHint": "⌘-click a ticket to select it"
   }
 }

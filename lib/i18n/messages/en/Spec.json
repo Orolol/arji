@@ -135,5 +135,8 @@
       "restore": "Failed to restore the memory snapshot.",
       "dream": "Failed to start the dreaming session."
     }
+  },
+  "page": {
+    "regenerate": "Regenerate via chat"
   }
 }

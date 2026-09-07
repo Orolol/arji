@@ -38,5 +38,8 @@
   },
   "memory": {
     "helper": "ce que les agents ont appris"
+  },
+  "page": {
+    "regenerate": "Régénérer par chat"
   }
 }

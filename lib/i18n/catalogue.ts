@@ -57,14 +57,27 @@
  *    compile error. Proven on `lib/piscine/nav.ts` and
  *    `app/settings/layout.tsx` (a server component — no `"use client"`).
  *
- *    COPY COMPOSED OUTSIDE REACT — a `lib/` derivation or an API route that
- *    builds a display string from parts — takes a translator as an argument
- *    rather than importing one: the component passes its
- *    `useTranslations("Ns")`, a route passes
+ *    COPY COMPOSED OUTSIDE REACT — a `lib/` derivation or a pure helper that
+ *    builds a display string from parts — takes the RESOLVED PHRASES from its
+ *    caller, in a small `copy` object:
+ *
+ *      formatSaveState(state, { locale, copy: { unsaved: t("footer.unsaved") } })
+ *      landMeta(row, copy)          chipLabel(ticket, copy)
+ *
+ *    Prefer that over passing the translator itself. Three independent sweeps
+ *    arrived at it: the `t` a helper receives as a PARAMETER resolves keys
+ *    that no longer sit next to a `useTranslations` binding, which makes them
+ *    harder to find and, when the key is namespace-relative, invisible to
+ *    `scripts/i18n/check-keys.mjs`. Resolved phrases keep every key literal at
+ *    a real call site, where both the reader and the gate can see it.
+ *
+ *    An API ROUTE is the exception, because it is the thing that knows the
+ *    locale and there is no component above it:
  *    `translatorFor(resolveUiLocaleForRequest(request), "Ns")`
- *    (lib/i18n/translator.ts). The copy still lives in the catalogue; only
- *    the resolution moves to the caller, which is the one that knows the
- *    locale.
+ *    (lib/i18n/translator.ts).
+ *
+ *    Either way the copy still lives in the catalogue; only the resolution
+ *    moves to the caller.
  *
  * 4. LOCALE-SENSITIVE FORMATTING (dates, numbers, plurals) goes through
  *    `lib/i18n/format.ts`, never through a bespoke helper: one family,

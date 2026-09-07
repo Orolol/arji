@@ -51,5 +51,8 @@
     "ticketCreatedAndDispatched": "Ticket créé et envoyé en dev : {title}",
     "ticketCreatedDispatchFailed": "Ticket créé, mais le lancement du build a échoué : {reason}",
     "ticketCreatedDispatchUnconfirmed": "Ticket créé, mais le lancement du build n'a pas pu être confirmé : {title}"
+  },
+  "projectDesk": {
+    "selectHint": "⌘-clic sur un ticket pour le sélectionner"
   }
 }
