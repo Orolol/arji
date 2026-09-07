@@ -96,7 +96,7 @@ describe("Documents import route", () => {
     const json = await res.json();
 
     expect(res.status).toBe(400);
-    expect(json.error).toContain("Aucun fichier sélectionné");
+    expect(json.error).toContain("No files selected");
     expect(dbMockState.insertCalls).toHaveLength(0);
   });
 
@@ -141,7 +141,7 @@ describe("Documents import route", () => {
 
       expect(res.status).toBe(200);
       expect(json.data.imported).toHaveLength(0);
-      expect(json.data.skipped[0].reason).toContain("Chemin invalide");
+      expect(json.data.skipped[0].reason).toContain("Not a file");
       expect(mockConvertToMarkdown).not.toHaveBeenCalled();
       expect(dbMockState.insertCalls).toHaveLength(0);
     } finally {
@@ -149,7 +149,7 @@ describe("Documents import route", () => {
     }
   });
 
-  it("marks files whose name already exists in the project as déjà importé", async () => {
+  it("marks files whose name already exists in the project as already imported", async () => {
     dbMockState.getQueue = [{ id: "existing-doc" }];
 
     const res = await post(["docs/spec.md"]);
@@ -158,7 +158,7 @@ describe("Documents import route", () => {
     expect(json.data.imported).toHaveLength(0);
     expect(json.data.skipped[0]).toMatchObject({
       relativePath: "docs/spec.md",
-      reason: "Déjà importé.",
+      reason: "Already imported.",
     });
     expect(dbMockState.insertCalls).toHaveLength(0);
   });
@@ -183,7 +183,7 @@ describe("Documents import route", () => {
     expect(json.data.skipped[0]).toMatchObject({
       relativePath: "b/same.md",
     });
-    expect(json.data.skipped[0].reason).toContain("déjà importé");
+    expect(json.data.skipped[0].reason).toContain("already part of this request");
     expect(dbMockState.insertCalls).toHaveLength(1);
   });
 
@@ -197,7 +197,7 @@ describe("Documents import route", () => {
     expect(json.data.imported[0].originalFilename).toBe("README.md");
     expect(json.data.skipped[0]).toMatchObject({
       relativePath: "docs/gone.md",
-      reason: "Fichier introuvable sur le disque.",
+      reason: "File not found on disk.",
     });
   });
 });

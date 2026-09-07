@@ -86,12 +86,12 @@ export async function importScannedDocuments(
 
     const extension = path.extname(rel).toLowerCase();
     if (!DOCUMENT_SCAN_EXTENSIONS[extension]) {
-      skip("Type de fichier non pris en charge.");
+      skip("Unsupported file type.");
       continue;
     }
     if (extension === ".doc") {
       skip(
-        "Format .doc non pris en charge — convertissez le fichier en .docx."
+        "The .doc format is not supported — convert the file to .docx."
       );
       continue;
     }

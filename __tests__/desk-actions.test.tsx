@@ -430,7 +430,7 @@ describe("desk mutations", () => {
     expect(screen.getByRole("link", { name: "View the ticket" })).toHaveAttribute(
       "href", "/projects/p1?ticket=new-epic",
     );
-    fireEvent.click(screen.getByRole("button", { name: "Fermer la notification" }));
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss notification" }));
     expect(screen.queryByTestId("desk-toast")).not.toBeInTheDocument();
   });
 

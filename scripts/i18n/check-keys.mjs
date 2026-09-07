@@ -163,9 +163,14 @@ export function referencedKeys() {
           .map((name) => name.slice(0, -".json".length))
       : [],
   );
-  /** A pattern-3 literal, only when it addresses a namespace that exists. */
+  /**
+   * A pattern-3 literal, only when it addresses a namespace that exists AND
+   * actually reaches into it. The dot is required: the bare word "Verify" is
+   * a button label in `components/verify/`, not the `Verify` namespace, and
+   * reading it as a key reported a missing string nobody wrote.
+   */
   const asCatalogueKey = (value) =>
-    value && namespaces.has(value.split(".")[0]) ? value : null;
+    value && value.includes(".") && namespaces.has(value.split(".")[0]) ? value : null;
   const files = SOURCE_ROOTS.flatMap((root) => walkFiles(path.join(ROOT, root)));
 
   for (const file of files) {

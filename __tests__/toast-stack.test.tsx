@@ -38,7 +38,7 @@ describe("shared toast stack", () => {
     expect(screen.getAllByRole("alert")).toHaveLength(2);
     act(() => vi.advanceTimersByTime(TOAST_DURATION_MS * 3));
     expect(dismiss).not.toHaveBeenCalled();
-    fireEvent.click(screen.getAllByRole("button", { name: "Fermer la notification" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "Dismiss notification" })[0]);
     expect(dismiss).toHaveBeenCalledExactlyOnceWith("one");
   });
 

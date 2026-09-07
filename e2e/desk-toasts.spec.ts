@@ -46,6 +46,6 @@ test("creation errors stay visible and preserve the draft on a narrow screen", a
   expect(bounds!.x).toBeGreaterThanOrEqual(0);
   expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(390);
   await page.screenshot({ path: "data/toast-mobile.png" });
-  await toast.getByRole("button", { name: "Fermer la notification" }).click();
+  await toast.getByRole("button", { name: "Dismiss notification" }).click();
   await expect(toast).toBeHidden();
 });

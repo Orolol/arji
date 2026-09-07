@@ -1,0 +1,28 @@
+{
+  "git": {
+    "label": "Git",
+    "diffstat": "· {files} files · isolated worktree",
+    "diffstatUnknown": "— · — files · isolated worktree",
+    "prLink": "PR #{number}",
+    "createPr": "Create PR",
+    "creatingPr": "Creating…",
+    "diff": "Diff",
+    "sync": "Sync",
+    "syncing": "Sync…",
+    "merge": "Merge into main",
+    "merging": "Merge…",
+    "conflict": "CONFLICT",
+    "resolveWithAgent": "Resolve with agent"
+  },
+  "conversation": {
+    "label": "Conversation",
+    "placeholder": "Reply — @ to cite a doc…",
+    "replyLabel": "Reply",
+    "send": "Send",
+    "sending": "Sending…"
+  },
+  "comment": {
+    "expand": "see all",
+    "collapse": "less"
+  }
+}

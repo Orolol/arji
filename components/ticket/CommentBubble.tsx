@@ -1,6 +1,6 @@
 "use client";
 
-import { useLocale } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 /**
  * One comment in the CONVERSATION band (frame 6a, lines 264-267).
  *
@@ -28,6 +28,7 @@ export interface CommentBubbleProps {
 }
 
 export function CommentBubble({ comment }: CommentBubbleProps) {
+  const t = useTranslations("Ticket");
   const locale = useLocale();
   const [expanded, setExpanded] = useState(false);
   const isUser = comment.author === "user";
@@ -60,7 +61,7 @@ export function CommentBubble({ comment }: CommentBubbleProps) {
           testId="ticket-comment-expand"
           className="mt-1"
         >
-          {expanded ? "moins" : "voir tout"}
+          {expanded ? t("comment.collapse") : t("comment.expand")}
         </QuietLink>
       ) : null}
     </div>

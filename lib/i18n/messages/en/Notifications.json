@@ -2,6 +2,7 @@
   "stack": {
     "label": "Notifications",
     "defaultAction": "Open session",
-    "activeSession": "Open active session"
+    "activeSession": "Open active session",
+    "dismiss": "Dismiss notification"
   }
 }

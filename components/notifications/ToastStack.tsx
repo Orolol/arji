@@ -100,16 +100,14 @@ function Toast({ item, onDismiss, testId }: {
         ) : null}
       </div>
       {/*
-        LEFT IN FRENCH ON PURPOSE, and it is the only string of this band that
-        is. Everything else here was already English, so extracting it kept
-        the rendered bytes identical — the acceptance criterion of this sweep.
-        This one is not English, so it is not a move but a REWRITE, and it is
-        pinned by three unit tests plus `e2e/desk-toasts.spec.ts`. It belongs
-        to the French-screens pass: English in `en/Notifications.json`, the
-        French below in `fr/Notifications.json`, and the four assertions
-        updated in the same commit.
+        This label was the last French string in the interface, and it carried
+        no accent — so neither the epic's own accent grep nor a French-word
+        scan found it. It surfaced only because a sweep read the file. Its
+        French is seeded in `fr/Notifications.json`, and the three unit tests
+        plus `e2e/desk-toasts.spec.ts` that pinned the old bytes were updated
+        with it.
       */}
-      <button type="button" aria-label="Fermer la notification" onClick={() => onDismiss(item.id)} className="flex size-7 shrink-0 items-center justify-center rounded-full hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring">
+      <button type="button" aria-label={t("stack.dismiss")} onClick={() => onDismiss(item.id)} className="flex size-7 shrink-0 items-center justify-center rounded-full hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring">
         <X size={15} aria-hidden="true" />
       </button>
     </SurfaceCard>

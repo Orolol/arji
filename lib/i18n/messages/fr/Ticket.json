@@ -1,0 +1,16 @@
+{
+  "git": {
+    "diffstat": "· {files} files · worktree isolé",
+    "diffstatUnknown": "— · — files · worktree isolé",
+    "creatingPr": "Création…"
+  },
+  "conversation": {
+    "placeholder": "Répondre — @ pour citer un doc…",
+    "replyLabel": "Répondre",
+    "sending": "Envoi…"
+  },
+  "comment": {
+    "expand": "voir tout",
+    "collapse": "moins"
+  }
+}
