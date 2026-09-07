@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
 import { Check, Copy, ExternalLink } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -55,6 +56,7 @@ export function ProjectSourceBadge({
   gitRemoteUrl,
   className,
 }: ProjectSourceBadgeProps) {
+  const t = useTranslations("Layout");
   const [copied, setCopied] = useState(false);
   const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -95,7 +97,7 @@ export function ProjectSourceBadge({
               type="button"
               onClick={copyPath}
               aria-label={
-                copied ? "Repository path copied" : "Copy repository path"
+                copied ? t("source.copied") : t("source.copy")
               }
               data-testid="project-source-copy-path"
               className="group flex items-center gap-[6px] min-w-0 max-w-[280px] h-[24px] px-[8px] rounded-[7px] border border-border/70 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
@@ -119,7 +121,7 @@ export function ProjectSourceBadge({
           <TooltipContent>
             <p className="font-mono text-[11px]">{gitRepoPath}</p>
             <p className="text-[11px] text-muted-foreground">
-              {copied ? "Copied" : "Click to copy"}
+              {copied ? t("source.copiedShort") : t("source.clickToCopy")}
             </p>
           </TooltipContent>
         </Tooltip>
@@ -130,7 +132,7 @@ export function ProjectSourceBadge({
             className="h-[22px] shrink-0 text-[10.5px] font-medium"
             data-testid="project-source-clone-badge"
           >
-            Arij-managed clone
+            {t("source.managedClone")}
           </Badge>
         )}
 

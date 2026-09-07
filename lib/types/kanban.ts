@@ -1,4 +1,5 @@
 import type { GradingStatus } from "@/lib/grading/report";
+import type { TranslationKey } from "@/lib/i18n/catalogue";
 import type { MergeReadiness } from "@/lib/kanban/merge-readiness";
 
 export const KANBAN_COLUMNS = [
@@ -204,9 +205,18 @@ export interface ReorderItem {
 export const USER_STORY_STATUSES = ["todo", "in_progress", "review", "done"] as const;
 export type UserStoryStatus = (typeof USER_STORY_STATUSES)[number];
 
-export const USER_STORY_STATUS_LABELS: Record<UserStoryStatus, string> = {
-  todo: "To Do",
-  in_progress: "In Progress",
-  review: "Review",
-  done: "Done",
+/**
+ * A MODULE-SCOPE COPY TABLE, so it holds catalogue KEY REFERENCES rather than
+ * words: it is evaluated at import time and cannot call a hook, and the panel
+ * that draws it resolves each key with the namespace-less translator
+ * (`lib/i18n/catalogue.ts`, pattern 3).
+ */
+export const USER_STORY_STATUS_LABELS: Record<
+  UserStoryStatus,
+  { labelKey: TranslationKey }
+> = {
+  todo: { labelKey: "Story.status.todo" },
+  in_progress: { labelKey: "Story.status.inProgress" },
+  review: { labelKey: "Story.status.review" },
+  done: { labelKey: "Story.status.done" },
 };

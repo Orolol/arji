@@ -1,6 +1,7 @@
 "use client";
 
 import { Loader2, RotateCcw, Sparkles } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -36,6 +37,7 @@ export function ChatWorkspaceHeader({
   onSelectAgentOrProvider,
   onRestartPersistentSession = () => {},
 }: ChatWorkspaceHeaderProps) {
+  const t = useTranslations("ChatLegacy");
   const isPersistent = isPersistentChatProvider(activeConversation?.provider);
   // Shared with the chat page: `provider` is a free-form column, and a
   // conversation stored before a provider cleanup (`gemini-cli`, `pi`) has no
@@ -58,7 +60,7 @@ export function ChatWorkspaceHeader({
           }
           data-testid="persistent-session-state"
         >
-          {isHot ? "session warm" : "session cold"}
+          {isHot ? t("header.sessionWarm") : t("header.sessionCold")}
         </Badge>
       ) : (
         // Non-persistent CLI conversations still resume from a stored session
@@ -69,7 +71,7 @@ export function ChatWorkspaceHeader({
             className="border-agent-border text-[10px] text-agent"
             data-testid="linked-session-state"
           >
-            session linked
+            {t("header.sessionLinked")}
           </Badge>
         )
       )}
@@ -83,8 +85,8 @@ export function ChatWorkspaceHeader({
           size="icon"
           variant="ghost"
           className="h-7 w-7"
-          title={isBusy ? "Stop and restart session" : "Restart session"}
-          aria-label="Restart persistent chat session"
+          title={isBusy ? t("header.restartBusy") : t("header.restart")}
+          aria-label={t("header.restartAria")}
           onClick={onRestartPersistentSession}
         >
           <RotateCcw className="h-3.5 w-3.5" />
@@ -124,6 +126,8 @@ export function ChatProposalCard({
   epicCreating,
   onCreateEpic,
 }: ChatProposalCardProps) {
+  const t = useTranslations("ChatLegacy");
+
   if (!showCreateEpic && !showGenerateSpec) return null;
 
   return (
@@ -134,7 +138,7 @@ export function ChatProposalCard({
           data-testid="chat-proposed-epic"
         >
           <span className="text-[11.5px] uppercase tracking-[.08em] text-meta">
-            Proposed epic
+            {t("proposal.label")}
           </span>
           <span className="text-[13.5px] font-medium leading-[1.4]">
             {resolveLegacyConversationLabel(
@@ -156,7 +160,7 @@ export function ChatProposalCard({
               ) : (
                 <Sparkles className="mr-1 h-3 w-3" />
               )}
-              Create Epic & Generate Stories
+              {t("proposal.createEpic")}
             </Button>
           </div>
         </div>
@@ -177,7 +181,7 @@ export function ChatProposalCard({
             ) : (
               <Sparkles className="mr-1 h-3 w-3" />
             )}
-            Generate Spec & Plan
+            {t("proposal.generateSpec")}
           </Button>
         </div>
       )}

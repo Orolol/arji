@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { MentionTextarea } from "@/components/documents/MentionTextarea";
 import { ImageAttachmentStrip } from "@/components/shared/ImageAttachmentStrip";
@@ -13,6 +14,7 @@ interface MessageInputProps {
   projectId: string;
   onSend: (content: string, attachmentIds: string[]) => void;
   disabled?: boolean;
+  /** Defaults to the catalogue's `input.placeholder` when the caller omits it. */
   placeholder?: string;
   /**
    * Disables the image-attach button, paste-to-attach, and file picker.
@@ -26,9 +28,10 @@ export function MessageInput({
   projectId,
   onSend,
   disabled,
-  placeholder = "Ask a question...",
+  placeholder,
   attachmentsDisabled = false,
 }: MessageInputProps) {
+  const t = useTranslations("ChatLegacy");
   const [value, setValue] = useState("");
   const {
     attachments,
@@ -78,7 +81,7 @@ export function MessageInput({
           onValueChange={setValue}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
-          placeholder={placeholder}
+          placeholder={placeholder ?? t("input.placeholder")}
           rows={2}
           className="min-h-[54px] resize-none rounded-[8px] text-[13.5px]"
           disabled={disabled}
@@ -89,7 +92,7 @@ export function MessageInput({
             variant="outline"
             onClick={openFilePicker}
             disabled={disabled || uploading || attachmentsDisabled}
-            title="Attach image"
+            title={t("input.attachImage")}
             type="button"
             className="h-[30px] w-[30px] rounded-[8px]"
           >
@@ -103,7 +106,7 @@ export function MessageInput({
             size="icon"
             onClick={handleSubmit}
             disabled={disabled || !hasContent || uploading}
-            aria-label="Send message"
+            aria-label={t("input.send")}
             className="h-[30px] w-[30px] rounded-[8px] bg-primary"
           >
             <ArrowRight className="h-[14px] w-[14px]" />

@@ -1,0 +1,12 @@
+{
+  "stream": {
+    "waiting": "Waiting for agent output...",
+    "unavailable": "This session's {stream} output could not be read — the record may be damaged. This is not the same as a session that produced no output.",
+    "unreadable": "This session's output could not be read.",
+    "loadMoreError": "Could not load more output.",
+    "truncated": "{count, plural, one {One oversized chunk is shown in part.} other {# oversized chunks are shown in part.}}",
+    "loadMoreHint": "Load more to continue reading it.",
+    "loading": "Loading...",
+    "loadMore": "Load more output"
+  }
+}

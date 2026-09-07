@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { useTranslations } from "next-intl";
 import { Loader2, MessageCircle, MessageSquare, Plus, Sparkles, X } from "lucide-react";
 import {
   DropdownMenu,
@@ -46,6 +47,8 @@ export function ChatTabBar({
   onCreateTab,
   trailing,
 }: ChatTabBarProps) {
+  const t = useTranslations("ChatLegacy");
+
   return (
     <div
       className="flex items-center gap-[14px] overflow-x-auto border-b border-border px-[18px] py-[12px]"
@@ -83,7 +86,7 @@ export function ChatTabBar({
               <Loader2
                 data-testid={`active-indicator-${conversation.id}`}
                 className="h-3 w-3 animate-spin text-agent"
-                aria-label="Agent active"
+                aria-label={t("tabs.agentActive")}
               />
             )}
             {conversations.length > 1 && (
@@ -109,32 +112,39 @@ export function ChatTabBar({
             type="button"
             data-testid="new-conversation-tab"
             className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-[6px] text-meta transition-colors hover:bg-band hover:text-foreground"
-            title="New conversation"
+            title={t("tabs.newConversation")}
           >
             <Plus className="h-[13px] w-[13px]" />
           </button>
         </DropdownMenuTrigger>
+        {/*
+          The `label` each item creates with is NOT copy and stays inline: it
+          is written to the conversation row and read back on every later
+          render (and by `resolveLegacyConversationLabel`), so translating it
+          would persist one locale's word into the database. Only the menu
+          item's own text resolves from the catalogue.
+        */}
         <DropdownMenuContent align="start">
           <DropdownMenuItem
             data-testid="new-tab-chat"
             onClick={() => onCreateTab({ type: "chat", label: "Chat" })}
           >
             <MessageCircle className="mr-2 h-4 w-4" />
-            Chat
+            {t("tabs.new.chat")}
           </DropdownMenuItem>
           <DropdownMenuItem
             data-testid="new-tab-brainstorm"
             onClick={() => onCreateTab({ type: "brainstorm", label: "Brainstorm" })}
           >
             <MessageSquare className="mr-2 h-4 w-4" />
-            Brainstorm
+            {t("tabs.new.brainstorm")}
           </DropdownMenuItem>
           <DropdownMenuItem
             data-testid="new-tab-epic"
             onClick={() => onCreateTab({ type: "epic_creation", label: "New Epic" })}
           >
             <Sparkles className="mr-2 h-4 w-4" />
-            New Epic
+            {t("tabs.new.epic")}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 
 interface DetectionPayload {
@@ -27,6 +28,7 @@ export function GitHubConnectBanner({
   githubOwnerRepo,
   onConnected,
 }: GitHubConnectBannerProps) {
+  const t = useTranslations("Github");
   const [dismissed, setDismissed] = useState(false);
   const [detecting, setDetecting] = useState(false);
   const [connecting, setConnecting] = useState(false);
@@ -59,10 +61,7 @@ export function GitHubConnectBanner({
 
         if (!response.ok) {
           if (!cancelled) {
-            setError(
-              payload?.error ??
-                "Could not detect a GitHub remote for this project."
-            );
+            setError(payload?.error ?? t("connect.detectError"));
           }
           return;
         }
@@ -77,7 +76,7 @@ export function GitHubConnectBanner({
         }
       } catch {
         if (!cancelled) {
-          setError("Could not detect a GitHub remote for this project.");
+          setError(t("connect.detectError"));
         }
       } finally {
         if (!cancelled) {
@@ -90,7 +89,7 @@ export function GitHubConnectBanner({
     return () => {
       cancelled = true;
     };
-  }, [projectId, shouldAttemptDetect]);
+  }, [projectId, shouldAttemptDetect, t]);
 
   function handleDismiss() {
     if (typeof window !== "undefined") {
@@ -114,10 +113,7 @@ export function GitHubConnectBanner({
       const payload = await response.json().catch(() => ({}));
 
       if (!response.ok) {
-        setError(
-          payload?.error ??
-            "Failed to connect this project to the detected GitHub repository."
-        );
+        setError(payload?.error ?? t("connect.connectError"));
         return;
       }
 
@@ -128,9 +124,7 @@ export function GitHubConnectBanner({
       onConnected?.(ownerRepo);
       setCandidate(null);
     } catch {
-      setError(
-        "Failed to connect this project to the detected GitHub repository."
-      );
+      setError(t("connect.connectError"));
     } finally {
       setConnecting(false);
     }
@@ -144,7 +138,10 @@ export function GitHubConnectBanner({
     <div className="border-b border-border bg-muted/40 px-4 py-2">
       <div className="flex flex-wrap items-center gap-2">
         <p className="text-sm">
-          Connect this project to <span className="font-mono">{candidate.ownerRepo}</span>?
+          {t.rich("connect.question", {
+            ownerRepo: candidate.ownerRepo,
+            repo: (chunks) => <span className="font-mono">{chunks}</span>,
+          })}
         </p>
         <Button
           size="sm"
@@ -152,7 +149,7 @@ export function GitHubConnectBanner({
           onClick={handleConnect}
           disabled={connecting || detecting}
         >
-          {connecting ? "Connecting..." : "Connect"}
+          {connecting ? t("connect.connecting") : t("connect.connect")}
         </Button>
         <Button
           size="sm"
@@ -161,9 +158,13 @@ export function GitHubConnectBanner({
           onClick={handleDismiss}
           disabled={connecting}
         >
-          Dismiss
+          {t("connect.dismiss")}
         </Button>
-        {detecting && <span className="text-xs text-muted-foreground">Detecting remote...</span>}
+        {detecting && (
+          <span className="text-xs text-muted-foreground">
+            {t("connect.detecting")}
+          </span>
+        )}
       </div>
       {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
     </div>
