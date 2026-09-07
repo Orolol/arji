@@ -86,12 +86,14 @@ const resolutionMocks = vi.hoisted(() => ({
     namedAgentId: null as string | null,
     name: null as string | null,
     model: null as string | null,
+    compositeAgentId: null as string | null,
   })),
   resolveAgentForDispatch: vi.fn(async () => ({
     provider: "claude-code",
     namedAgentId: null as string | null,
     name: null as string | null,
     model: null as string | null,
+    compositeAgentId: null as string | null,
   })),
   pickAlternativeReviewProvider: vi.fn(async () => "codex"),
 }));
@@ -152,7 +154,13 @@ vi.mock("@/lib/agent-config/prompts", () => ({
   resolveAgentPrompt: vi.fn().mockResolvedValue("system prompt"),
 }));
 
-vi.mock("@/lib/agent-config/agent-resolution", () => ({
+// PARTIAL mock: only the two entry-point resolvers are substituted, so the
+// composite rank arithmetic under test runs for real against the test
+// database rather than against a stub of itself.
+vi.mock("@/lib/agent-config/agent-resolution", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("@/lib/agent-config/agent-resolution")
+  >()),
   resolveAgentByNamedId: resolutionMocks.resolveAgentByNamedId,
   resolveAgentForDispatch: resolutionMocks.resolveAgentForDispatch,
 }));
@@ -189,15 +197,14 @@ const {
   ticketComments,
   ticketActivityLog,
   notifications,
-  settings,
+  namedAgents,
+  compositeAgentMembers,
 } = await import("@/lib/db/schema");
 const { POST: epicBuildPost } = await import(
   "@/app/api/projects/[projectId]/epics/[epicId]/build/route"
 );
 const { pipelineRegistry } = await import("@/lib/pipeline");
-const { PIPELINE_REASONS, pipelineMaxAttemptsSettingKey } = await import(
-  "@/lib/pipeline/constants"
-);
+const { PIPELINE_REASONS } = await import("@/lib/pipeline/constants");
 const { PIPELINE_FIX_INSTRUCTIONS_SECTION } = await import(
   "@/lib/pipeline/stages"
 );
@@ -445,12 +452,14 @@ beforeEach(() => {
     namedAgentId: null,
     name: null,
     model: null,
+    compositeAgentId: null,
   });
   resolutionMocks.resolveAgentForDispatch.mockResolvedValue({
     provider: "claude-code",
     namedAgentId: null,
     name: null,
     model: null,
+    compositeAgentId: null,
   });
   resolutionMocks.pickAlternativeReviewProvider.mockResolvedValue("codex");
 });
@@ -727,16 +736,11 @@ describe("pipeline e2e — the structured submit_findings verdict decides", () =
 /* ------------------------------------------------------------------ */
 
 describe("pipeline e2e — build failure ladder and forensic hand-off", () => {
-  it("fail → resume retry → fail → escalated provider → fail → forensic comment, run failed", async () => {
+  it("fail → resume retry → fail → forensic comment, run failed (SIMPLE agent, never switched)", async () => {
     const { projectId, epicId } = seed();
-    // Per-project attempt cap 3 (scoped key so other tests keep the default).
-    db.insert(settings)
-      .values({ key: pipelineMaxAttemptsSettingKey(projectId), value: "3" })
-      .run();
 
     scriptRun("build-1", cliFail("npm test exploded"));
     scriptRun("build-2", cliFail("still exploding"));
-    scriptRun("build-3", cliFail("codex also failed"));
     scriptRun(
       "forensic",
       cliOk(
@@ -752,17 +756,16 @@ describe("pipeline e2e — build failure ladder and forensic hand-off", () => {
 
     expect(run).toMatchObject({
       state: "failed",
-      reason: "stage build failed after 3 attempts",
+      reason: "stage build failed after 2 attempts",
     });
-    expect(run.sessionIds).toHaveLength(4);
+    expect(run.sessionIds).toHaveLength(3);
 
-    // Attempt cap respected: exactly three build sessions, all failed.
     const sessions = projectSessions(projectId);
     const buildSessions = sessions.filter((s) => s.agentType === "build");
-    expect(buildSessions).toHaveLength(3);
+    expect(buildSessions).toHaveLength(2);
     for (const s of buildSessions) expect(s.status).toBe("failed");
 
-    // Attempt 2 resumed the dead attempt on the same provider.
+    // Attempt 2 resumed the dead attempt on the SAME agent and provider.
     const buildRow = sessionRow(buildSessionId);
     const attempt2 = cliState.starts[1];
     expect(attempt2.label).toBe("build-2");
@@ -772,26 +775,13 @@ describe("pipeline e2e — build failure ladder and forensic hand-off", () => {
       resumeSession: true,
     });
 
-    // Attempt 3 escalated: fresh session on the alternative provider, no
-    // named agent, no model, no resume (codex cannot resume).
+    // AND NOTHING SWITCHED. The alternative-provider picker is no longer an
+    // escalator; the ladder for a simple agent is that agent, twice.
     expect(
       resolutionMocks.pickAlternativeReviewProvider
-    ).toHaveBeenCalledWith("claude-code");
-    const attempt3 = cliState.starts[2];
-    expect(attempt3.label).toBe("build-3");
-    expect(attempt3.provider).toBe("codex");
-    expect(attempt3.opts.resumeSession).toBe(false);
-    expect(attempt3.opts.cliSessionId).toBeUndefined();
-    expect(sessionRow(attempt3.sessionId)).toMatchObject({
-      provider: "codex",
-      namedAgentId: null,
-      model: null,
-    });
+    ).not.toHaveBeenCalled();
 
-    // Forensic: dispatched on the LAST dead session, ticket-free row (no
-    // epicId → the concurrency guards keep the ticket re-dispatchable),
-    // diagnostic posted as an agent comment.
-    const forensicStart = cliState.starts[3];
+    const forensicStart = cliState.starts[2];
     expect(forensicStart.label).toBe("forensic");
     const forensicRow = sessionRow(forensicStart.sessionId);
     expect(forensicRow).toMatchObject({
@@ -800,7 +790,7 @@ describe("pipeline e2e — build failure ladder and forensic hand-off", () => {
       epicId: null,
       status: "completed",
     });
-    expect(forensicRow.prompt).toContain("codex also failed");
+    expect(forensicRow.prompt).toContain("still exploding");
     expect(forensicRow.prompt).toContain("Token auth epic");
 
     const comments = db
@@ -815,20 +805,109 @@ describe("pipeline e2e — build failure ladder and forensic hand-off", () => {
     expect(diagnostic!.content).toContain("Probable root cause");
     expect(diagnostic!.agentSessionId).toBe(forensicStart.sessionId);
 
-    // The story: dispatch → pipeline start → retry (resume) → retry
-    // (escalation) → stage failure → forensic diagnostic.
     expect(epicReasons(epicId)).toEqual([
       "Build agent started",
       PIPELINE_REASONS.started,
       "Build failed; ticket held in in_progress: npm test exploded",
-      PIPELINE_REASONS.retry("build", 2, 3),
+      PIPELINE_REASONS.retry("build", 2, 2),
       "Build agent started",
       "Build failed; ticket held in in_progress: still exploding",
-      PIPELINE_REASONS.retry("build", 3, 3),
+      PIPELINE_REASONS.failedStage("build", 2),
+      PIPELINE_REASONS.forensic,
+    ]);
+  });
+
+  it("fail → next composite member → fail → forensic, with the rank-down traced", async () => {
+    const { projectId, epicId } = seed();
+
+    // A two-member composite: the LIST is the attempt budget, so
+    // `pipeline_max_attempts` (2 by default, and untouched here) no longer
+    // has anything to say about the agent switch.
+    const compositeId = `composite-${epicId}`;
+    const firstId = `member-1-${epicId}`;
+    const secondId = `member-2-${epicId}`;
+    db.insert(namedAgents)
+      .values([
+        {
+          id: firstId,
+          name: "First builder",
+          provider: "claude-code",
+          model: "claude-sonnet-4-6",
+        },
+        {
+          id: secondId,
+          name: "Second builder",
+          provider: "codex",
+          model: "gpt-5",
+        },
+        {
+          id: compositeId,
+          name: "Builder ladder",
+          provider: "composite",
+          model: "",
+          kind: "composite",
+        },
+      ])
+      .run();
+    db.insert(compositeAgentMembers)
+      .values([
+        { id: `${compositeId}-m1`, compositeId, memberId: firstId, position: 0 },
+        { id: `${compositeId}-m2`, compositeId, memberId: secondId, position: 1 },
+      ])
+      .run();
+
+    // What every caller sees for this composite: rank 0, already unfolded.
+    resolutionMocks.resolveAgentByNamedId.mockReturnValue({
+      provider: "claude-code",
+      namedAgentId: firstId,
+      name: "First builder",
+      model: "claude-sonnet-4-6",
+      compositeAgentId: compositeId,
+    });
+
+    scriptRun("build-1", cliFail("first builder exploded"));
+    scriptRun("build-2", cliFail("second builder exploded too"));
+    scriptRun("forensic", cliOk("**Probable root cause**\n\nA broken lockfile."));
+
+    const { runId } = await dispatchPipelineBuild(projectId, epicId);
+    const run = await waitForTerminalRun(runId);
+
+    expect(run).toMatchObject({
+      state: "failed",
+      reason: "stage build failed after 2 attempts",
+    });
+
+    // Attempt 2 ran the SECOND member — a different agent on a different
+    // provider — and started fresh, because a composite never resumes.
+    const attempt2 = cliState.starts[1];
+    expect(attempt2.label).toBe("build-2");
+    expect(attempt2.provider).toBe("codex");
+    expect(attempt2.opts.resumeSession).toBe(false);
+    expect(sessionRow(attempt2.sessionId)).toMatchObject({
+      provider: "codex",
+      namedAgentId: secondId,
+      namedAgentName: "Second builder",
+      // The list that dispatched, next to the member that ran.
+      compositeAgentId: compositeId,
+    });
+
+    // The descent is journalled naming BOTH ends and the reason.
+    expect(epicReasons(epicId)).toEqual([
       "Build agent started",
-      PIPELINE_REASONS.escalation("build", "codex"),
-      "Build failed; ticket held in in_progress: codex also failed",
-      PIPELINE_REASONS.failedStage("build", 3),
+      PIPELINE_REASONS.started,
+      "Build failed; ticket held in in_progress: first builder exploded",
+      PIPELINE_REASONS.retry("build", 2, 2),
+      "Build agent started",
+      PIPELINE_REASONS.compositeRankDown(
+        "build",
+        "First builder",
+        "Second builder",
+        "the session failed",
+        2,
+        2
+      ),
+      "Build failed; ticket held in in_progress: second builder exploded too",
+      PIPELINE_REASONS.failedStage("build", 2),
       PIPELINE_REASONS.forensic,
     ]);
   });

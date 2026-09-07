@@ -1,3 +1,4 @@
+import { withAgentResolutionErrors } from "@/lib/api/agent-resolution-response";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import {
@@ -60,7 +61,7 @@ export async function GET(
   return NextResponse.json({ data: result });
 }
 
-export async function POST(
+export const POST = withAgentResolutionErrors(async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -230,6 +231,7 @@ ${ticketContext}
         agentType: "release_notes",
         namedAgentName: resolvedAgent.name || null,
         namedAgentId: resolvedAgent.namedAgentId || null,
+        compositeAgentId: resolvedAgent.compositeAgentId ?? null,
         model: resolvedAgent.model || null,
         createdAt: now,
       });
@@ -491,4 +493,4 @@ ${ticketContext}
   }
 
   return NextResponse.json({ data: payload }, { status: 201 });
-}
+});

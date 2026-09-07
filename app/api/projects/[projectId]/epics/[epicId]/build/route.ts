@@ -1,3 +1,4 @@
+import { withAgentResolutionErrors } from "@/lib/api/agent-resolution-response";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import {
@@ -59,6 +60,7 @@ import {
 import {
   finalizeBuildTerminalOutcome,
   resolveBuildSessionResult,
+  SILENT_BUILD_ERROR,
   transitionBuildStarted,
   WorkflowTransitionError,
 } from "@/lib/workflow/automatic-transitions";
@@ -74,7 +76,7 @@ import {
 
 type Params = { params: Promise<{ projectId: string; epicId: string }> };
 
-export async function POST(request: NextRequest, { params }: Params) {
+export const POST = withAgentResolutionErrors(async function POST(request: NextRequest, { params }: Params) {
   const { projectId, epicId } = await params;
   const body = await request.json().catch(() => ({}));
   const ciAutofix =
@@ -317,6 +319,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     worktreePath,
     cliSessionId,
     namedAgentId: resolvedAgent.namedAgentId ?? null,
+    compositeAgentId: resolvedAgent.compositeAgentId ?? null,
     agentType: "build",
     namedAgentName: resolvedAgent.name || null,
     model: resolvedAgent.model || null,
@@ -390,7 +393,13 @@ export async function POST(request: NextRequest, { params }: Params) {
           `branch ${branchName} carries an unpushed fix for head ${ciAutofix.headSha.slice(0, 12)} and requires a manual push`
         : undefined,
     });
-    if (terminal.kind !== "failed" && terminal.kind !== "refused") {
+    // `silent` joins the failures: nothing was delivered, so the desk must
+    // not light up as if a build had landed.
+    if (
+      terminal.kind !== "failed" &&
+      terminal.kind !== "refused" &&
+      terminal.kind !== "silent"
+    ) {
       emitSessionCompleted(projectId, epicId, sessionId);
     } else {
       emitSessionFailed(
@@ -399,6 +408,8 @@ export async function POST(request: NextRequest, { params }: Params) {
         sessionId,
         terminal.kind === "refused"
           ? terminal.error
+          : terminal.kind === "silent"
+          ? SILENT_BUILD_ERROR
           : result?.error || "Build failed",
       );
     }
@@ -496,4 +507,4 @@ export async function POST(request: NextRequest, { params }: Params) {
       ...(ciAutofix ? { ciAutofix: { launched: true } } : {}),
     },
   });
-}
+});

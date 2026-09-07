@@ -36,6 +36,9 @@ describe("Agent assignment resolver", () => {
     const { resolveAgent } = await import("@/lib/agent-config/agent-resolution");
     dbMockState.getQueue = [
       { provider: "codex", namedAgentId: null },
+      // resolveAgent() probes the designated default composite — one
+      // settings read — before the seeded catch-all agent.
+      null, // no designated default composite
       {
         id: "seeded-agent",
         name: "Claude Code",
@@ -160,7 +163,9 @@ describe("Agent assignment resolver", () => {
 
       // Same DB state, and resolveAgent still answers — which is exactly why
       // its answer cannot be read as evidence of a choice.
-      dbMockState.getQueue = [null, null, seeded];
+      // The third null is the designated-default-composite probe
+      // resolveAgent() makes before the seeded catch-all agent.
+      dbMockState.getQueue = [null, null, null, seeded];
       expect(await resolveAgent("chat", "proj-1")).toMatchObject({
         provider: "claude-code",
         namedAgentId: "seeded-agent",

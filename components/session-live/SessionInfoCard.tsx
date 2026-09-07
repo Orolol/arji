@@ -190,6 +190,15 @@ export function SessionInfoCard({
           <TextValue>{providerLabel}</TextValue>
         </KeyValueRow>
 
+        {/* Only when a composite dispatched. A row reading "—" on every
+            simple-agent run would add a permanent blank to the card for the
+            sake of a fact that has no value there. */}
+        {session.compositeAgentName ? (
+          <KeyValueRow label={t("info.rows.composite")}>
+            <TextValue>{session.compositeAgentName}</TextValue>
+          </KeyValueRow>
+        ) : null}
+
         <KeyValueRow label={t("info.rows.model")}>
           <Mono size={11.5}>{session.model ?? "—"}</Mono>
         </KeyValueRow>

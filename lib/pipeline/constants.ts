@@ -201,10 +201,22 @@ export const PIPELINE_REASONS = {
     `Pipeline stage: fix started (cycle ${cycle}/${max})`,
   retry: (stage: string, attempt: number, max: number) =>
     `Pipeline retry: ${stage} attempt ${attempt}/${max}`,
-  effortEscalation: (stage: string, namedAgent: string) =>
-    `Pipeline effort escalation: ${stage} retried with ${namedAgent}`,
-  escalation: (stage: string, provider: string) =>
-    `Pipeline escalation: ${stage} retried on ${provider}`,
+  /**
+   * One rank down a composite agent.
+   *
+   * Names BOTH ends and the reason: the reader has to be able to see which
+   * agent was abandoned, which one replaced it and what it was abandoned for,
+   * without opening the dead session.
+   */
+  compositeRankDown: (
+    stage: string,
+    from: string,
+    to: string,
+    reason: string,
+    attempt: number,
+    budget: number
+  ) =>
+    `Pipeline composite fallback: ${stage} moved from ${from} to ${to} (attempt ${attempt}/${budget}) because ${reason}`,
   pausedQuestion: (stage: string) =>
     `Pipeline paused: agent asked a question (${stage})`,
   cancelled: "Pipeline stopped: session cancelled by user",

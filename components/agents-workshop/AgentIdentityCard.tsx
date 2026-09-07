@@ -1,17 +1,9 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useId } from "react";
 import { useTranslations } from "next-intl";
 
-import {
-  FieldKicker,
-  SegmentedControl,
-  SelectPill,
-  SurfaceCard,
-  type SegmentedControlOption,
-} from "@/components/piscine";
-import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
-import type { NamedAgent } from "@/hooks/useAgentConfig";
+import { FieldKicker, SurfaceCard } from "@/components/piscine";
 import {
   PROVIDER_LABELS,
   type AgentProvider,
@@ -21,94 +13,48 @@ import { CliDropdown, providerAvailabilityHintKey } from "./CliDropdown";
 import { FieldBoxInput } from "./FieldBox";
 
 /**
- * The identity row: NAME · CLI · MODEL · RETRY ESCALATION.
+ * The identity row: NAME · CLI · MODEL.
  *
  * Not a `StrataBand` — the frame gives this row the plain white card ground
  * with no label line, so it is a `SurfaceCard` at band radius.
  *
- * RETRY ESCALATION HAS ONLY TWO STORED STATES. The ladder is deterministic:
- * attempt 1 as configured, attempt 2 resumes, attempt 3 uses `escalatesTo`
- * when one is set, and the provider escalation ALWAYS happens (attempt 3
- * without a stronger model, attempt 4 with one). "Other CLI" is therefore not
- * a choice anyone can make — it is rendered disabled with a hint rather than
- * hidden, because hiding it would suggest it does not happen.
+ * THERE IS NO RETRY CONTROL HERE ANY MORE. A simple agent is retried as
+ * itself, full stop; fallback to a different agent is what a COMPOSITE is
+ * for, and it is configured on the composite rather than as an edge hanging
+ * off each simple agent. The old "retry escalation" segment offered a choice
+ * that the default attempt cap of 2 meant the pipeline never reached.
  */
-type RetryMode = "none" | "stronger" | "other-cli";
-
 export interface AgentIdentityCardProps {
-  agentId: string;
-  agents: NamedAgent[];
   name: string;
   provider: AgentProvider;
   model: string;
-  escalatesTo: string | null;
   availability: Record<AgentProvider, boolean>;
   availabilityLoading: boolean;
   disabled: boolean;
   onNameChange: (value: string) => void;
   onProviderChange: (value: AgentProvider) => void;
   onModelChange: (value: string) => void;
-  onEscalatesToChange: (value: string | null) => void;
 }
 
 export function AgentIdentityCard({
-  agentId,
-  agents,
   name,
   provider,
   model,
-  escalatesTo,
   availability,
   availabilityLoading,
   disabled,
   onNameChange,
   onProviderChange,
   onModelChange,
-  onEscalatesToChange,
 }: AgentIdentityCardProps) {
+  const uid = useId();
   const t = useTranslations("AgentsWorkshop");
   // Namespace-less, for the availability hint's KEY REFERENCE.
   const tKey = useTranslations();
-  const uid = useId();
-  // "Stronger model" is chosen before a target is picked; the segment must
-  // stay lit while the menu is open. Remounted per agent by the caller's key.
-  const [strongerPending, setStrongerPending] = useState(false);
-
-  // The candidate filter is the EDITED provider, not the stored one — the
-  // server rejects a cross-provider edge outright.
-  const candidates = agents.filter(
-    (candidate) => candidate.id !== agentId && candidate.provider === provider,
-  );
-
-  const retryMode: RetryMode =
-    escalatesTo || strongerPending ? "stronger" : "none";
-
-  const retryOptions: SegmentedControlOption<RetryMode>[] = [
-    { value: "none", label: t("identity.retryNone"), flex: 1 },
-    {
-      value: "stronger",
-      label: t("identity.retryStronger"),
-      flex: 1.4,
-      disabled: candidates.length === 0,
-      hint:
-        candidates.length === 0
-          ? t("identity.retryStrongerHint")
-          : undefined,
-    },
-    {
-      value: "other-cli",
-      label: t("identity.retryOtherCli"),
-      flex: 1.2,
-      disabled: true,
-      hint: t("identity.retryOtherCliHint"),
-    },
-  ];
-
-  const target = candidates.find((candidate) => candidate.id === escalatesTo);
 
   return (
     <SurfaceCard className="shrink-0 rounded-[14px] px-[18px] py-[14px]">
-      {/* Wraps: the four fields need ~800px side by side, so below `lg` they
+      {/* Wraps: the three fields need ~700px side by side, so below `lg` they
           reflow onto as many lines as the viewport affords instead of
           pushing the model field past the right edge. */}
       <div className="flex flex-wrap items-end gap-x-[22px] gap-y-[14px]">
@@ -163,51 +109,6 @@ export function AgentIdentityCard({
             placeholder={t("common.cliDefault")}
             disabled={disabled}
           />
-        </div>
-
-        <div className="flex min-w-[240px] flex-1 flex-col gap-[5px]">
-          <FieldKicker stratum="card" size={10}>
-            {t("identity.retryKicker")}
-          </FieldKicker>
-          <div className="flex items-center gap-2">
-            <SegmentedControl<RetryMode>
-              options={retryOptions}
-              value={retryMode}
-              onChange={(next) => {
-                if (disabled) return;
-                if (next === "none") {
-                  setStrongerPending(false);
-                  onEscalatesToChange(null);
-                  return;
-                }
-                if (next === "stronger") setStrongerPending(true);
-              }}
-              chrome="bordered"
-              size="md"
-              wrap
-              className="min-w-0 flex-1 self-stretch"
-            />
-            {retryMode === "stronger" && candidates.length > 0 ? (
-              <SelectPill
-                tone="ink"
-                fill="card"
-                disabled={disabled}
-                label={target ? target.name : t("identity.chooseAgent")}
-              >
-                {candidates.map((candidate) => (
-                  <DropdownMenuItem
-                    key={candidate.id}
-                    onSelect={() => onEscalatesToChange(candidate.id)}
-                  >
-                    {t("identity.candidate", {
-                      name: candidate.name,
-                      model: candidate.model || t("common.cliDefault"),
-                    })}
-                  </DropdownMenuItem>
-                ))}
-              </SelectPill>
-            ) : null}
-          </div>
         </div>
       </div>
     </SurfaceCard>

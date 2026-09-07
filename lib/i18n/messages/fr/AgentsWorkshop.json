@@ -1,8 +1,4 @@
 {
-  "identity": {
-    "retryStrongerHint": "aucun autre agent n'utilise ce CLI",
-    "retryOtherCliHint": "toujours tenté en dernier recours — tentative 3 sans modèle plus fort, tentative 4 avec."
-  },
   "numbers": {
     "meta": "14 derniers jours, tous projets",
     "metaEmpty": "14 derniers jours, tous projets — aucun run sur la période",

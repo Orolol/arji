@@ -190,6 +190,18 @@ describe("0046_core_table_indexes", () => {
         .run(MIGRATION_WHEN);
       // Later ADD COLUMN migrations must be rewound with the ledger.
       conn.exec("ALTER TABLE agent_sessions DROP COLUMN refinement_actions");
+      // 0053/0055 (composite agents). Dropped for the same reason as every
+      // column above: the replay re-adds them, and an ADD COLUMN is not a
+      // no-op the second time.
+      conn.exec("ALTER TABLE named_agents DROP COLUMN kind");
+      conn.exec("ALTER TABLE agent_sessions DROP COLUMN composite_agent_id");
+      // 0054 DROPS a column, so rewinding past it means putting that column
+      // BACK — the inverse of the drops above. The rewind lands after
+      // 0039 (which adds it), so nothing else re-creates it and the replayed
+      // DROP would fail on a column that is not there.
+      conn.exec(
+        "ALTER TABLE named_agents ADD COLUMN escalates_to text REFERENCES named_agents(id) ON DELETE SET NULL"
+      );
 
       expect(() => initDb(conn)).not.toThrow();
 

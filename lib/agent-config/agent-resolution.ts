@@ -1,13 +1,23 @@
+import { CompositeAgentUnusableError } from "./resolution-errors";
+export { CompositeAgentUnusableError } from "./resolution-errors";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { agentProviderDefaults, namedAgents } from "@/lib/db/schema";
 import {
   AGENT_TYPES,
+  COMPOSITE_AGENT_KIND,
+  COMPOSITE_AGENT_PROVIDER,
   FALLBACK_PROVIDER,
+  SIMPLE_AGENT_KIND,
   isAgentProvider,
   type AgentProvider,
   type AgentType,
+  type NamedAgentKind,
 } from "./constants";
+import {
+  listCompositeMembers,
+  readDefaultCompositeAgentId,
+} from "./composite-agents";
 import {
   parseStoredProviderOptions,
   type NamedAgentCliOptions,
@@ -19,8 +29,16 @@ export type AgentResolveSource = ProviderSource | "override";
 export interface NamedAgentLite {
   id: string;
   name: string;
+  /**
+   * A composite carries the documented `COMPOSITE_AGENT_PROVIDER` sentinel
+   * here, exactly as `NamedAgentRecord` does — it owns no CLI. Running its
+   * stored provider through `normalizeProvider` used to report it as
+   * `claude-code`, so the assignment routes described a composite as a
+   * specific CLI it does not have. Readers must branch on `kind` first.
+   */
   provider: AgentProvider;
   model: string;
+  kind: NamedAgentKind;
 }
 
 export interface ResolvedAgentProvider {
@@ -96,16 +114,27 @@ function mapNamedAgentsById(namedAgentIds: Array<string | null | undefined>): Ma
       name: namedAgents.name,
       provider: namedAgents.provider,
       model: namedAgents.model,
+      kind: namedAgents.kind,
     })
     .from(namedAgents)
     .all()
     .filter((row) => idSet.has(row.id))
-    .map((row) => ({
-      id: row.id,
-      name: row.name,
-      provider: normalizeProvider(row.provider),
-      model: row.model,
-    }));
+    .map((row) => {
+      const isComposite = row.kind === COMPOSITE_AGENT_KIND;
+      return {
+        id: row.id,
+        name: row.name,
+        // The sentinel, NOT the fallback: `normalizeProvider` rejects
+        // "composite" and would answer `claude-code`.
+        provider: isComposite
+          ? (COMPOSITE_AGENT_PROVIDER as unknown as AgentProvider)
+          : normalizeProvider(row.provider),
+        model: isComposite ? "" : row.model,
+        kind: (isComposite
+          ? COMPOSITE_AGENT_KIND
+          : SIMPLE_AGENT_KIND) as NamedAgentKind,
+      };
+    });
 
   const byId = new Map<string, NamedAgentLite>();
   for (const row of rows) {
@@ -267,6 +296,27 @@ export interface ResolvedAgent {
    * segregation was evaluated (even when no redirect happened).
    */
   builderProvider?: AgentProvider;
+  /**
+   * The COMPOSITE this resolution unfolded, when the id it was given named
+   * one. `namedAgentId` above is then the MEMBER that will actually run —
+   * the split that keeps reliability statistics measured per real agent
+   * (`agent_sessions.composite_agent_id` persists this).
+   */
+  compositeAgentId?: string | null;
+  /** Rank of the unfolded member within its composite; 0-based. */
+  compositeRank?: number;
+  /** Human name of the unfolded member's composite, for activity traces. */
+  compositeName?: string;
+}
+
+/** Outcome of unfolding a composite at one rank of the retry ladder. */
+export interface CompositeRankResolution {
+  /** The member to run, or null when the rank is past the last member. */
+  resolved: ResolvedAgent | null;
+  /** How many members the composite has; the stage's attempt budget. */
+  memberCount: number;
+  /** True when `rank` is past the end — the list is spent, not broken. */
+  exhausted: boolean;
 }
 
 /**
@@ -278,6 +328,172 @@ export interface AgentResolutionContext {
   projectId: string;
   epicId?: string;
   storyId?: string;
+}
+
+/* ------------------------------------------------------------------ */
+/* Composite unfolding                                                 */
+/* ------------------------------------------------------------------ */
+
+interface NamedAgentRow {
+  id: string;
+  name: string;
+  provider: string;
+  model: string;
+  options: string;
+  kind: string;
+}
+
+function readNamedAgentRow(agentId: string): NamedAgentRow | null {
+  return (
+    db
+      .select({
+        id: namedAgents.id,
+        name: namedAgents.name,
+        provider: namedAgents.provider,
+        model: namedAgents.model,
+        options: namedAgents.options,
+        kind: namedAgents.kind,
+      })
+      .from(namedAgents)
+      .where(eq(namedAgents.id, agentId))
+      .get() ?? null
+  );
+}
+
+/** A simple agent row as the dispatch layer wants it. */
+function toResolvedAgent(row: NamedAgentRow): ResolvedAgent {
+  return {
+    provider: normalizeProvider(row.provider),
+    model: row.model,
+    name: row.name,
+    namedAgentId: row.id,
+    cliOptions: parseStoredProviderOptions(row.provider, row.options),
+  };
+}
+
+/**
+ * Unfolds a composite to the member at `rank`, or reports the list spent.
+ *
+ * This is the whole of the fallback mechanism: rank 0 is the first member,
+ * and each failed attempt asks for the next rank. The member count IS the
+ * attempt budget, which is why `memberCount` travels with every answer —
+ * `pipeline_max_attempts` no longer governs an agent switch.
+ *
+ * An EMPTY composite throws rather than returning `exhausted`. The two states
+ * are different questions: "the ladder is spent" is a normal end to a run,
+ * while "this agent can never run anything" is a misconfiguration that must
+ * not be mistaken for one.
+ */
+export function resolveCompositeMemberAtRank(
+  compositeId: string,
+  rank: number,
+): CompositeRankResolution {
+  const row = readNamedAgentRow(compositeId);
+  if (!row || row.kind !== COMPOSITE_AGENT_KIND) {
+    throw new Error(`Not a composite agent: ${compositeId}`);
+  }
+
+  const members = listCompositeMembers(compositeId);
+  if (members.length === 0) {
+    throw new CompositeAgentUnusableError(compositeId, row.name);
+  }
+
+  if (rank < 0 || rank >= members.length) {
+    return { resolved: null, memberCount: members.length, exhausted: true };
+  }
+
+  const member = members[rank];
+  const memberRow = readNamedAgentRow(member.id);
+  // The membership row cascades with its agent, so a missing row here means a
+  // database edited outside Arij; degrade to the joined columns rather than
+  // pretending the rank does not exist.
+  const resolved: ResolvedAgent = memberRow
+    ? toResolvedAgent(memberRow)
+    : {
+        provider: member.provider,
+        model: member.model,
+        name: member.name,
+        namedAgentId: member.id,
+      };
+
+  return {
+    resolved: {
+      ...resolved,
+      compositeAgentId: compositeId,
+      compositeRank: rank,
+      compositeName: row.name,
+    },
+    memberCount: members.length,
+    exhausted: false,
+  };
+}
+
+/** Member count of a composite, or null when `agentId` is not one. */
+export function readCompositeMemberCount(
+  agentId: string | null | undefined,
+): number | null {
+  if (!agentId) return null;
+  const row = readNamedAgentRow(agentId);
+  if (!row || row.kind !== COMPOSITE_AGENT_KIND) return null;
+  return listCompositeMembers(agentId).length;
+}
+
+/**
+ * Resolves one named-agent id, unfolding a composite to its first member.
+ *
+ * Every caller that holds an id — an explicit dispatch choice, a role
+ * assignment, a conversation, the builtin fallback — goes through here, which
+ * is what makes a composite assignable everywhere without a single call site
+ * learning that composites exist.
+ */
+function resolveNamedAgentId(agentId: string): ResolvedAgent | null {
+  const row = readNamedAgentRow(agentId);
+  if (!row) return null;
+  if (row.kind === COMPOSITE_AGENT_KIND) {
+    // rank 0 — the first member of the list. Throws when the composite was
+    // emptied by member deletion (see CompositeAgentUnusableError).
+    return resolveCompositeMemberAtRank(agentId, 0).resolved;
+  }
+  return toResolvedAgent(row);
+}
+
+/**
+ * `resolveNamedAgentId` for the RESOLUTION CHAIN, where an unusable composite
+ * must not be fatal.
+ *
+ * The difference is who chose the agent. When a caller NAMES a composite for
+ * a dispatch, an emptied one is a refusal it has to hear — resolving to some
+ * arbitrary other agent would run the work on something the user did not ask
+ * for. But a role assignment and the designated default are *background*
+ * links in a chain that already ends in a built-in fallback: the user set
+ * them once and then deleted a simple agent from the roster, which cascades
+ * `composite_agent_members` and can empty the list with no warning anywhere.
+ * Throwing there takes down every unassigned resolution in the app — build
+ * routes (a 500, not a typed 4xx), the chat stream, night runs, Full Auto and
+ * the scheduled routines, none of which catch it.
+ *
+ * So the chain treats an emptied composite exactly as it already treats a
+ * deleted agent: not an assignment, continue to the next link. The trace goes
+ * to the server log, because a silent skip here would be the "resolved
+ * configuration is invisible" trap.
+ */
+function resolveNamedAgentIdInChain(
+  agentId: string,
+  where: string
+): ResolvedAgent | null {
+  try {
+    return resolveNamedAgentId(agentId);
+  } catch (error) {
+    if (error instanceof CompositeAgentUnusableError) {
+      console.warn(
+        `[agent-config] ${where} points at composite "${error.compositeName}" ` +
+          `(${error.compositeAgentId}), which has no members left; falling through ` +
+          `to the next link of the resolution chain.`
+      );
+      return null;
+    }
+    throw error;
+  }
 }
 
 /**
@@ -305,7 +521,22 @@ export function resolveAgent(
     return { ...taskDefault };
   }
 
-  // Builtin fallback — resolve via global default named agent
+  // Builtin fallback. A DESIGNATED DEFAULT COMPOSITE outranks the seeded
+  // catch-all agent: "Default agent" in the picker has always meant "the
+  // server decides", and this is the user telling the server what to decide.
+  // It sits BELOW the historical task defaults above on purpose — routing
+  // title generation through a build ladder would make unconfigured
+  // background work more expensive, which is exactly what those defaults
+  // exist to prevent.
+  const defaultCompositeId = readDefaultCompositeAgentId();
+  if (defaultCompositeId) {
+    const resolved = resolveNamedAgentIdInChain(
+      defaultCompositeId,
+      "the designated default agent"
+    );
+    if (resolved) return resolved;
+  }
+
   const defaultAgent = db
     .select()
     .from(namedAgents)
@@ -400,21 +631,10 @@ export function resolveAgentByNamedId(
   namedAgentId?: string | null,
 ): ResolvedAgent {
   if (namedAgentId) {
-    const agent = db
-      .select()
-      .from(namedAgents)
-      .where(eq(namedAgents.id, namedAgentId))
-      .get();
-
-    if (agent) {
-      return {
-        provider: normalizeProvider(agent.provider),
-        model: agent.model,
-        name: agent.name,
-        namedAgentId: agent.id,
-        cliOptions: parseStoredProviderOptions(agent.provider, agent.options),
-      };
-    }
+    // A composite unfolds to its first member here — the caller neither knows
+    // nor needs to know that the id it holds names a list.
+    const resolved = resolveNamedAgentId(namedAgentId);
+    if (resolved) return resolved;
   }
 
   // Fall through to standard resolution (no provider override)
@@ -445,23 +665,12 @@ export async function resolveAgentForDispatch(
   namedAgentId?: string | null,
   context?: AgentResolutionContext
 ): Promise<ResolvedAgent> {
-  // 1. Explicit named-agent override — never segregated.
+  // 1. Explicit named-agent override — never segregated. A composite unfolds
+  //    to its first member, so an explicit composite choice still wins over
+  //    reviewer segregation exactly as an explicit simple choice does.
   if (namedAgentId) {
-    const agent = db
-      .select()
-      .from(namedAgents)
-      .where(eq(namedAgents.id, namedAgentId))
-      .get();
-
-    if (agent) {
-      return {
-        provider: normalizeProvider(agent.provider),
-        model: agent.model,
-        name: agent.name,
-        namedAgentId: agent.id,
-        cliOptions: parseStoredProviderOptions(agent.provider, agent.options),
-      };
-    }
+    const resolved = resolveNamedAgentId(namedAgentId);
+    if (resolved) return resolved;
   }
 
   // 2. Default resolution chain.
@@ -519,21 +728,16 @@ function resolveFromRow(row: {
   namedAgentId: string | null;
 }): ResolvedAgent | null {
   if (row.namedAgentId) {
-    const agent = db
-      .select()
-      .from(namedAgents)
-      .where(eq(namedAgents.id, row.namedAgentId))
-      .get();
-
-    if (agent) {
-      return {
-        provider: normalizeProvider(agent.provider),
-        model: agent.model,
-        name: agent.name,
-        namedAgentId: agent.id,
-        cliOptions: parseStoredProviderOptions(agent.provider, agent.options),
-      };
-    }
+    // A composite assigned to a role — at global or project scope — unfolds
+    // here to its first member, so `agent_provider_defaults` needed no
+    // schema change at all to accept one. An EMPTIED one falls through to the
+    // next link rather than throwing: same reasoning as the designated
+    // default, and the same cascade empties it.
+    const resolved = resolveNamedAgentIdInChain(
+      row.namedAgentId,
+      "a role assignment"
+    );
+    if (resolved) return resolved;
   }
 
   // A legacy CLI-only default (or a deleted agent) is not an assignment.

@@ -1,3 +1,4 @@
+import { withAgentResolutionErrors } from "@/lib/api/agent-resolution-response";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { agentSessions, namedAgents } from "@/lib/db/schema";
@@ -19,7 +20,7 @@ function normalizeProvider(value: string | null | undefined): ProviderType | nul
   return value && isAgentProvider(value) ? value : null;
 }
 
-export async function GET(request: NextRequest, { params }: Params) {
+export const GET = withAgentResolutionErrors(async function GET(request: NextRequest, { params }: Params) {
   const { projectId } = await params;
   const { searchParams } = new URL(request.url);
   const epicId = searchParams.get("epicId");
@@ -42,7 +43,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     resolvedNamedAgentId = resolved.namedAgentId ?? null;
   } else if (resolvedNamedAgentId) {
     const namedAgent = db
-      .select({ id: namedAgents.id, provider: namedAgents.provider })
+      .select({ id: namedAgents.id })
       .from(namedAgents)
       .where(eq(namedAgents.id, resolvedNamedAgentId))
       .get();
@@ -51,8 +52,11 @@ export async function GET(request: NextRequest, { params }: Params) {
       return NextResponse.json({ data: [] });
     }
 
-    resolvedProvider = normalizeProvider(namedAgent.provider);
-    resolvedNamedAgentId = namedAgent.id;
+    // Unfold the explicit choice even without a role filter. Reading the
+    // composite sentinel directly would drop the provider/member filters.
+    const resolved = resolveAgentByNamedId("build", projectId, namedAgent.id);
+    resolvedProvider = resolved.provider;
+    resolvedNamedAgentId = resolved.namedAgentId ?? null;
   }
 
   // A provider that cannot resume has nothing to offer. Listing its sessions
@@ -106,4 +110,4 @@ export async function GET(request: NextRequest, { params }: Params) {
     .all();
 
   return NextResponse.json({ data: sessions });
-}
+});

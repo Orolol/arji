@@ -5,7 +5,11 @@ import { useTranslations } from "next-intl";
 import { Loader2 } from "lucide-react";
 
 import { ScopeSwitcher } from "@/components/agents-workshop/ScopeSwitcher";
-import { sourceLabelKey } from "@/components/agents-workshop/agent-initials";
+import {
+  assignmentAgentSubLabel,
+  sourceLabelKey,
+  type AssignmentAgentCopy,
+} from "@/components/agents-workshop/agent-initials";
 import {
   BandHeader,
   Mono,
@@ -17,7 +21,6 @@ import { useAgentAssignments, useNamedAgents } from "@/hooks/useAgentConfig";
 import {
   AGENT_TYPES,
   AGENT_TYPE_LABELS,
-  PROVIDER_LABELS,
   type AgentType,
 } from "@/lib/agent-config/constants";
 
@@ -43,6 +46,17 @@ export function AssignmentsView({ projectId }: { projectId?: string }) {
   const t = useTranslations("AgentsWorkshop");
   // Namespace-less, for the KEY REFERENCES `agent-initials.ts` holds.
   const tKey = useTranslations();
+  /**
+   * The second line of an agent row: the phrases resolved here, composed by
+   * `assignmentAgentSubLabel` (pattern 3 of lib/i18n/catalogue.ts).
+   */
+  const agentCopy: AssignmentAgentCopy = {
+    compositeLadder: (ladder) => t("composite.ladder", { ladder }),
+    compositeEmpty: t("composite.ladderEmpty"),
+    simple: (provider, model) =>
+      t("assignments.agentMeta", { provider, model }),
+    cliDefaultModel: t("common.cliDefaultModel"),
+  };
   const [scope, setScope] = useState<"global" | "project">(
     projectId ? "project" : "global",
   );
@@ -160,11 +174,11 @@ export function AssignmentsView({ projectId }: { projectId?: string }) {
                     >
                       <span className="flex flex-col items-start">
                         <span>{agent.name}</span>
-                        <span className="text-xs text-muted-foreground">
-                          {t("assignments.agentMeta", {
-                            provider: PROVIDER_LABELS[agent.provider],
-                            model: agent.model || t("common.cliDefaultModel"),
-                          })}
+                        <span
+                          data-testid={`assignment-agent-sub-${agent.id}`}
+                          className="text-xs text-muted-foreground"
+                        >
+                          {assignmentAgentSubLabel(agent, agentCopy)}
                         </span>
                       </span>
                     </DropdownMenuItem>

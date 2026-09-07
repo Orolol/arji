@@ -19,12 +19,15 @@ import type {
 } from "@/hooks/useAgentConfig";
 import {
   AGENT_TYPE_LABELS,
-  PROVIDER_LABELS,
   type AgentType,
 } from "@/lib/agent-config/constants";
 import type { TranslationKey } from "@/lib/i18n/catalogue";
 
-import { sourceLabelKey } from "./agent-initials";
+import {
+  assignmentAgentSubLabel,
+  sourceLabelKey,
+  type AssignmentAgentCopy,
+} from "./agent-initials";
 
 /**
  * WHERE HE WORKS — the turquoise band, and the ONE band on this screen that
@@ -84,6 +87,17 @@ export function WhereHeWorksBand({
   // The second, namespace-less translator resolves the KEY REFERENCES the
   // module-scope tables above and in `agent-initials.ts` hold.
   const tKey = useTranslations();
+  /**
+   * The second line of an agent row: the phrases resolved here, composed by
+   * `assignmentAgentSubLabel` (pattern 3 of lib/i18n/catalogue.ts).
+   */
+  const agentCopy: AssignmentAgentCopy = {
+    compositeLadder: (ladder) => t("composite.ladder", { ladder }),
+    compositeEmpty: t("composite.ladderEmpty"),
+    simple: (provider, model) =>
+      t("assignments.agentMeta", { provider, model }),
+    cliDefaultModel: t("common.cliDefaultModel"),
+  };
   const [savingRole, setSavingRole] = useState<AgentType | null>(null);
   // A per-role map, never one shared string: one failing assignment must not
   // blank the message of another.
@@ -188,11 +202,11 @@ export function WhereHeWorksBand({
                       >
                         <span className="flex flex-col items-start">
                           <span>{agent.name}</span>
-                          <span className="text-xs text-muted-foreground">
-                            {t("assignments.agentMeta", {
-                              provider: PROVIDER_LABELS[agent.provider],
-                              model: agent.model || t("common.cliDefaultModel"),
-                            })}
+                          <span
+                            data-testid={`assignment-agent-sub-${agent.id}`}
+                            className="text-xs text-muted-foreground"
+                          >
+                            {assignmentAgentSubLabel(agent, agentCopy)}
                           </span>
                         </span>
                       </DropdownMenuItem>

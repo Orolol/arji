@@ -1,5 +1,6 @@
 import type { TranslationKey } from "@/lib/i18n/catalogue";
 import type { ProjectTone } from "@/lib/piscine/tokens";
+import { PROVIDER_LABELS } from "@/lib/agent-config/constants";
 
 /**
  * Two-letter roster-avatar label. Words first ("Opus Builder" → "OB"), falling
@@ -60,4 +61,56 @@ export function sourceLabelKey(
   source: "builtin" | "global" | "project",
 ): TranslationKey {
   return SOURCE_LABELS[source].labelKey;
+}
+
+/**
+ * The phrases the second line of an agent row is made of, already resolved by
+ * the caller's translator (`lib/i18n/catalogue.ts`, pattern 3) —
+ * `assignmentAgentSubLabel` composes, it does not hold copy.
+ */
+export interface AssignmentAgentCopy {
+  /** `AgentsWorkshop.composite.ladder` — the members in order. */
+  compositeLadder: (ladder: string) => string;
+  /** `AgentsWorkshop.composite.ladderEmpty`. */
+  compositeEmpty: string;
+  /** `AgentsWorkshop.assignments.agentMeta` — provider and model. */
+  simple: (provider: string, model: string) => string;
+  /** `AgentsWorkshop.common.cliDefaultModel` — the model when none is set. */
+  cliDefaultModel: string;
+}
+
+/**
+ * The second line of an agent row in the two ROLE-ASSIGNMENT pickers.
+ *
+ * A composite has no CLI and no model of its own — `named_agents.provider`
+ * holds the documented sentinel, and `PROVIDER_LABELS` (keyed on
+ * `ChatModeProvider`) has no entry for it. Rendering the simple-agent shape
+ * for one therefore printed an empty label followed by " · CLI default
+ * model": a blank provider and a claim about a CLI it does not have.
+ *
+ * A composite's ladder is what predicts its run, so that is what this shows,
+ * matching the "composite · N" marker the two dispatch pickers already use.
+ * Shared because both assignment surfaces render the identical row and this
+ * is exactly the kind of duplicated vocabulary that drifts.
+ */
+export function assignmentAgentSubLabel(
+  agent: {
+    kind?: "simple" | "composite";
+    provider: string;
+    model: string;
+    members?: Array<{ name: string }>;
+  },
+  copy: AssignmentAgentCopy,
+): string {
+  if (agent.kind === "composite") {
+    const members = agent.members ?? [];
+    if (members.length === 0) return copy.compositeEmpty;
+    return copy.compositeLadder(
+      members.map((member) => member.name).join(" → "),
+    );
+  }
+  const label =
+    (PROVIDER_LABELS as Record<string, string>)[agent.provider] ??
+    agent.provider;
+  return copy.simple(label, agent.model || copy.cliDefaultModel);
 }

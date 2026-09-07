@@ -1,6 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
+
 import {
   Select,
   SelectContent,
@@ -79,6 +80,9 @@ export function NamedAgentSelect({
   const t = useTranslations("Shared");
   const { agents, loading } = useNamedAgentsList();
   const reliability = useDispatchReliability(dispatchRole);
+  // Every branch shares a controlled value, including before the roster
+  // arrives. An empty string shows the placeholder when clearing is disabled.
+  const selectedValue = value || (allowClear ? NO_AGENT_VALUE : "");
   // Carried by every branch below: the loading and empty states render a
   // trigger too, and a picker that is only named once its agents arrive is
   // still an unlabeled combobox for the reader who reaches it first.
@@ -89,21 +93,14 @@ export function NamedAgentSelect({
     ...(ariaDescribedBy ? { "aria-describedby": ariaDescribedBy } : {}),
   };
 
-  if (loading) {
+  if (loading || agents.length === 0) {
+    const placeholder = loading
+      ? t("namedAgentSelect.loading")
+      : t("namedAgentSelect.empty");
     return (
-      <Select disabled>
+      <Select value={selectedValue} disabled>
         <SelectTrigger {...labelProps} className={className ?? "w-44 h-7 text-xs"}>
-          <SelectValue placeholder={t("namedAgentSelect.loading")} />
-        </SelectTrigger>
-      </Select>
-    );
-  }
-
-  if (agents.length === 0) {
-    return (
-      <Select disabled>
-        <SelectTrigger {...labelProps} className={className ?? "w-44 h-7 text-xs"}>
-          <SelectValue placeholder={t("namedAgentSelect.empty")} />
+          <SelectValue placeholder={placeholder}>{placeholder}</SelectValue>
         </SelectTrigger>
       </Select>
     );
@@ -111,7 +108,7 @@ export function NamedAgentSelect({
 
   return (
     <Select
-      value={value ?? (allowClear ? NO_AGENT_VALUE : undefined)}
+      value={selectedValue}
       onValueChange={(next) =>
         onChange(next === NO_AGENT_VALUE ? "" : next)
       }
@@ -127,13 +124,46 @@ export function NamedAgentSelect({
           </SelectItem>
         )}
         {agents.map((agent) => {
-          if (!dispatchRole) {
+          const isComposite = agent.kind === "composite";
+          // `?? []` for the same reason as in AgentSelectPill: the list is
+          // fetched, and an older payload must degrade rather than crash.
+          const members = agent.members ?? [];
+          // A COMPOSITE'S LADDER, in the row's title. The list is what
+          // predicts the run, and it is the whole difference between the two
+          // kinds of row.
+          const ladder = isComposite
+            ? members.map((member) => member.name).join(" → ") ||
+              t("composite.unusable")
+            : undefined;
+
+          const kindMark = isComposite ? (
+            <span
+              data-testid={`agent-kind-${agent.id}`}
+              className="shrink-0 font-mono text-[10px] uppercase tracking-[.06em] text-muted-foreground"
+            >
+              {members.length > 0
+                ? t("composite.count", { count: members.length })
+                : t("composite.empty")}
+            </span>
+          ) : null;
+
+          // NO RELIABILITY BADGE ON A COMPOSITE, and none invented. The
+          // aggregate groups by `agent_sessions.named_agent_id`, which records
+          // the MEMBER that ran and never the composite that dispatched it, so
+          // a composite has no row at all — a badge here would be a fabricated
+          // em-dash presented as a measurement. It carries its member count
+          // instead, which is a fact about it.
+          if (!dispatchRole || isComposite) {
             return (
-              <SelectItem key={agent.id} value={agent.id}>
-                {agent.name}
+              <SelectItem key={agent.id} value={agent.id} title={ladder} disabled={isComposite && members.length === 0}>
+                <span className="flex w-full min-w-0 items-center justify-between gap-3">
+                  <span className="truncate">{agent.name}</span>
+                  {kindMark}
+                </span>
               </SelectItem>
             );
           }
+
           const badge = formatReliabilityBadge(
             reliability.byAgentId.get(agent.id),
             dispatchRole,

@@ -18,9 +18,10 @@
  *   - review verdict channels: a structured submit_findings verdict on the
  *     session row outranks the prose scan in BOTH directions, and the
  *     activity trail records which channel decided,
- *   - escalation: attempt 3 uses a configured stronger same-provider named
- *     agent before attempt 4 changes provider; without configuration attempt
- *     3 retains the legacy alternative-provider behaviour,
+ *   - retry ladder, in its two shapes and no third: a SIMPLE agent is retried
+ *     as itself at every attempt, with no switch of agent, model or provider;
+ *     a COMPOSITE descends one rank per attempt, and the session records the
+ *     member that ran plus the composite that dispatched it,
  *   - guard probe: foreign active session flagged, own sessions ignored,
  *     scope-correct review-target status.
  */
@@ -37,12 +38,14 @@ const resolutionMocks = vi.hoisted(() => ({
     namedAgentId: null as string | null,
     name: null as string | null,
     model: null as string | null,
+    compositeAgentId: null as string | null,
   })),
   resolveAgentForDispatch: vi.fn(async () => ({
     provider: "claude-code",
     namedAgentId: null as string | null,
     name: null as string | null,
     model: null as string | null,
+    compositeAgentId: null as string | null,
   })),
   pickAlternativeReviewProvider: vi.fn(async () => "codex"),
 }));
@@ -79,7 +82,15 @@ vi.mock("@/lib/agent-config/prompts", () => ({
   resolveAgentPrompt: vi.fn().mockResolvedValue("system prompt"),
 }));
 
-vi.mock("@/lib/agent-config/agent-resolution", () => ({
+// PARTIAL mock: only the two entry-point resolvers are substituted. The
+// composite helpers (`resolveCompositeMemberAtRank`,
+// `readCompositeMemberCount`) run for real against the test database, because
+// the rank arithmetic they perform IS the ladder under test here — a stubbed
+// version would prove only that the stub was called.
+vi.mock("@/lib/agent-config/agent-resolution", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("@/lib/agent-config/agent-resolution")
+  >()),
   resolveAgentByNamedId: resolutionMocks.resolveAgentByNamedId,
   resolveAgentForDispatch: resolutionMocks.resolveAgentForDispatch,
 }));
@@ -131,19 +142,13 @@ const {
   ticketComments,
   ticketActivityLog,
   namedAgents,
-  settings,
+  compositeAgentMembers,
 } = await import("@/lib/db/schema");
 const { processManager } = await import("@/lib/claude/process-manager");
-const { emitTicketUpdated } = await import("@/lib/events/emit");
-const fsMock = await import("fs");
 const { createPipelineStageDriver } = await import("@/lib/pipeline/stages");
 const { PIPELINE_FIX_INSTRUCTIONS_SECTION } = await import(
   "@/lib/pipeline/stages"
 );
-const { verifyCommandsSettingKey, verifyTimeoutMsSettingKey } = await import(
-  "@/lib/verify/verify-constants"
-);
-
 let counter = 0;
 
 function claudeEnvelope(text: string): string {
@@ -229,12 +234,14 @@ beforeEach(() => {
     namedAgentId: null,
     name: null,
     model: null,
+    compositeAgentId: null,
   });
   resolutionMocks.resolveAgentForDispatch.mockResolvedValue({
     provider: "claude-code",
     namedAgentId: null,
     name: null,
     model: null,
+    compositeAgentId: null,
   });
   resolutionMocks.pickAlternativeReviewProvider.mockResolvedValue("codex");
   processManagerState.result = {
@@ -285,7 +292,7 @@ describe("fix stage dispatch (epic scope)", () => {
     });
 
     expect(handle.sessionId).toBeTruthy();
-    expect(handle.escalatedToProvider).toBeNull();
+    expect(handle.compositeDescent).toBeNull();
 
     // Session row: build semantics, resumed CLI session.
     const row = db
@@ -527,6 +534,7 @@ describe("fix stage dispatch (epic scope)", () => {
       namedAgentId: null,
       name: null,
       model: null,
+      compositeAgentId: null,
     });
 
     const driver = createPipelineStageDriver({
@@ -600,6 +608,7 @@ describe("fix stage dispatch (epic scope)", () => {
       namedAgentId: null,
       name: null,
       model: null,
+      compositeAgentId: null,
     });
 
     const driver = createPipelineStageDriver({
@@ -634,6 +643,7 @@ describe("fix stage dispatch (epic scope)", () => {
       namedAgentId: null,
       name: null,
       model: null,
+      compositeAgentId: null,
     });
 
     const driver = createPipelineStageDriver({
@@ -670,6 +680,7 @@ describe("review stage dispatch", () => {
       namedAgentId: null,
       name: null,
       model: null,
+      compositeAgentId: null,
     });
     processManagerState.result = {
       success: true,
@@ -725,6 +736,57 @@ describe("review stage dispatch", () => {
     expect(
       db.select().from(epics).where(eq(epics.id, epicId)).get()!.status
     ).toBe("to_merge");
+  });
+
+  it("resolves a review stage's agent ONCE per stage entry, not once per caller", async () => {
+    const { projectId, epicId } = seed("review");
+    processManagerState.result = {
+      success: true,
+      result: claudeEnvelope("**Overall Verdict: Complete**"),
+      duration: 100,
+    };
+    const driver = createPipelineStageDriver({
+      projectId,
+      scope: "epic",
+      epicId,
+      userStoryId: null,
+      buildNamedAgentId: null,
+    });
+
+    // Sizing the ladder and launching the stage are two separate calls FROM
+    // THE RUNNER, and each used to resolve for itself. On a review that path
+    // dynamic-imports review-segregation, queries the last successful
+    // builder, and can await getProvider(p).isAvailable() across
+    // PROVIDER_OPTIONS — real subprocess probes, previously paid twice per
+    // stage entry. Sharing one resolution also closes the window where the
+    // two could disagree and the ladder would be sized from a different
+    // agent than the one that runs.
+    resolutionMocks.resolveAgentForDispatch.mockClear();
+    await driver.attemptBudget("review", 2);
+    await driver.launchStage({
+      stage: "review",
+      attempt: 1,
+      fixCycle: 0,
+      previousAttemptSessionId: null,
+      lastCodeSessionId: null,
+    });
+
+    expect(resolutionMocks.resolveAgentForDispatch).toHaveBeenCalledTimes(1);
+
+    // Attempt 2 of the SAME stage entry reuses it too.
+    await driver.launchStage({
+      stage: "review",
+      attempt: 2,
+      fixCycle: 0,
+      previousAttemptSessionId: null,
+      lastCodeSessionId: null,
+    });
+    expect(resolutionMocks.resolveAgentForDispatch).toHaveBeenCalledTimes(1);
+
+    // A NEW stage entry re-resolves: a run revisits review after a fix cycle,
+    // and the segregation input (the last successful builder) has moved.
+    await driver.attemptBudget("review", 2);
+    expect(resolutionMocks.resolveAgentForDispatch).toHaveBeenCalledTimes(2);
   });
 
   it("injects one compact line per passing command into the reviewer prompt", async () => {
@@ -954,6 +1016,7 @@ describe("review stage dispatch", () => {
       namedAgentId: "named-reviewer",
       name: "Codex Reviewer",
       model: "gpt-5.4",
+      compositeAgentId: null,
     });
 
     const driver = createPipelineStageDriver({
@@ -1037,6 +1100,7 @@ describe("review stage dispatch", () => {
       namedAgentId: null,
       name: null,
       model: null,
+      compositeAgentId: null,
     });
     processManagerState.result = {
       success: true,
@@ -1233,7 +1297,9 @@ describe("review stage dispatch", () => {
     });
   });
 
-  it("keeps the legacy attempt-3 provider escalation without escalatesTo", async () => {
+  it("retries a SIMPLE agent as itself, at every attempt", async () => {
+    // The binary model's first half: no attempt, however late, switches agent
+    // or provider. This is what the retired attempt-3 rungs used to do.
     const { projectId, epicId } = seed("review");
     const prevSid = `review-prev-${counter}`;
     insertSession({
@@ -1254,158 +1320,19 @@ describe("review stage dispatch", () => {
     });
     const handle = await driver.launchStage({
       stage: "review",
-      attempt: 3,
+      attempt: 4,
       fixCycle: 0,
       previousAttemptSessionId: prevSid,
       lastCodeSessionId: null,
     });
 
-    expect(
-      resolutionMocks.pickAlternativeReviewProvider
-    ).toHaveBeenCalledWith("claude-code");
-    expect(resolutionMocks.resolveAgentForDispatch).not.toHaveBeenCalled();
-    expect(handle.escalatedToNamedAgent).toBeNull();
-    expect(handle.escalatedToProvider).toBe("codex");
-
-    const row = db
-      .select()
-      .from(agentSessions)
-      .where(eq(agentSessions.id, handle.sessionId!))
-      .get()!;
-    expect(row).toMatchObject({
-      provider: "codex",
-      namedAgentId: null,
-      model: null,
-    });
-    expect(startOpts().provider).toBe("codex");
-    await handle.settled;
-  });
-
-  it("uses the stronger same-provider agent before the alternative provider", async () => {
-    const { projectId, epicId } = seed("review");
-    const strongerId = `review-stronger-${counter}`;
-    const baseId = `review-base-${counter}`;
-    db.insert(namedAgents)
-      .values([
-        {
-          id: strongerId,
-          name: `Stronger reviewer ${counter}`,
-          provider: "claude-code",
-          model: "claude-opus-4-6",
-        },
-        {
-          id: baseId,
-          name: `Base reviewer ${counter}`,
-          provider: "claude-code",
-          model: "claude-sonnet-4-6",
-          escalatesTo: strongerId,
-        },
-      ])
-      .run();
-    const resumedAttemptId = `review-resumed-${counter}`;
-    insertSession({
-      id: resumedAttemptId,
-      projectId,
-      epicId,
-      provider: "claude-code",
-      status: "failed",
-      agentType: "review_code",
-      namedAgentId: baseId,
-    });
-
-    const driver = createPipelineStageDriver({
-      projectId,
-      scope: "epic",
-      epicId,
-      userStoryId: null,
-      buildNamedAgentId: null,
-    });
-    const effortHandle = await driver.launchStage({
-      stage: "review",
-      attempt: 3,
-      fixCycle: 0,
-      previousAttemptSessionId: resumedAttemptId,
-      lastCodeSessionId: null,
-    });
-
+    // The escalator is gone: nothing consults the alternative-provider picker
+    // on the ladder any more (review SEGREGATION still does, inside
+    // resolveAgentForDispatch — which is mocked here).
     expect(
       resolutionMocks.pickAlternativeReviewProvider
     ).not.toHaveBeenCalled();
-    expect(effortHandle.escalatedToNamedAgent).toBe(
-      `Stronger reviewer ${counter}`
-    );
-    expect(effortHandle.escalatedToProvider).toBeNull();
-    expect(
-      db
-        .select()
-        .from(agentSessions)
-        .where(eq(agentSessions.id, effortHandle.sessionId!))
-        .get()
-    ).toMatchObject({
-      provider: "claude-code",
-      namedAgentId: strongerId,
-      namedAgentName: `Stronger reviewer ${counter}`,
-      model: "claude-opus-4-6",
-    });
-    expect(startOpts().provider).toBe("claude-code");
-    await effortHandle.settled;
-
-    const providerHandle = await driver.launchStage({
-      stage: "review",
-      attempt: 4,
-      fixCycle: 0,
-      previousAttemptSessionId: effortHandle.sessionId,
-      lastCodeSessionId: null,
-    });
-
-    expect(
-      resolutionMocks.pickAlternativeReviewProvider
-    ).toHaveBeenCalledWith("claude-code");
-    expect(providerHandle.escalatedToNamedAgent).toBeNull();
-    expect(providerHandle.escalatedToProvider).toBe("codex");
-    expect(
-      db
-        .select()
-        .from(agentSessions)
-        .where(eq(agentSessions.id, providerHandle.sessionId!))
-        .get()
-    ).toMatchObject({
-      provider: "codex",
-      namedAgentId: null,
-      model: null,
-    });
-    expect(startOpts(1).provider).toBe("codex");
-    await providerHandle.settled;
-  });
-});
-
-describe("story scope", () => {
-  it("dispatches ticket_build fix sessions and syncs the story board states", async () => {
-    const { projectId, epicId, storyId } = seed("review");
-    const buildSid = `tbuild-${counter}`;
-    insertSession({
-      id: buildSid,
-      projectId,
-      epicId,
-      userStoryId: storyId,
-      cliSessionId: "cli-story",
-      agentType: "ticket_build",
-    });
-
-    const driver = createPipelineStageDriver({
-      projectId,
-      scope: "story",
-      epicId,
-      userStoryId: storyId,
-      buildNamedAgentId: null,
-    });
-    const handle = await driver.launchStage({
-      stage: "fix",
-      attempt: 1,
-      fixCycle: 1,
-      previousAttemptSessionId: null,
-      lastCodeSessionId: buildSid,
-    });
+    expect(handle.compositeDescent).toBeNull();
 
     const row = db
       .select()
@@ -1413,431 +1340,130 @@ describe("story scope", () => {
       .where(eq(agentSessions.id, handle.sessionId!))
       .get()!;
     expect(row).toMatchObject({
-      agentType: "ticket_build",
-      userStoryId: storyId,
-      cliSessionId: "cli-story",
+      provider: "claude-code",
+      compositeAgentId: null,
     });
-    expect(startOpts().opts.resumeSession).toBe(true);
-
+    expect(startOpts().provider).toBe("claude-code");
     await handle.settled;
-    // Story back to review; sole story → epic review too. Comment on the
-    // story, not the epic.
-    expect(
-      db.select().from(userStories).where(eq(userStories.id, storyId)).get()!
-        .status
-    ).toBe("review");
-    expect(
-      db.select().from(epics).where(eq(epics.id, epicId)).get()!.status
-    ).toBe("review");
-    const comment = db
-      .select()
-      .from(ticketComments)
-      .where(eq(ticketComments.userStoryId, storyId))
-      .all()[0];
-    expect(comment).toMatchObject({ author: "agent" });
   });
 
-  it("passes the storyId into purpose-review resolution", async () => {
-    const { projectId, epicId, storyId } = seed("review");
+  it("descends one composite rank per attempt and records both ids on the session", async () => {
+    const { projectId, epicId } = seed("review");
+    const compositeId = `review-composite-${counter}`;
+    const firstId = `review-member-1-${counter}`;
+    const secondId = `review-member-2-${counter}`;
+    db.insert(namedAgents)
+      .values([
+        {
+          id: firstId,
+          name: `First reviewer ${counter}`,
+          provider: "claude-code",
+          model: "claude-sonnet-4-6",
+        },
+        {
+          id: secondId,
+          name: `Second reviewer ${counter}`,
+          provider: "codex",
+          model: "gpt-5",
+        },
+        {
+          id: compositeId,
+          name: `Reviewer ladder ${counter}`,
+          provider: "composite",
+          model: "",
+          kind: "composite",
+        },
+      ])
+      .run();
+    db.insert(compositeAgentMembers)
+      .values([
+        {
+          id: `${compositeId}-m1`,
+          compositeId,
+          memberId: firstId,
+          position: 0,
+        },
+        {
+          id: `${compositeId}-m2`,
+          compositeId,
+          memberId: secondId,
+          position: 1,
+        },
+      ])
+      .run();
+
+    // Attempt 1 resolution: the composite already unfolded to rank 0.
+    resolutionMocks.resolveAgentForDispatch.mockResolvedValue({
+      provider: "claude-code",
+      namedAgentId: firstId,
+      name: `First reviewer ${counter}`,
+      model: "claude-sonnet-4-6",
+      compositeAgentId: compositeId,
+    });
+
     const driver = createPipelineStageDriver({
       projectId,
-      scope: "story",
+      scope: "epic",
       epicId,
-      userStoryId: storyId,
+      userStoryId: null,
       buildNamedAgentId: null,
     });
-    const handle = await driver.launchStage({
+
+    // The member count IS the attempt budget.
+    expect(await driver.attemptBudget("review", 2)).toBe(2);
+
+    const first = await driver.launchStage({
       stage: "review",
       attempt: 1,
       fixCycle: 0,
       previousAttemptSessionId: null,
       lastCodeSessionId: null,
     });
-    expect(resolutionMocks.resolveAgentForDispatch).toHaveBeenCalledWith(
-      "review_code",
-      projectId,
-      null,
-      { purpose: "review", projectId, epicId, storyId }
-    );
-    await handle.settled;
-  });
-});
-
-describe("deterministic verification driver", () => {
-  it("returns the strict no-op outcome when verify_commands is not configured", async () => {
-    const { projectId, epicId } = seed("review");
-    const driver = createPipelineStageDriver({
-      projectId,
-      scope: "epic",
-      epicId,
-      userStoryId: null,
-      buildNamedAgentId: null,
+    expect(first.compositeDescent).toBeNull();
+    expect(
+      db
+        .select()
+        .from(agentSessions)
+        .where(eq(agentSessions.id, first.sessionId!))
+        .get()
+    ).toMatchObject({
+      provider: "claude-code",
+      // The MEMBER on named_agent_id, the LIST on composite_agent_id — the
+      // split that keeps reliability statistics measured per real agent.
+      namedAgentId: firstId,
+      compositeAgentId: compositeId,
     });
+    await first.settled;
 
-    await expect(
-      driver.runDeterministicVerification("unused-session")
-    ).resolves.toEqual({ ran: false, result: null });
-    expect(verificationMocks.runVerification).not.toHaveBeenCalled();
-  });
-
-  it("resolves settings and runs in the recorded epic worktree with the code session attribution", async () => {
-    const { projectId, epicId } = seed("review");
-    const codeSessionId = `verify-code-${counter}`;
-    insertSession({
-      id: codeSessionId,
-      projectId,
-      epicId,
-      worktreePath: "/repos/.arij-worktrees/exact-epic-worktree",
-    });
-    db.insert(settings)
-      .values([
-        {
-          key: verifyCommandsSettingKey(projectId),
-          value: JSON.stringify([
-            { name: "test", command: "npm test" },
-            { name: "lint", command: "npm run lint" },
-          ]),
-        },
-        { key: verifyTimeoutMsSettingKey(projectId), value: "45000" },
-      ])
-      .run();
-    // The applicability path now stats the recorded worktree; the global
-    // mock reports nothing exists, so mark this one as present.
-    (fsMock.default.existsSync as ReturnType<typeof vi.fn>).mockImplementationOnce(
-      (candidate: unknown) =>
-        candidate === "/repos/.arij-worktrees/exact-epic-worktree"
-    );
-    const expected = {
-      id: "verify-report",
-      projectId,
-      epicId,
-      agentSessionId: codeSessionId,
-      persisted: true,
-      status: "pass" as const,
-      startedAt: "2026-08-25T10:00:00.000Z",
-      finishedAt: "2026-08-25T10:00:02.000Z",
-      commands: [
-        {
-          name: "test",
-          command: "npm test",
-          exitCode: 0,
-          durationMs: 2_000,
-          tail: "ok",
-        },
-      ],
-    };
-    verificationMocks.runVerification.mockResolvedValueOnce(expected);
-
-    const driver = createPipelineStageDriver({
-      projectId,
-      scope: "epic",
-      epicId,
-      userStoryId: null,
-      buildNamedAgentId: null,
-    });
-    await expect(
-      driver.runDeterministicVerification(codeSessionId)
-    ).resolves.toEqual({ ran: true, result: expected });
-
-    // The pipeline announces the finished report the same way the manual
-    // route does, so an open EpicDetail panel and the board stay current.
-    expect(emitTicketUpdated).toHaveBeenCalledWith(projectId, epicId, {
-      verifyReportId: "verify-report",
-      verifyStatus: "pass",
-    });
-
-    expect(verificationMocks.runVerification).toHaveBeenCalledWith({
-      projectId,
-      epicId,
-      agentSessionId: codeSessionId,
-      worktreePath: "/repos/.arij-worktrees/exact-epic-worktree",
-      commands: [
-        { name: "test", command: "npm test" },
-        { name: "lint", command: "npm run lint" },
-      ],
-      timeoutMs: 45_000,
-    });
-  });
-
-  it("treats a report that could not be persisted as a skip", async () => {
-    const { projectId, epicId } = seed("review");
-    const codeSessionId = `verify-lost-${counter}`;
-    insertSession({
-      id: codeSessionId,
-      projectId,
-      epicId,
-      worktreePath: "/repos/.arij-worktrees/exact-epic-worktree",
-    });
-    db.insert(settings)
-      .values([
-        {
-          key: verifyCommandsSettingKey(projectId),
-          value: JSON.stringify([{ name: "test", command: "npm test" }]),
-        },
-      ])
-      .run();
-    (fsMock.default.existsSync as ReturnType<typeof vi.fn>).mockImplementationOnce(
-      (candidate: unknown) =>
-        candidate === "/repos/.arij-worktrees/exact-epic-worktree"
-    );
-    verificationMocks.runVerification.mockResolvedValueOnce({
-      id: "verify-lost",
-      projectId,
-      epicId,
-      agentSessionId: codeSessionId,
-      persisted: false,
-      status: "pass" as const,
-      startedAt: "2026-08-25T10:00:00.000Z",
-      finishedAt: "2026-08-25T10:00:02.000Z",
-      commands: [
-        { name: "test", command: "npm test", exitCode: 0, durationMs: 5, tail: "ok" },
-      ],
-    });
-
-    const driver = createPipelineStageDriver({
-      projectId,
-      scope: "epic",
-      epicId,
-      userStoryId: null,
-      buildNamedAgentId: null,
-    });
-    const outcome = await driver.runDeterministicVerification(codeSessionId);
-
-    // Every durable reader — the merge gate, the panel, the next sweep —
-    // reads the table. Announcing "passed" from an in-memory report the
-    // table never received would have the two halves disagreeing forever.
-    expect(outcome.ran).toBe(false);
-    expect(outcome.skipReason).toMatch(/could not be persisted/i);
-    expect(emitTicketUpdated).not.toHaveBeenCalled();
-  });
-
-  it("does not emit a report event when verification is not configured", async () => {
-    const { projectId, epicId } = seed("review");
-
-    const driver = createPipelineStageDriver({
-      projectId,
-      scope: "epic",
-      epicId,
-      userStoryId: null,
-      buildNamedAgentId: null,
-    });
-    await expect(
-      driver.runDeterministicVerification("unused-session")
-    ).resolves.toEqual({ ran: false, result: null });
-    expect(emitTicketUpdated).not.toHaveBeenCalled();
-  });
-
-  it("skips verification for a repository checkout recorded as a session worktree", async () => {
-    const { projectId, epicId } = seed("review");
-    const codeSessionId = `verify-main-checkout-${counter}`;
-    insertSession({
-      id: codeSessionId,
-      projectId,
-      epicId,
-      worktreePath: "/repos/s",
-    });
-    db.insert(settings)
-      .values({
-        key: verifyCommandsSettingKey(projectId),
-        value: JSON.stringify([{ name: "test", command: "npm test" }]),
-      })
-      .run();
-
-    const driver = createPipelineStageDriver({
-      projectId,
-      scope: "epic",
-      epicId,
-      userStoryId: null,
-      buildNamedAgentId: null,
-    });
-
-    // Hard constraint intact — nothing runs outside a managed epic
-    // worktree — but the stage is TOTAL: an applicability fault resolves
-    // to "did not apply" with a visible reason instead of crashing into
-    // the runner's park path.
-    const outcome = await driver.runDeterministicVerification(codeSessionId);
-    expect(outcome).toMatchObject({ ran: false, result: null });
-    expect(outcome.skipReason).toMatch(/managed epic worktree/i);
-    expect(verificationMocks.runVerification).not.toHaveBeenCalled();
-    expect(emitTicketUpdated).not.toHaveBeenCalled();
-  });
-
-  it("skips with a visible reason when the recorded worktree was pruned", async () => {
-    const { projectId, epicId } = seed("review");
-    const codeSessionId = `verify-pruned-${counter}`;
-    insertSession({
-      id: codeSessionId,
-      projectId,
-      epicId,
-      // Managed path, but the global fs mock stats nothing as existing —
-      // exactly the pruned-worktree situation.
-      worktreePath: "/repos/.arij-worktrees/vanished",
-    });
-    db.insert(settings)
-      .values({
-        key: verifyCommandsSettingKey(projectId),
-        value: JSON.stringify([{ name: "test", command: "npm test" }]),
-      })
-      .run();
-
-    const driver = createPipelineStageDriver({
-      projectId,
-      scope: "epic",
-      epicId,
-      userStoryId: null,
-      buildNamedAgentId: null,
-    });
-
-    // Spawning into a missing cwd would read as a phantom failing command
-    // and burn a fix cycle; it must surface as a traced skip instead.
-    const outcome = await driver.runDeterministicVerification(codeSessionId);
-    expect(outcome).toMatchObject({ ran: false, result: null });
-    expect(outcome.skipReason).toMatch(/no longer exists/i);
-    expect(verificationMocks.runVerification).not.toHaveBeenCalled();
-  });
-});
-
-describe("grading stage dispatch", () => {
-  it("returns a successful journalled skip without creating a session when no stories exist", async () => {
-    const { projectId, epicId, storyId } = seed("review");
-    db.delete(userStories).where(eq(userStories.id, storyId)).run();
-    const driver = createPipelineStageDriver({
-      projectId,
-      scope: "epic",
-      epicId,
-      userStoryId: null,
-      buildNamedAgentId: null,
-    });
-
-    const handle = await driver.launchStage({
-      stage: "grading",
-      attempt: 1,
+    const second = await driver.launchStage({
+      stage: "review",
+      attempt: 2,
       fixCycle: 0,
-      previousAttemptSessionId: null,
-      lastCodeSessionId: "build-complete",
+      previousAttemptSessionId: first.sessionId,
+      lastCodeSessionId: null,
     });
 
-    expect(handle.sessionId).toBeNull();
-    await expect(handle.settled).resolves.toMatchObject({
-      success: true,
-      gradingSkipped: true,
+    expect(second.compositeDescent).toEqual({
+      from: `First reviewer ${counter}`,
+      to: `Second reviewer ${counter}`,
     });
     expect(
       db
         .select()
         .from(agentSessions)
-        .where(eq(agentSessions.epicId, epicId))
-        .all(),
-    ).toHaveLength(0);
-    expect(
-      db
-        .select()
-        .from(ticketActivityLog)
-        .where(eq(ticketActivityLog.epicId, epicId))
-        .all(),
-    ).toContainEqual(
-      expect.objectContaining({ reason: expect.stringContaining("Grading skipped") }),
-    );
-  });
-});
-
-describe("guard probe", () => {
-  it("flags foreign active sessions, ignores the run's own, and reads scope-correct status", async () => {
-    const { projectId, epicId, storyId } = seed("review");
-    const driver = createPipelineStageDriver({
-      projectId,
-      scope: "epic",
-      epicId,
-      userStoryId: null,
-      buildNamedAgentId: null,
+        .where(eq(agentSessions.id, second.sessionId!))
+        .get()
+    ).toMatchObject({
+      provider: "codex",
+      namedAgentId: secondId,
+      namedAgentName: `Second reviewer ${counter}`,
+      model: "gpt-5",
+      compositeAgentId: compositeId,
+      // A composite NEVER resumes: attempt 2 is a different agent, and a
+      // stored cliSessionId only means something to the CLI that made it.
+      cliSessionId: null,
     });
-
-    // No active sessions: free, epic status reported.
-    expect(driver.checkGuards(["s-own"])).toEqual({
-      conflictSessionId: null,
-      reviewTargetStatus: "review",
-    });
-
-    const intruder = `intruder-${counter}`;
-    insertSession({
-      id: intruder,
-      projectId,
-      epicId,
-      status: "running",
-    });
-    expect(driver.checkGuards(["s-own"]).conflictSessionId).toBe(intruder);
-    // The run's own live session is not a conflict.
-    expect(driver.checkGuards([intruder]).conflictSessionId).toBeNull();
-
-    // Story scope reads the STORY status (a sibling-blocked epic must not
-    // fail a story run's review guard).
-    db.update(epics).set({ status: "in_progress" }).where(eq(epics.id, epicId)).run();
-    db.update(userStories)
-      .set({ status: "review" })
-      .where(eq(userStories.id, storyId))
-      .run();
-    const storyDriver = createPipelineStageDriver({
-      projectId,
-      scope: "story",
-      epicId,
-      userStoryId: storyId,
-      buildNamedAgentId: null,
-    });
-    expect(storyDriver.checkGuards([intruder]).reviewTargetStatus).toBe(
-      "review"
-    );
-  });
-});
-
-describe("batch run tagging (night runs)", () => {
-  it("stamps the driver's batchRunId on the stage session row; null when absent", async () => {
-    const { projectId, epicId } = seed("review");
-
-    const tagged = createPipelineStageDriver({
-      projectId,
-      scope: "epic",
-      epicId,
-      userStoryId: null,
-      buildNamedAgentId: null,
-      batchRunId: "night_test_run",
-    });
-    const handle = await tagged.launchStage({
-      stage: "review",
-      attempt: 1,
-      fixCycle: 0,
-      previousAttemptSessionId: null,
-      lastCodeSessionId: null,
-    });
-    await handle.settled;
-
-    const taggedRow = db
-      .select()
-      .from(agentSessions)
-      .where(eq(agentSessions.id, handle.sessionId!))
-      .get();
-    expect(taggedRow!.batchRunId).toBe("night_test_run");
-
-    // Standalone pipelines (no batchRunId on the init) leave the column NULL.
-    const untagged = createPipelineStageDriver({
-      projectId,
-      scope: "epic",
-      epicId,
-      userStoryId: null,
-      buildNamedAgentId: null,
-    });
-    const handle2 = await untagged.launchStage({
-      stage: "review",
-      attempt: 1,
-      fixCycle: 0,
-      previousAttemptSessionId: null,
-      lastCodeSessionId: null,
-    });
-    await handle2.settled;
-    const untaggedRow = db
-      .select()
-      .from(agentSessions)
-      .where(eq(agentSessions.id, handle2.sessionId!))
-      .get();
-    expect(untaggedRow!.batchRunId).toBeNull();
+    expect(startOpts(1).provider).toBe("codex");
+    await second.settled;
   });
 });

@@ -20,17 +20,13 @@ import {
 import { formatCostUsd } from "@/lib/utils/format-usage";
 
 /**
- * THE NUMBERS — the sun band: five numerals, a 14-day sparkline and the task
+ * THE NUMBERS — the sun band: four numerals, a 14-day sparkline and the task
  * split, for the selected agent.
  *
  * EM-DASH DISCIPLINE. Every numeral is wired to a NULLABLE value and
  * `StatNumeral` renders `—` for null. A clean rate of "0%" when nothing has
  * finished, or "$0" when no CLI reported a cost, would be a lie the rest of
  * the app does not tell.
- *
- * ESCALATIONS is coral only when it is greater than zero. A coral `0` would
- * spend one of the screen's two loud colours on the ABSENCE of a problem;
- * coral is reserved for something that blocks.
  */
 
 /**
@@ -55,7 +51,6 @@ export function TheNumbersBand({ stats }: TheNumbersBandProps) {
   const cleanRate = stats?.cleanRate ?? null;
   const medianMs = stats?.medianDurationMs ?? null;
   const cost = stats?.totalCostUsd ?? null;
-  const escalations = stats?.escalationCount ?? null;
 
   const medianLabel = formatReliabilityDuration(medianMs);
   const hasRuns = (runCount ?? 0) > 0;
@@ -128,13 +123,6 @@ export function TheNumbersBand({ stats }: TheNumbersBandProps) {
             captionStratum="land"
             caption={t("numbers.captions.cost")}
             value={formatCostUsd(cost)}
-          />
-          <StatNumeral
-            size={22}
-            captionStratum="land"
-            caption={t("numbers.captions.escalations")}
-            tone={escalations !== null && escalations > 0 ? "danger" : "ink"}
-            value={escalations}
           />
         </div>
 

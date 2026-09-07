@@ -7,7 +7,6 @@ import {
   agentSessions,
   epics,
   gradingReports,
-  namedAgents,
   projects,
   reviewComments,
   ticketComments,
@@ -36,15 +35,15 @@ import {
   providerReportsOwnSessionId,
 } from "@/lib/agent-sessions/resume-capability";
 import {
+  readCompositeMemberCount,
   resolveAgentByNamedId,
   resolveAgentForDispatch,
+  resolveCompositeMemberAtRank,
   type ResolvedAgent,
 } from "@/lib/agent-config/agent-resolution";
-import { pickAlternativeReviewProvider } from "@/lib/agent-config/review-segregation";
 import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
 import {
   REVIEW_TYPE_TO_AGENT_TYPE,
-  type AgentProvider,
   type AgentType,
 } from "@/lib/agent-config/constants";
 import {
@@ -65,7 +64,7 @@ import { runVerification as executeVerification } from "@/lib/verify/runner";
 import { assertManagedEpicWorktreePath } from "@/lib/verify/worktree";
 import { readRegressionConfig } from "@/lib/pipeline/verify";
 import { emitTicketUpdated } from "@/lib/events/emit";
-import { dispatchGradingSession } from "@/lib/grading/dispatch";
+import { dispatchGradingSession, GRADING_AGENT_TYPE } from "@/lib/grading/dispatch";
 import {
   buildGradingFixSection,
   parseGradingEntries,
@@ -89,6 +88,7 @@ import { handleAskedQuestionOutcome } from "@/lib/workflow/agent-question";
 import {
   finalizeBuildTerminalOutcome,
   resolveBuildSessionResult,
+  SILENT_BUILD_ERROR,
   transitionBuildStarted,
   transitionReviewRejected,
   transitionReviewPassed,
@@ -112,6 +112,7 @@ import type {
   PipelineGradingAssessment,
   PipelineReviewAssessment,
   PipelineStageHandle,
+  PipelineStageKind,
   PipelineStageRequest,
   PipelineStageResult,
 } from "./runner";
@@ -122,26 +123,32 @@ import type {
  * the corresponding route closures byte-for-byte in behavior so the board
  * cannot tell a pipeline stage from a human dispatch.
  *
- * Retry ladder per stage (deterministic by attempt index):
- *   attempt 1  — as-configured resolution: build/fix via resolveAgentByNamedId
- *                with the run's ORIGINAL namedAgentId; review via
- *                resolveAgentForDispatch purpose 'review' with the run's
- *                reviewNamedAgentId — null for every caller but Full Auto
- *                Mode, so reviewer segregation can act as before; an explicit
- *                review agent, when set, wins over segregation.
- *   attempt 2  — RESUME the failed attempt's session when the machinery
- *                allows (validateResumeSession — failed sessions keep their
- *                cliSessionId; status is not checked), same provider/agent;
- *                fresh otherwise.
- *   attempt 3  — when the failed named agent has escalatesTo configured,
- *                start fresh on that stronger named agent (same provider).
- *                Without that opt-in edge, this is byte-for-byte the legacy
- *                provider-escalation attempt below.
- *   attempt 3+ — ESCALATE to the first available alternative provider when
- *                no model escalation occupied attempt 3; with an escalatesTo
- *                edge, provider escalation starts at attempt 4. The generic
- *                picker is pickAlternativeReviewProvider despite its name.
- *                namedAgentId null, model undefined (provider default).
+ * Retry ladder per stage — BINARY, with no third path:
+ *
+ *   SIMPLE AGENT — every attempt runs the SAME agent. Attempt 1 is the
+ *                as-configured resolution (build/fix via
+ *                resolveAgentByNamedId with the run's ORIGINAL namedAgentId;
+ *                review via resolveAgentForDispatch purpose 'review' with the
+ *                run's reviewNamedAgentId — null for every caller but Full
+ *                Auto Mode, so reviewer segregation can act as before; an
+ *                explicit review agent, when set, wins over segregation).
+ *                Attempt 2 RESUMES the failed attempt's session when the
+ *                machinery allows (validateResumeSession — failed sessions
+ *                keep their cliSessionId; status is not checked); later
+ *                attempts start fresh. No attempt ever switches agent or
+ *                provider, and the attempt cap is `pipeline_max_attempts`.
+ *
+ *   COMPOSITE    — attempt N runs the member at position N-1, and the LENGTH
+ *                OF THE LIST is the attempt budget. Nothing is resumed: each
+ *                attempt is a different agent, and a stored cliSessionId only
+ *                means something to the CLI that created it.
+ *
+ * What used to sit at attempts 3 and 3+ — the same-provider effort hop and
+ * the first-available-alternative-provider hop — is gone. Neither was
+ * reachable under the default attempt cap of 2, and the provider hop threw
+ * the named agent away to run a CLI's default model.
+ * `pickAlternativeReviewProvider()` survives; it is still what reviewer
+ * segregation uses to keep a reviewer off the builder's provider.
  *
  * Fix stages additionally resume the run's previous code-writing session on
  * attempt 1 and append the open review feedback + pipeline fix instructions
@@ -186,6 +193,14 @@ export interface PipelineStageDriverInit {
 
 export interface PipelineStageDriver {
   launchStage(request: PipelineStageRequest): Promise<PipelineStageHandle>;
+  /**
+   * Attempts `stage` may spend: the configured cap for a simple agent, the
+   * member count for a composite. The runner asks once per stage entry.
+   */
+  attemptBudget(
+    stage: PipelineStageKind,
+    configuredMaxAttempts: number
+  ): Promise<number>;
   runDeterministicVerification(
     lastCodeSessionId: string | null
   ): Promise<PipelineDeterministicVerificationOutcome>;
@@ -211,13 +226,63 @@ export function createPipelineStageDriver(
   /** sessionId → review output, captured by the review closure. */
   const reviewOutputs = new Map<string, string>();
 
+  const codeAgentType: AgentType =
+    init.scope === "epic" ? "build" : "ticket_build";
+  const reviewAgentType: AgentType =
+    REVIEW_TYPE_TO_AGENT_TYPE[PIPELINE_REVIEW_TYPE];
+
+  /**
+   * The as-configured resolution for the stage entry currently in flight.
+   *
+   * Populated when the runner sizes the ladder (`attemptBudget`, attempt 1)
+   * and read by every attempt of that stage entry, so the budget and the
+   * agents it spends come from ONE resolution rather than from independent
+   * repeats of an expensive, live-query-backed path.
+   */
+  const configuredByStage = new Map<PipelineStageKind, ResolvedAgent>();
+
+  const configuredAgent = async (
+    stage: PipelineStageKind,
+    refresh = false
+  ): Promise<ResolvedAgent> => {
+    const cached = configuredByStage.get(stage);
+    if (cached && !refresh) return cached;
+    const resolved = await resolveConfiguredStageAgent(
+      init,
+      stage,
+      codeAgentType,
+      reviewAgentType
+    );
+    configuredByStage.set(stage, resolved);
+    return resolved;
+  };
+
   return {
+    attemptBudget: async (stage, configuredMaxAttempts) => {
+      // A new stage entry: re-resolve rather than reuse the previous entry's
+      // answer, since a run can revisit review after a fix cycle.
+      let configured: ResolvedAgent | null = null;
+      try {
+        configured = await configuredAgent(stage, true);
+      } catch {
+        // An emptied composite. Leave the cache untouched so the dispatch
+        // raises the real error rather than this sizing call.
+        configuredByStage.delete(stage);
+      }
+      return resolveStageAttemptBudget(configured, configuredMaxAttempts);
+    },
+
     launchStage: async (request) => {
       try {
         if (request.stage === "grading") {
-          return await dispatchPipelineGradingStage(init);
+          return await dispatchPipelineGradingStage(init, request, configuredAgent);
         }
-        return await dispatchPipelineStage(init, request, reviewOutputs);
+        return await dispatchPipelineStage(
+          init,
+          request,
+          reviewOutputs,
+          configuredAgent
+        );
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "Stage dispatch failed";
@@ -233,7 +298,7 @@ export function createPipelineStageDriver(
             outcome: null,
             error: message,
           }),
-          escalatedToProvider: null,
+          compositeDescent: null,
         };
       }
     },
@@ -299,12 +364,20 @@ export function createPipelineStageDriver(
 /** Adapts the reusable grader dispatcher to the pipeline stage contract. */
 async function dispatchPipelineGradingStage(
   init: PipelineStageDriverInit,
+  request: PipelineStageRequest,
+  configuredAgent: (stage: PipelineStageKind) => Promise<ResolvedAgent>,
 ): Promise<PipelineStageHandle> {
+  let compositeDescent: ResolvedStageAgent["compositeDescent"] = null;
   const result = await dispatchGradingSession({
     projectId: init.projectId,
     epicId: init.epicId,
     userStoryId: init.scope === "story" ? init.userStoryId : null,
     batchRunId: init.batchRunId ?? null,
+    resolveAgent: async () => {
+      const selected = resolveStageAgent(request, await configuredAgent("grading"));
+      compositeDescent = selected.compositeDescent;
+      return selected.resolved;
+    },
   });
 
   if (result.skipped) {
@@ -318,7 +391,7 @@ async function dispatchPipelineGradingStage(
         gradingReportId: null,
         gradingSkipped: true,
       }),
-      escalatedToProvider: null,
+      compositeDescent: null,
     };
   }
 
@@ -332,7 +405,7 @@ async function dispatchPipelineGradingStage(
       gradingReportId: terminal.reportId,
       gradingSkipped: false,
     })),
-    escalatedToProvider: null,
+    compositeDescent,
   };
 }
 
@@ -507,60 +580,6 @@ function readLastNonEmptyText(sessionId: string): string | null {
   );
 }
 
-interface PreviousSessionRow {
-  id: string;
-  provider: string | null;
-  namedAgentId: string | null;
-}
-
-function readSessionAgent(sessionId: string): PreviousSessionRow | null {
-  return (
-    db
-      .select({
-        id: agentSessions.id,
-        provider: agentSessions.provider,
-        namedAgentId: agentSessions.namedAgentId,
-      })
-      .from(agentSessions)
-      .where(eq(agentSessions.id, sessionId))
-      .get() ?? null
-  );
-}
-
-function readEffortEscalationTarget(
-  namedAgentId: string,
-  provider: AgentProvider
-): ResolvedAgent | null {
-  const source = db
-    .select({ escalatesTo: namedAgents.escalatesTo })
-    .from(namedAgents)
-    .where(eq(namedAgents.id, namedAgentId))
-    .get();
-  if (!source?.escalatesTo) return null;
-
-  const target = db
-    .select({
-      id: namedAgents.id,
-      name: namedAgents.name,
-      provider: namedAgents.provider,
-      model: namedAgents.model,
-    })
-    .from(namedAgents)
-    .where(eq(namedAgents.id, source.escalatesTo))
-    .get();
-
-  // The write service enforces this invariant. Keep the dispatch-side check
-  // so a database edited outside Arij can never turn effort escalation into
-  // an unannounced provider switch.
-  if (!target || target.provider !== provider) return null;
-  return {
-    provider,
-    namedAgentId: target.id,
-    name: target.name,
-    model: target.model,
-  };
-}
-
 /**
  * Ceilings for the open-findings blocks below. A finding body is a filed
  * review comment — normally a few hundred characters; the caps only bite on
@@ -703,96 +722,132 @@ looping forever instead of shipping.`
 
 interface ResolvedStageAgent {
   resolved: ResolvedAgent;
-  escalatedToNamedAgent: string | null;
-  escalatedToProvider: AgentProvider | null;
+  /**
+   * Set when this attempt moved DOWN one rank of a composite. Carries both
+   * ends of the move so the runner's activity trace can name the member that
+   * was abandoned as well as the one that replaces it.
+   */
+  compositeDescent: { from: string; to: string } | null;
 }
 
-/** Applies the D5b ladder to pick the stage's agent. */
-async function resolveStageAgent(
+/**
+ * Attempt budget for `stage`: how many attempts its configured agent affords.
+ *
+ * A SIMPLE agent keeps the configured `pipeline_max_attempts` — it is retried
+ * as itself, so the cap is the only thing bounding it. A COMPOSITE's budget is
+ * its member count, because each attempt descends a rank and there is nothing
+ * below the last member; `pipeline_max_attempts` no longer governs an agent
+ * switch, which is the setting's whole former purpose here.
+ *
+ * A resolution that throws (an emptied composite) reports a budget of 1 rather
+ * than propagating: the dispatch itself will fail with the real message, and
+ * that is a clearer failure than one raised while merely sizing the ladder.
+ */
+/**
+ * The stage's AS-CONFIGURED agent, before the ladder picks a rank.
+ *
+ * Sizing the budget and picking the agent both need this, and they used to
+ * each resolve it for themselves — twice per stage entry. For a review that is
+ * not merely duplicated work: the path dynamic-imports ./review-segregation,
+ * runs `findLastSuccessfulBuildProvider`, and when the default resolution
+ * matches the builder's provider it awaits `getProvider(p).isAvailable()`
+ * across PROVIDER_OPTIONS until one answers — real subprocess probes, paid
+ * twice.
+ *
+ * It was also a correctness smell. The two calls were independent, and
+ * `findLastSuccessfulBuildProvider` is a live query, so a segregation decision
+ * that flipped between them would size the ladder from one resolution and run
+ * another. Resolving once and sharing the result removes the window rather
+ * than relying on the two agreeing.
+ */
+async function resolveConfiguredStageAgent(
   init: PipelineStageDriverInit,
-  request: PipelineStageRequest,
+  stage: PipelineStageKind,
   codeAgentType: AgentType,
   reviewAgentType: AgentType
-): Promise<ResolvedStageAgent> {
-  let configured: ResolvedAgent | null = null;
-  const resolveConfigured = async (): Promise<ResolvedAgent> => {
-    if (configured) return configured;
-    if (request.stage === "review") {
-      configured = await resolveAgentForDispatch(
-        reviewAgentType,
-        init.projectId,
-        init.reviewNamedAgentId ?? null,
-        {
-          purpose: "review",
-          projectId: init.projectId,
-          epicId: init.epicId,
-          ...(init.scope === "story" && init.userStoryId
-            ? { storyId: init.userStoryId }
-            : {}),
-        }
-      );
-      return configured;
-    }
-    configured = resolveAgentByNamedId(
-      codeAgentType,
+): Promise<ResolvedAgent> {
+  if (stage === "review" || stage === "grading") {
+    return resolveAgentForDispatch(
+      stage === "grading" ? GRADING_AGENT_TYPE : reviewAgentType,
       init.projectId,
-      init.buildNamedAgentId
-    );
-    return configured;
-  };
-
-  if (request.attempt < 3) {
-    return {
-      resolved: await resolveConfigured(),
-      escalatedToNamedAgent: null,
-      escalatedToProvider: null,
-    };
-  }
-
-  // Escalation always starts fresh. If the failed named agent opted into a
-  // stronger same-provider model, that occupies attempt 3. Otherwise attempt
-  // 3 retains the exact historical alternative-provider path.
-  const previous = request.previousAttemptSessionId
-    ? readSessionAgent(request.previousAttemptSessionId)
-    : null;
-  const baseProvider = (previous?.provider ??
-    (await resolveConfigured()).provider) as AgentProvider;
-  if (request.attempt === 3) {
-    const sourceNamedAgentId =
-      previous !== null
-        ? previous.namedAgentId
-        : (await resolveConfigured()).namedAgentId ?? null;
-    if (sourceNamedAgentId) {
-      const effortTarget = readEffortEscalationTarget(
-        sourceNamedAgentId,
-        baseProvider
-      );
-      if (effortTarget) {
-        return {
-          resolved: effortTarget,
-          escalatedToNamedAgent:
-            effortTarget.name ?? effortTarget.namedAgentId ?? "stronger agent",
-          escalatedToProvider: null,
-        };
+      stage === "grading" ? null : init.reviewNamedAgentId ?? null,
+      {
+        purpose: stage === "grading" ? "grading" : "review",
+        projectId: init.projectId,
+        epicId: init.epicId,
+        ...(init.scope === "story" && init.userStoryId
+          ? { storyId: init.userStoryId }
+          : {}),
       }
-    }
+    );
+  }
+  return resolveAgentByNamedId(
+    codeAgentType,
+    init.projectId,
+    init.buildNamedAgentId
+  );
+}
+
+async function resolveStageAttemptBudget(
+  configured: ResolvedAgent | null,
+  configuredMaxAttempts: number
+): Promise<number> {
+  // A resolution that already failed (an emptied composite) reports 1 rather
+  // than propagating: the dispatch itself will fail with the real message,
+  // and that is a clearer failure than one raised while merely sizing.
+  if (!configured) return 1;
+  if (!configured.compositeAgentId) return configuredMaxAttempts;
+  const count = readCompositeMemberCount(configured.compositeAgentId);
+  return count && count > 0 ? count : 1;
+}
+
+/**
+ * Picks the stage's agent for `request.attempt`.
+ *
+ * TWO SHAPES, AND NO THIRD. A simple agent is retried as ITSELF at every
+ * attempt — attempt 2 resumes its failed session where the machinery allows
+ * (see the resume decision in dispatchPipelineStage), later attempts start
+ * fresh, and no attempt ever switches agent or provider. A composite descends
+ * one rank per attempt: attempt N runs the member at position N-1.
+ *
+ * This replaces the retired ladder, whose attempt-3 rungs (the same-provider
+ * effort hop, then the first alternative provider) were unreachable under the
+ * default attempt cap of 2 and, when reached, threw the named agent away to
+ * run a provider's default model.
+ */
+function resolveStageAgent(
+  request: PipelineStageRequest,
+  configured: ResolvedAgent
+): ResolvedStageAgent {
+  // Simple agent — every attempt, including the first, is this agent.
+  if (!configured.compositeAgentId) {
+    return { resolved: configured, compositeDescent: null };
   }
 
-  // Provider escalation: first available alternative to the failed attempt's
-  // provider; same provider when none is installed. The named agent is
-  // dropped and the provider's default model is used.
-  const alternative = await pickAlternativeReviewProvider(baseProvider);
-  if (alternative) {
-    return {
-      resolved: { provider: alternative, namedAgentId: null },
-      escalatedToNamedAgent: null,
-      escalatedToProvider: alternative,
-    };
+  const compositeId = configured.compositeAgentId;
+  const rank = request.attempt - 1;
+  if (rank <= 0) {
+    // Attempt 1 already IS rank 0: `configured` is the unfolded first member.
+    return { resolved: configured, compositeDescent: null };
   }
+
+  const step = resolveCompositeMemberAtRank(compositeId, rank);
+  if (!step.resolved) {
+    // The runner sizes the ladder from the same member count, so asking past
+    // the end is a bug rather than a normal end of run. Fail loudly instead
+    // of re-running the member that just failed.
+    throw new Error(
+      `Composite agent has no member at rank ${rank} (${step.memberCount} members)`
+    );
+  }
+
+  const previous = resolveCompositeMemberAtRank(compositeId, rank - 1);
   return {
-    resolved: { provider: baseProvider, namedAgentId: null },
-    escalatedToNamedAgent: null,
-    escalatedToProvider: null,
+    resolved: step.resolved,
+    compositeDescent: {
+      from: previous.resolved?.name ?? `rank ${rank - 1}`,
+      to: step.resolved.name ?? `rank ${rank}`,
+    },
   };
 }
 
@@ -806,7 +861,9 @@ async function resolveStageAgent(
 async function dispatchPipelineStage(
   init: PipelineStageDriverInit,
   request: PipelineStageRequest,
-  reviewOutputs: Map<string, string>
+  reviewOutputs: Map<string, string>,
+  /** The driver's per-stage-entry resolution — see `resolveConfiguredStageAgent`. */
+  configuredAgent: (stage: PipelineStageKind) => Promise<ResolvedAgent>
 ): Promise<PipelineStageHandle> {
   const { projectId, epicId, userStoryId, scope } = init;
 
@@ -839,16 +896,24 @@ async function dispatchPipelineStage(
   const isReview = request.stage === "review";
   const agentType = isReview ? reviewAgentType : codeAgentType;
 
-  const { resolved, escalatedToNamedAgent, escalatedToProvider } =
-    await resolveStageAgent(init, request, codeAgentType, reviewAgentType);
+  const { resolved, compositeDescent } = resolveStageAgent(
+    request,
+    await configuredAgent(request.stage)
+  );
 
   // ---------------------------------------------------------------------
   // Resume decision. Targets: attempt 2 resumes the failed attempt of THIS
   // stage; a fix's attempt 1 resumes the run's previous code-writing
-  // session. Escalated attempts always start fresh.
+  // session.
+  //
+  // A COMPOSITE never resumes: attempt 2 is a DIFFERENT agent, and the stored
+  // cliSessionId only means something to the CLI that created it. Resuming
+  // one agent's session on another is exactly the cross-provider hand-off
+  // validateResumeSession refuses — the check below is the explicit half of
+  // that, so the intent survives a future edit to the resume machinery.
   // ---------------------------------------------------------------------
   let resumeTarget: string | null = null;
-  if (request.attempt === 2) {
+  if (request.attempt === 2 && !resolved.compositeAgentId) {
     resumeTarget = request.previousAttemptSessionId;
   } else if (request.attempt === 1 && request.stage === "fix") {
     resumeTarget = request.lastCodeSessionId;
@@ -1118,6 +1183,7 @@ async function dispatchPipelineStage(
     worktreePath,
     cliSessionId,
     namedAgentId: resolved.namedAgentId ?? null,
+    compositeAgentId: resolved.compositeAgentId ?? null,
     agentType,
     namedAgentName: resolved.name || null,
     model: resolved.model || null,
@@ -1244,8 +1310,7 @@ async function dispatchPipelineStage(
   return {
     sessionId,
     settled,
-    escalatedToNamedAgent,
-    escalatedToProvider,
+    compositeDescent,
   };
 }
 
@@ -1277,13 +1342,21 @@ function finalizeCodeSession(input: {
         : "Story build completed successfully",
   });
   if (scope === "epic") {
-    if (terminal.kind === "failed" || terminal.kind === "refused") {
+    // `silent` sits with the failures: the run delivered nothing, so the desk
+    // must not light up as if a build had landed.
+    if (
+      terminal.kind === "failed" ||
+      terminal.kind === "refused" ||
+      terminal.kind === "silent"
+    ) {
       emitSessionFailed(
         projectId,
         epicId,
         sessionId,
         terminal.kind === "refused"
           ? terminal.error
+          : terminal.kind === "silent"
+          ? SILENT_BUILD_ERROR
           : result?.error || "Build failed"
       );
     } else {

@@ -1,3 +1,4 @@
+import { withAgentResolutionErrors } from "@/lib/api/agent-resolution-response";
 import { NextRequest, NextResponse } from "next/server";
 import { getProjectOr404, isErrorResponse } from "@/lib/api/route-helpers";
 import { isAgentType } from "@/lib/agent-config/constants";
@@ -15,7 +16,7 @@ type Params = { params: Promise<{ projectId: string }> };
  * - epicId / storyId (optional) — the review target
  * - namedAgentId (optional) — explicit named-agent pick (always wins)
  */
-export async function GET(request: NextRequest, { params }: Params) {
+export const GET = withAgentResolutionErrors(async function GET(request: NextRequest, { params }: Params) {
   const { projectId } = await params;
 
   const found = getProjectOr404(projectId);
@@ -50,4 +51,4 @@ export async function GET(request: NextRequest, { params }: Params) {
       builderProvider: resolved.builderProvider ?? null,
     },
   });
-}
+});

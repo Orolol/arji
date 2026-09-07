@@ -10,6 +10,17 @@ describe("REfinment 2 — refinement actions migration", () => {
     const { sqlite } = createTestDb();
     try {
       sqlite.exec("ALTER TABLE agent_sessions DROP COLUMN refinement_actions");
+      // Un-stamping from 0052 replays every LATER migration too, and an ADD
+      // COLUMN is not a no-op the second time — so the composite-agent
+      // columns (0053, 0055) have to go back as well.
+      sqlite.exec("ALTER TABLE named_agents DROP COLUMN kind");
+      sqlite.exec("ALTER TABLE agent_sessions DROP COLUMN composite_agent_id");
+      // 0054 DROPS a column, so rewinding past it means putting that column
+      // back — the inverse of the drops above. The rewind lands after 0039
+      // (which adds it), so nothing else re-creates it.
+      sqlite.exec(
+        "ALTER TABLE named_agents ADD COLUMN escalates_to text REFERENCES named_agents(id) ON DELETE SET NULL"
+      );
       sqlite.prepare("DELETE FROM __drizzle_migrations WHERE created_at >= ?").run(migration.when);
       sqlite.exec("INSERT INTO projects (id, name) VALUES ('p', 'Old project')");
       sqlite.exec("INSERT INTO agent_sessions (id, project_id, prompt, status) VALUES ('s', 'p', 'Historical prompt', 'completed')");

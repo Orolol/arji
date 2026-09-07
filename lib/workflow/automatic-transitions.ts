@@ -775,13 +775,27 @@ export function holdFailedBuild(opts: {
 /**
  * Exhaustive terminal-outcome switch for code sessions. `answered` (and a
  * legacy successful null outcome) is a delivered build; asked_question holds
- * the ticket; every unsuccessful/error result stays in progress with a log.
+ * the ticket; `silent` and every unsuccessful/error result stay in progress
+ * with a log.
+ *
+ * `silent` USED TO BE PROMOTED. A run that exits successfully having produced
+ * no textual deliverable at all (classifySessionOutcome, after the
+ * prompt-echo scrub) was treated as a delivered build and moved to Review,
+ * where a human or a reviewer agent then had to discover that nothing had
+ * been done. It is now a failed attempt, which is what lets the composite
+ * ladder absorb exactly the failure it exists for: the next member gets the
+ * ticket instead of the next reviewer getting an empty branch.
  */
 export type BuildTerminalOutcome =
   | { kind: "promoted"; epicPromoted: boolean; remainingStories: number }
   | { kind: "refused"; error: string }
   | { kind: "awaiting_reply" }
+  | { kind: "silent" }
   | { kind: "failed" };
+
+/** The build ended without producing anything Arij can read. */
+export const SILENT_BUILD_ERROR =
+  "The build ended without producing any output";
 
 export interface BuildSessionResult {
   success: boolean;
@@ -789,17 +803,33 @@ export interface BuildSessionResult {
   error: string | null;
 }
 
-/** Fold the board-transition decision into a pipeline/wave settle payload. */
+/**
+ * Fold the board-transition decision into a pipeline/wave settle payload.
+ *
+ * Two verdicts turn a technically-successful session into a FAILED attempt,
+ * and both are what a composite's ordered list exists to absorb: a refused
+ * workflow transition, and a silent run. Everything else passes through as
+ * the session reported it.
+ */
 export function resolveBuildSessionResult(
   terminal: BuildTerminalOutcome,
   result: BuildSessionResult
 ): BuildSessionResult {
-  if (terminal.kind !== "refused") return result;
-  return {
-    success: false,
-    outcome: "transition_refused",
-    error: terminal.error,
-  };
+  if (terminal.kind === "refused") {
+    return {
+      success: false,
+      outcome: "transition_refused",
+      error: terminal.error,
+    };
+  }
+  if (terminal.kind === "silent") {
+    return {
+      success: false,
+      outcome: "silent",
+      error: result.error || SILENT_BUILD_ERROR,
+    };
+  }
+  return result;
 }
 
 export function finalizeBuildTerminalOutcome(opts: {
@@ -813,6 +843,23 @@ export function finalizeBuildTerminalOutcome(opts: {
   error?: string | null;
   reason?: string;
 }): BuildTerminalOutcome {
+  // A SILENT run delivered nothing. Promoting it to Review would ask a
+  // reviewer (or a human) to review an untouched branch, and — under Full
+  // Auto — would put that branch in front of the merge gate. It is held in
+  // in_progress like any other failed build, and the pipeline reads it as a
+  // failed attempt so the composite ladder moves to the next member.
+  if (opts.success && opts.outcome === "silent") {
+    holdFailedBuild({
+      projectId: opts.projectId,
+      epicId: opts.epicId,
+      scope: opts.scope,
+      userStoryId: opts.userStoryId,
+      sessionId: opts.sessionId,
+      error: opts.error || SILENT_BUILD_ERROR,
+    });
+    return { kind: "silent" };
+  }
+
   if (opts.success && opts.outcome !== "asked_question") {
     const completed = transitionBuildCompleted(opts);
     if (!completed.valid) {

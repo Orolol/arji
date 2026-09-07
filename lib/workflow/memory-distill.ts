@@ -616,6 +616,7 @@ export async function dispatchMemoryDistillSession(
     logsPath,
     cliSessionId,
     namedAgentId: resolvedAgent.namedAgentId ?? null,
+    compositeAgentId: resolvedAgent.compositeAgentId ?? null,
     agentType: "memory_distill",
     namedAgentName: resolvedAgent.name || null,
     model: resolvedAgent.model || null,

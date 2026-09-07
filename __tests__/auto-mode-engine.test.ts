@@ -1542,7 +1542,7 @@ describe("deterministic verification", () => {
     expect(autoModeRegistry.snapshot(PROJECT_ID).parked).toEqual([]);
   });
 
-  it("still verifies a build that delivered without saying anything", async () => {
+  it("charges a silent build to the parking streak instead of verifying it", async () => {
     const fakes = makeFakes();
     fakes.setConfig({ buildConcurrency: 1, reviewConcurrency: 0 });
     addEpic({ id: "t1", status: "todo" });
@@ -1550,14 +1550,37 @@ describe("deterministic verification", () => {
 
     const first = await sweepProject(PROJECT_ID, fakes.deps);
     settle(fakes, first.buildsDispatched[0], "completed", "silent");
-    db.update(epics).set({ status: "review" }).where(eq(epics.id, "t1")).run();
     await sweepProject(PROJECT_ID, fakes.deps);
 
-    // finalizeBuildTerminalOutcome promotes a silent build to Review, so it
-    // is a tree the merge gate will be asked about — an agent that delivered
-    // without saying anything is exactly where evidence matters most.
-    expect(fakes.verifications).toHaveLength(1);
-    expect(db.select().from(epics).get()!.status).toBe("in_progress");
+    // A silent build is no longer promoted to Review by
+    // finalizeBuildTerminalOutcome: the branch carries nothing anyone asked
+    // for, so there is nothing to verify. Spending a verification pass on it
+    // would charge a phantom failure to the very streak the silence already
+    // charges, and drop a failing-test comment on a ticket whose real problem
+    // is that no agent did any work.
+    expect(fakes.verifications).toEqual([]);
+    expect(db.select().from(ticketComments).all()).toEqual([]);
+  });
+
+  it("parks a ticket after three silent builds", async () => {
+    // AUTO_MODE_MAX_CONSECUTIVE_FAILURES is 3, and a silent build now counts
+    // against it. Before, silence was credited as a success and cleared the
+    // streak — so build → silence → build looped for as long as the mode ran.
+    const fakes = makeFakes();
+    fakes.setConfig({ buildConcurrency: 1, reviewConcurrency: 0 });
+    addEpic({ id: "t1", status: "todo" });
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const sweep = await sweepProject(PROJECT_ID, fakes.deps);
+      expect(sweep.buildsDispatched).toHaveLength(1);
+      settle(fakes, sweep.buildsDispatched[0], "completed", "silent");
+    }
+    const final = await sweepProject(PROJECT_ID, fakes.deps);
+
+    expect(final.parked).toContain("t1");
+    expect(
+      autoModeRegistry.snapshot(PROJECT_ID).parked.map((row) => row.ticketId)
+    ).toContain("t1");
   });
 
   it("says the ticket was held when the pullback is refused", async () => {

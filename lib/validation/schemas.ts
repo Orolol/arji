@@ -204,7 +204,25 @@ export const createNamedAgentSchema = z.object({
   // and it produces the user-facing message.
   options: z.record(z.string(), z.unknown()).optional(),
   personaPrompt: z.string().nullable().optional(),
-  escalatesTo: z.string().nullable().optional(),
+});
+
+/**
+ * Creating a COMPOSITE: a name and an ordered member list, and nothing else.
+ * A composite owns no CLI, model, options or persona — those belong to its
+ * members — so this is a separate schema rather than the one above with a
+ * discriminator and four fields that must be absent.
+ *
+ * Emptiness is refused here as well as in the write service: the service is
+ * the authority (an MCP or test caller reaches it directly), but a 400 with
+ * the field name is a better answer than a 400 with a prose message.
+ */
+export const createCompositeAgentSchema = z.object({
+  name: z
+    .string("name is required")
+    .refine((v) => v.trim().length > 0, "name is required"),
+  memberIds: z
+    .array(z.string().min(1))
+    .min(1, "a composite agent must have at least one member"),
 });
 
 export const updateNamedAgentSchema = z.object({
@@ -219,7 +237,13 @@ export const updateNamedAgentSchema = z.object({
   model: z.string().optional(),
   options: z.record(z.string(), z.unknown()).optional(),
   personaPrompt: z.string().nullable().optional(),
-  escalatesTo: z.string().nullable().optional(),
+  /** Composite only — the new ordered member list. */
+  memberIds: z.array(z.string().min(1)).optional(),
+});
+
+/** `null` clears the designation; there is at most one at a time. */
+export const setDefaultCompositeAgentSchema = z.object({
+  compositeAgentId: z.string().min(1).nullable(),
 });
 
 export const createReviewAgentSchema = z.object({

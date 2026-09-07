@@ -1,3 +1,4 @@
+import { withAgentResolutionErrors } from "@/lib/api/agent-resolution-response";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { chatMessages, chatAttachments } from "@/lib/db/schema";
@@ -70,7 +71,7 @@ export async function GET(
   return NextResponse.json({ data: messagesWithAttachments });
 }
 
-export async function POST(
+export const POST = withAgentResolutionErrors(async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -100,6 +101,9 @@ export async function POST(
 
   const conversationId = body.conversationId || null;
   const attachmentIds: string[] = body.attachmentIds || [];
+
+  // Refuse an unusable agent before storing the message or linking uploads.
+  const resolvedAgent = resolveAgentByNamedId("chat", projectId, namedAgentId);
 
   // Save user message
   const userMsgId = createId();
@@ -146,7 +150,6 @@ export async function POST(
     chatSystemPrompt
   );
 
-  const resolvedAgent = resolveAgentByNamedId("chat", projectId, namedAgentId);
   // The new user message plus earlier user messages only: an assistant reply
   // naming a codebase file is not an Arij document reference. Unknown mentions
   // in the new message already returned 400 above (validateMentionsExist).
@@ -243,4 +246,4 @@ export async function POST(
 
     return NextResponse.json({ data: { userMessage: userMsgId, assistantMessage: errorMsgId } });
   }
-}
+});

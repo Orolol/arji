@@ -217,18 +217,54 @@ export function AgentSelectPill({
       : (providerLabel(selection.provider) ??
         (mode === "dispatch" ? tKey(DEFAULT_AGENT_LABEL_KEY) : "—")));
 
-  const agentItems = safeAgents.map((agent) => (
-    <DropdownMenuRadioItem
-      key={agent.id}
-      value={agentValue(agent.id)}
-      data-testid={`chat-option-agent-${agent.id}`}
-      onSelect={() =>
-        onSelect({ namedAgentId: agent.id, provider: agent.provider })
-      }
-    >
-      {agent.name}
-    </DropdownMenuRadioItem>
-  ));
+  /**
+   * A COMPOSITE is marked, and its ladder travels in the title.
+   *
+   * The distinction is not cosmetic: picking a composite buys a run a fallback
+   * list whose LENGTH is its attempt budget, and picking a simple agent buys
+   * it that agent retried as itself. A menu that rendered the two identically
+   * would hide the only difference that changes what the run does.
+   */
+  const agentItems = safeAgents.map((agent) => {
+    const isComposite = agent.kind === "composite";
+    // `?? []` rather than a bare `.map`: this list is fetched, and a payload
+    // shaped by an older route (or a stub) must degrade to "a simple agent",
+    // not crash the picker every surface in the app mounts.
+    const members = agent.members ?? [];
+    const ladder = members.map((member) => member.name).join(" → ");
+    return (
+      <DropdownMenuRadioItem
+        key={agent.id}
+        value={agentValue(agent.id)}
+        data-testid={`chat-option-agent-${agent.id}`}
+        title={isComposite ? ladder || t("composite.unusable") : undefined}
+        disabled={isComposite && members.length === 0}
+        onSelect={() =>
+          onSelect({ namedAgentId: agent.id, provider: agent.provider })
+        }
+      >
+        <span className="flex w-full min-w-0 items-center justify-between gap-3">
+          <span className="truncate">{agent.name}</span>
+          {isComposite ? (
+            <span
+              data-testid={`chat-option-agent-kind-${agent.id}`}
+              className="shrink-0 font-mono text-[9.5px] uppercase tracking-[.06em] text-muted-foreground"
+            >
+              {members.length > 0
+                ? t("composite.count", { count: members.length })
+                : t("composite.empty")}
+            </span>
+          ) : null}
+        </span>
+      </DropdownMenuRadioItem>
+    );
+  });
+
+  // The server resolves "Default agent" through the designated composite when
+  // one exists (resolveAgent → readDefaultCompositeAgentId), so the row names
+  // it. Saying only "Default agent" while a composite answers for it would
+  // leave the picker describing a resolution it no longer performs.
+  const defaultComposite = safeAgents.find((agent) => agent.isDefault);
 
   return (
     <SelectPill
@@ -251,7 +287,17 @@ export function AgentSelectPill({
             data-testid="chat-option-default-agent"
             onSelect={() => onSelect({ namedAgentId: null, provider: null })}
           >
-            {tKey(DEFAULT_AGENT_LABEL_KEY)}
+            <span className="flex w-full min-w-0 items-center justify-between gap-3">
+              <span className="truncate">{tKey(DEFAULT_AGENT_LABEL_KEY)}</span>
+              {defaultComposite ? (
+                <span
+                  data-testid="chat-option-default-agent-target"
+                  className="shrink-0 font-mono text-[9.5px] uppercase tracking-[.06em] text-muted-foreground"
+                >
+                  {defaultComposite.name}
+                </span>
+              ) : null}
+            </span>
           </DropdownMenuRadioItem>
           {agentItems.length > 0 ? (
             <>

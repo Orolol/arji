@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { agentSessions } from "@/lib/db/schema";
+import { agentSessions, namedAgents } from "@/lib/db/schema";
 import { and, eq, getTableColumns } from "drizzle-orm";
 import { processManager } from "@/lib/claude/process-manager";
 import { agentScheduler } from "@/lib/agents/scheduler";
@@ -355,6 +355,19 @@ export async function GET(
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
   }
 
+  // The composite that DISPATCHED this run, when one did. `namedAgentId` on
+  // the row is the member that actually ran, so without this the detail page
+  // cannot tell two runs apart whose resolved configuration differed only in
+  // which list produced them. Read by id rather than joined so a deleted
+  // composite (ON DELETE SET NULL) simply yields nothing.
+  const compositeAgentName = session.compositeAgentId
+    ? (db
+        .select({ name: namedAgents.name })
+        .from(namedAgents)
+        .where(eq(namedAgents.id, session.compositeAgentId))
+        .get()?.name ?? null)
+    : null;
+
   const logsRead = readSessionLogs(session.logsPath);
 
   // A preview of each stream, so a client that only wants the tail of a run
@@ -416,6 +429,7 @@ export async function GET(
       chunkStreams,
       ...(chunkStreamsUnavailable ? { chunkStreamsUnavailable: true } : {}),
       lastNonEmptyText,
+      compositeAgentName,
       arijActions,
       ...(arijActionsUnavailable ? { arijActionsUnavailable: true } : {}),
     },

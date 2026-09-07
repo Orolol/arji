@@ -25,10 +25,29 @@ testSqlite.exec(`
     readable_agent_name TEXT,
     options TEXT NOT NULL DEFAULT '{}',
     persona_prompt TEXT,
-    escalates_to TEXT REFERENCES named_agents(id) ON DELETE SET NULL,
+    kind TEXT NOT NULL DEFAULT 'simple',
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
   );
   CREATE UNIQUE INDEX named_agents_name_unique ON named_agents (name);
+  CREATE TABLE composite_agent_members (
+    id TEXT PRIMARY KEY NOT NULL,
+    composite_id TEXT NOT NULL REFERENCES named_agents(id) ON DELETE CASCADE,
+    member_id TEXT NOT NULL REFERENCES named_agents(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE UNIQUE INDEX composite_agent_members_position_unique
+    ON composite_agent_members (composite_id, position);
+  CREATE UNIQUE INDEX composite_agent_members_member_unique
+    ON composite_agent_members (composite_id, member_id);
+
+  -- readDefaultCompositeAgentId() reads the designated default from here.
+  CREATE TABLE settings (
+    key TEXT PRIMARY KEY NOT NULL,
+    value TEXT NOT NULL,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+
 `);
 
 vi.mock("@/lib/db", () => ({ db: testDb, sqlite: testSqlite }));
@@ -68,6 +87,7 @@ async function runtimeConfig(
 }
 
 beforeEach(() => {
+  testSqlite.exec("DELETE FROM settings");
   testSqlite.exec("DELETE FROM named_agents");
   counter = 0;
 });

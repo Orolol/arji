@@ -34,6 +34,10 @@ export interface AgentRosterProps {
     name: string;
     provider: AgentProvider;
   }) => Promise<{ ok: boolean; error?: string }>;
+  onCreateComposite: (input: {
+    name: string;
+    memberIds: string[];
+  }) => Promise<{ ok: boolean; error?: string }>;
 }
 
 export function AgentRoster({
@@ -46,6 +50,7 @@ export function AgentRoster({
   availabilityLoading,
   onSelect,
   onCreate,
+  onCreateComposite,
 }: AgentRosterProps) {
   return (
     <div
@@ -67,7 +72,11 @@ export function AgentRoster({
         <AddAgentCard
           availability={availability}
           availabilityLoading={availabilityLoading}
+          // Nesting is refused server-side, so the pool a new composite can
+          // list is the SIMPLE agents only.
+          candidates={agents.filter((agent) => agent.kind !== "composite")}
           onCreate={onCreate}
+          onCreateComposite={onCreateComposite}
         />
       </div>
       <CliInventoryCard

@@ -211,8 +211,11 @@ describe("sessions/resumable route", () => {
     expect(drizzle.eq).toHaveBeenCalledWith("agentSessions.namedAgentId", "agent-omp");
   });
 
-  it("resolves provider from namedAgentId when agentType is absent", async () => {
-    mockState.getQueue = [{ id: "agent-omp", provider: "oh-my-pi" }];
+  it("resolves provider and member from namedAgentId even when agentType is absent", async () => {
+    mockState.getQueue = [{ id: "agent-omp" }];
+    mockResolveAgentByNamedId.mockReturnValue({
+      provider: "oh-my-pi", namedAgentId: "agent-omp",
+    });
     mockState.allQueue = [[{ id: "sess-2", cliSessionId: "cli-2" }]];
 
     const { GET } = await import(
@@ -228,6 +231,7 @@ describe("sessions/resumable route", () => {
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.data).toHaveLength(1);
+    expect(mockResolveAgentByNamedId).toHaveBeenCalledWith("build", "proj-1", "agent-omp");
     expect(drizzle.eq).toHaveBeenCalledWith("namedAgents.id", "agent-omp");
     expect(drizzle.eq).toHaveBeenCalledWith("agentSessions.provider", "oh-my-pi");
     expect(drizzle.eq).toHaveBeenCalledWith("agentSessions.namedAgentId", "agent-omp");

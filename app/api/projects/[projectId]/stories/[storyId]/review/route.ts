@@ -1,3 +1,4 @@
+import { withAgentResolutionErrors } from "@/lib/api/agent-resolution-response";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import {
@@ -67,7 +68,7 @@ const REVIEW_LABELS: Record<ReviewType, string> = {
   feature_review: "Feature Review",
 };
 
-export async function POST(request: NextRequest, { params }: Params) {
+export const POST = withAgentResolutionErrors(async function POST(request: NextRequest, { params }: Params) {
   const { projectId, storyId } = await params;
   const body = await request.json().catch(() => ({}));
 
@@ -241,6 +242,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       worktreePath,
       cliSessionId,
       namedAgentId: resolvedAgent.namedAgentId ?? null,
+      compositeAgentId: resolvedAgent.compositeAgentId ?? null,
       namedAgentName: resolvedAgent.name || null,
       model: resolvedAgent.model || null,
       agentType: REVIEW_TYPE_TO_AGENT_TYPE[reviewType],
@@ -383,4 +385,4 @@ export async function POST(request: NextRequest, { params }: Params) {
       resolutions,
     },
   });
-}
+});

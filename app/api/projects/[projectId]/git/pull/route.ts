@@ -1,3 +1,4 @@
+import { withAgentResolutionErrors } from "@/lib/api/agent-resolution-response";
 import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
@@ -41,7 +42,7 @@ import path from "path";
 
 type Params = { params: Promise<{ projectId: string }> };
 
-export async function POST(request: NextRequest, { params }: Params) {
+export const POST = withAgentResolutionErrors(async function POST(request: NextRequest, { params }: Params) {
   const { projectId } = await params;
 
   const found = getProjectOr404(projectId, { requireGitRepo: true });
@@ -192,6 +193,7 @@ export async function POST(request: NextRequest, { params }: Params) {
           worktreePath: project.gitRepoPath,
           cliSessionId,
           namedAgentId: resolved.namedAgentId ?? null,
+          compositeAgentId: resolved.compositeAgentId ?? null,
           agentType: "merge",
           namedAgentName: resolved.name || null,
           model: model || null,
@@ -378,4 +380,4 @@ export async function POST(request: NextRequest, { params }: Params) {
 
     return errorResponse(error, "Failed to pull branch.");
   }
-}
+});

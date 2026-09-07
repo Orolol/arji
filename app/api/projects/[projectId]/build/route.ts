@@ -1,3 +1,4 @@
+import { withAgentResolutionErrors } from "@/lib/api/agent-resolution-response";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
@@ -99,7 +100,7 @@ const batchBuildOptionsSchema = z.object({
   costCapUsd: z.number().positive().optional(),
 });
 
-export async function POST(
+export const POST = withAgentResolutionErrors(async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -345,6 +346,7 @@ export async function POST(
         logsPath,
         cliSessionId: teamCliSessionId,
         namedAgentId: resolvedTeamAgent.namedAgentId ?? null,
+        compositeAgentId: resolvedTeamAgent.compositeAgentId ?? null,
         agentType: "team_build",
         namedAgentName: resolvedTeamAgent.name || null,
         model: resolvedTeamAgent.model || null,
@@ -604,6 +606,7 @@ export async function POST(
       worktreePath,
       cliSessionId: soloCliSessionId,
       namedAgentId: resolvedBuildAgent.namedAgentId ?? null,
+      compositeAgentId: resolvedBuildAgent.compositeAgentId ?? null,
       agentType: "build",
       namedAgentName: resolvedBuildAgent.name || null,
       model: resolvedBuildAgent.model || null,
@@ -1015,4 +1018,4 @@ export async function POST(
       { status: 500 }
     );
   }
-}
+});

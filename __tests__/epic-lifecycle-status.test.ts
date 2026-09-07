@@ -290,7 +290,15 @@ describe("Epic build — marks US & epic as review on success", () => {
   beforeEach(() => {
     vi.resetModules();
     dbUpdates = [];
-    processManagerResult = { success: true, duration: 1000 };
+    // A DELIVERED build: `result` is what classifySessionOutcome reads to
+    // answer `answered` rather than `silent`. Without it this fixture is a
+    // silent run, which is no longer promoted — see the silent-build test at
+    // the foot of this describe.
+    processManagerResult = {
+      success: true,
+      result: "Implemented both stories.",
+      duration: 1000,
+    };
     mockProject = { id: "proj-1", name: "Test", gitRepoPath: "/repos/test" };
     mockEpic = {
       id: "epic-1",
@@ -325,6 +333,52 @@ describe("Epic build — marks US & epic as review on success", () => {
       (u) => u.table === "epics" && u.setValues.status === "review"
     );
     expect(epicReview).toBeDefined();
+  });
+});
+
+describe("Epic build — a SILENT build does NOT mark review", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    dbUpdates = [];
+    // Success with NO textual deliverable: classifySessionOutcome calls this
+    // `silent`. It used to be promoted to Review as a delivered build, which
+    // put an untouched branch in front of a reviewer — and, under Full Auto,
+    // in front of the merge gate.
+    processManagerResult = { success: true, duration: 1000 };
+    mockProject = { id: "proj-1", name: "Test", gitRepoPath: "/repos/test" };
+    mockEpic = {
+      id: "epic-1",
+      title: "Test Epic",
+      status: "in_progress",
+      branchName: "feature/epic-1-test",
+    };
+    mockStories = [
+      { id: "us-1", epicId: "epic-1", status: "in_progress", title: "US 1" },
+    ];
+  });
+
+  it("leaves the epic and its stories out of review when the agent said nothing", async () => {
+    const { POST } = await import(
+      "@/app/api/projects/[projectId]/epics/[epicId]/build/route"
+    );
+
+    const res = await POST(mockRequest({}), {
+      params: Promise.resolve({ projectId: "proj-1", epicId: "epic-1" }),
+    });
+
+    expect(res.status).toBe(200);
+    await flushBackground();
+
+    expect(
+      dbUpdates.find(
+        (u) => u.table === "userStories" && u.setValues.status === "review"
+      )
+    ).toBeUndefined();
+    expect(
+      dbUpdates.find(
+        (u) => u.table === "epics" && u.setValues.status === "review"
+      )
+    ).toBeUndefined();
   });
 });
 
@@ -555,7 +609,12 @@ describe("Story build — marks story as review on success", () => {
   beforeEach(() => {
     vi.resetModules();
     dbUpdates = [];
-    processManagerResult = { success: true, duration: 1000 };
+    // Delivered, not silent — see the note in the epic-scope describe above.
+    processManagerResult = {
+      success: true,
+      result: "Implemented the story.",
+      duration: 1000,
+    };
     mockProject = { id: "proj-1", name: "Test", gitRepoPath: "/repos/test" };
     mockEpic = {
       id: "epic-1",

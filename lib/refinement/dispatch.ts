@@ -233,6 +233,7 @@ export async function dispatchRefinementSession(
     worktreePath: cwd,
     cliSessionId,
     namedAgentId: resolvedAgent.namedAgentId ?? null,
+    compositeAgentId: resolvedAgent.compositeAgentId ?? null,
     namedAgentName: resolvedAgent.name ?? null,
     model: resolvedAgent.model ?? null,
     agentType: REFINEMENT_AGENT_TYPE,

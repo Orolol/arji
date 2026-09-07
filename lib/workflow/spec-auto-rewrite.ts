@@ -322,6 +322,7 @@ export async function dispatchSpecAutoRewriteSession(
     logsPath,
     cliSessionId,
     namedAgentId: resolvedAgent.namedAgentId ?? null,
+    compositeAgentId: resolvedAgent.compositeAgentId ?? null,
     agentType: SPEC_REWRITE_AGENT_TYPE,
     namedAgentName: resolvedAgent.name || null,
     model: resolvedAgent.model || null,

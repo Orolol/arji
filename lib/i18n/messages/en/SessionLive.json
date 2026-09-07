@@ -130,6 +130,7 @@
     "rows": {
       "agent": "Agent",
       "model": "Model",
+      "composite": "Composite",
       "effort": "Effort",
       "permissions": "Permissions",
       "started": "Started",

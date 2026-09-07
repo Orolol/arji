@@ -540,6 +540,17 @@ async function reconcileInFlight(
       status === "completed" &&
       sessionOutcome === SESSION_TRANSITION_REFUSED_OUTCOME;
 
+    // A BUILD that said nothing at all delivered nothing at all. It used to
+    // be credited as a success here, because finalizeBuildTerminalOutcome
+    // promoted it to Review and the tree was therefore something the merge
+    // gate would be asked about. It no longer is: a silent build is held in
+    // in_progress, so crediting it would clear the very streak that stops
+    // build → silence → build from looping forever.
+    const silentBuild =
+      status === "completed" &&
+      entry.kind === "build" &&
+      sessionOutcome === "silent";
+
     // What the checks are allowed to run against. A build that stopped to ask
     // the user something DELIVERED NOTHING: the ticket is held in
     // `in_progress` awaiting a reply and its worktree is half-finished, so
@@ -549,15 +560,17 @@ async function reconcileInFlight(
     // lib/pipeline/runner.ts returns `paused_question` before its
     // verification block, i.e. `success && outcome !== "asked_question"`.
     //
-    // `silent` is deliberately NOT excluded, and that is not an oversight:
-    // finalizeBuildTerminalOutcome still promotes a silent build to Review,
-    // so it is a tree the merge gate will be asked about. An agent that
-    // delivered without saying anything is precisely the case where
-    // mechanical evidence matters most.
+    // `silent` is excluded for the same reason: the build is held in
+    // in_progress and its branch carries nothing anyone asked for. Spending a
+    // verification pass on it would charge a phantom failure to the parking
+    // ladder that `silentBuild` above is already charging, and would drop a
+    // failing-test comment on a ticket whose real problem is that no agent
+    // did any work.
     const deliveredCode =
       status === "completed" &&
       entry.kind === "build" &&
       !transitionRefused &&
+      !silentBuild &&
       sessionOutcome !== "asked_question";
 
     if (deliveredCode && verificationRan) {
@@ -631,7 +644,12 @@ async function reconcileInFlight(
       }
     }
 
-    if (status === "completed" && !unusableReview && !transitionRefused) {
+    if (
+      status === "completed" &&
+      !unusableReview &&
+      !transitionRefused &&
+      !silentBuild
+    ) {
       // Delivered code: run Arij's own checks BEFORE crediting the session,
       // because a red branch is not a success. Clearing the streak first
       // would erase the very failure the check is about to record, and
@@ -650,7 +668,14 @@ async function reconcileInFlight(
       autoModeRegistry.clearFailures(projectId, entry.ticketId);
       continue;
     }
-    if (status !== "failed" && !unusableReview && !transitionRefused) continue;
+    if (
+      status !== "failed" &&
+      !unusableReview &&
+      !transitionRefused &&
+      !silentBuild
+    ) {
+      continue;
+    }
 
     const failures = autoModeRegistry.recordFailure(
       projectId,
@@ -658,6 +683,8 @@ async function reconcileInFlight(
       entry.epicId,
       transitionRefused
         ? "build completed but its workflow transition was refused"
+        : silentBuild
+        ? "build completed without producing any output"
         : unusableReview
         ? "review completed with no usable verdict"
         : `${entry.kind} session failed`

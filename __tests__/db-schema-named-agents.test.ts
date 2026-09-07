@@ -11,7 +11,11 @@ describe("Schema: namedAgents table and provider types", () => {
     expect(columnNames).toContain("name");
     expect(columnNames).toContain("provider");
     expect(columnNames).toContain("model");
-    expect(columnNames).toContain("escalatesTo");
+    // `escalatesTo` is deliberately ABSENT: 0054 dropped the retired
+    // same-provider escalation, and `kind` is what replaced it — a composite
+    // is a row of this very table (see composite_agent_members).
+    expect(columnNames).not.toContain("escalatesTo");
+    expect(columnNames).toContain("kind");
     expect(columnNames).toContain("createdAt");
   });
 

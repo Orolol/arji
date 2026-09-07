@@ -35,6 +35,12 @@ export interface SessionDetail {
   agentType?: string | null;
   outcome?: string | null;
   namedAgentName?: string | null;
+  /**
+   * The COMPOSITE that dispatched this run, when one did. `namedAgentName`
+   * stays the member that actually ran; without both, two runs resolved from
+   * different fallback lists are indistinguishable in the audit trail.
+   */
+  compositeAgentName?: string | null;
   model?: string | null;
   /** JSON object of the per-CLI options in effect for this run. */
   cliOptions?: string | null;

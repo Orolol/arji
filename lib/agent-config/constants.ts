@@ -254,6 +254,40 @@ export function isAgentProvider(value: string): value is AgentProvider {
   return (PROVIDER_OPTIONS as readonly string[]).includes(value);
 }
 
+/* ------------------------------------------------------------------ */
+/* Composite agents                                                    */
+/* ------------------------------------------------------------------ */
+
+/** `named_agents.kind` — a composite is a row of that table, not a table. */
+export const SIMPLE_AGENT_KIND = "simple";
+export const COMPOSITE_AGENT_KIND = "composite";
+export type NamedAgentKind =
+  | typeof SIMPLE_AGENT_KIND
+  | typeof COMPOSITE_AGENT_KIND;
+
+/**
+ * Sentinel written into the NOT NULL `named_agents.provider` column of a
+ * composite, which owns no provider of its own.
+ *
+ * Deliberately NOT a member of `PROVIDER_OPTIONS`, so `isAgentProvider()`
+ * rejects it: nothing can spawn a composite by accident. Resolution unfolds a
+ * composite to one of its members, and the member's provider is what reaches
+ * the child process.
+ */
+export const COMPOSITE_AGENT_PROVIDER = "composite";
+
+/** Sentinel for the NOT NULL `named_agents.model` column of a composite. */
+export const COMPOSITE_AGENT_MODEL = "";
+
+/**
+ * Settings key naming the composite that answers "Default agent".
+ *
+ * A setting rather than a column, and that is what makes "one at a time" a
+ * property of the storage instead of an invariant some write path has to
+ * maintain across rows.
+ */
+export const DEFAULT_COMPOSITE_AGENT_SETTING_KEY = "default_composite_agent";
+
 /** True for anything a chat conversation can run on (see ChatModeProvider). */
 export function isChatProvider(value: string): value is ChatModeProvider {
   return (

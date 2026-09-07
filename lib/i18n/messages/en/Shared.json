@@ -64,6 +64,11 @@
     "cliProviders": "CLI Providers",
     "cliProvider": "{label} (CLI)"
   },
+  "composite": {
+    "count": "composite · {count}",
+    "empty": "composite · empty",
+    "unusable": "no members — unusable"
+  },
   "permanentDelete": {
     "warning": "This action cannot be undone."
   },

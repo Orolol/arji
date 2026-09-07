@@ -175,7 +175,7 @@ describe("agents workshop editor", () => {
     expect(screen.getByLabelText("Persona")).toHaveValue("");
   });
 
-  it("keeps Save disabled until something changes, then sends all six fields", async () => {
+  it("keeps Save disabled until something changes, then sends the five fields a simple agent owns", async () => {
     render(<AgentsWorkshopView />);
 
     const save = screen.getByRole("button", { name: "Save" });
@@ -198,7 +198,6 @@ describe("agents workshop editor", () => {
       model: "claude-opus-5",
       options: { effort: "max" },
       personaPrompt: "You're an experienced developer.",
-      escalatesTo: "agent-3",
     });
   });
 
@@ -212,7 +211,7 @@ describe("agents workshop editor", () => {
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
-  it("drops ghost options and a cross-provider escalation when the CLI changes", async () => {
+  it("drops ghost options when the CLI changes", async () => {
     render(<AgentsWorkshopView />);
 
     const codexItem = within(cliGroup())
@@ -228,10 +227,11 @@ describe("agents workshop editor", () => {
     const payload = state.updateNamedAgent.mock.calls[0][1];
     // `effort` is a claude-code key codex never declares.
     expect(payload.options).toEqual({});
-    // agent-3 is claude-code; keeping the edge would make the agent
-    // permanently unsaveable over a field the user never touched.
-    expect(payload.escalatesTo).toBe(null);
     expect(payload.provider).toBe("codex");
+    // The retry-escalation edge that used to have to be cleared alongside the
+    // options is gone: a simple agent is retried as itself, and fallback to
+    // another agent is a COMPOSITE's job now.
+    expect(payload).not.toHaveProperty("escalatesTo");
   });
 
   it("renders the server's error text verbatim in an alert", async () => {
