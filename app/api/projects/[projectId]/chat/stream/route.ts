@@ -182,14 +182,18 @@ export const POST = withAgentResolutionErrors(async function POST(
     conversation?.namedAgentId ?? null
   );
   const conversationProvider = normalizeProvider(conversation?.provider);
-  const persistentProvider = isPersistentChatProvider(conversationProvider)
-    ? conversationProvider
-    : null;
+  const overridesProvider =
+    Boolean(conversationProvider) && !conversation?.namedAgentId;
+  // A named agent (including a composite member) owns execution and CLI
+  // options. The stored provider is only its fallback if the agent is deleted;
+  // it must not route that member's model into an unrelated warm process.
+  const persistentProvider =
+    overridesProvider && isPersistentChatProvider(conversationProvider)
+      ? conversationProvider
+      : null;
   const conversationExecutionProvider = persistentProvider
     ? persistentChatBaseProvider(persistentProvider)
     : conversationProvider;
-  const overridesProvider =
-    Boolean(conversationProvider) && !conversation?.namedAgentId;
   const resolvedAgent =
     overridesProvider && conversationExecutionProvider
       ? {

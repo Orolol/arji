@@ -102,6 +102,9 @@ export const POST = withAgentResolutionErrors(async function POST(
   const conversationId = body.conversationId || null;
   const attachmentIds: string[] = body.attachmentIds || [];
 
+  // Refuse an unusable agent before storing the message or linking uploads.
+  const resolvedAgent = resolveAgentByNamedId("chat", projectId, namedAgentId);
+
   // Save user message
   const userMsgId = createId();
   const userContent = body.content || (attachmentIds.length > 0 ? "[image]" : "");
@@ -147,7 +150,6 @@ export const POST = withAgentResolutionErrors(async function POST(
     chatSystemPrompt
   );
 
-  const resolvedAgent = resolveAgentByNamedId("chat", projectId, namedAgentId);
   // The new user message plus earlier user messages only: an assistant reply
   // naming a codebase file is not an Arij document reference. Unknown mentions
   // in the new message already returned 400 above (validateMentionsExist).
