@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useCallback, useState } from "react";
 import { GitMerge, Hammer, RefreshCw, Send, X } from "lucide-react";
-import { useLocale } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 
 import {
   GhostInputPill,
@@ -37,7 +37,7 @@ import { cn } from "@/lib/utils";
  * the row — a neutral hairline circle, last in the tab order.
  *
  * Rows are tab-walkable; ⏎ on a focused row focuses its reply field, which is
- * what the header hint "↹ parcourir · ⏎ répondre" promises.
+ * what the header hint "↹ browse · ⏎ reply" promises.
  *
  * NARROW VIEWPORTS — B-arij-M9zsQujUTCoR.
  *
@@ -177,6 +177,7 @@ export function AsksYouRow({
   pending = false,
   className,
 }: AsksYouRowProps) {
+  const t = useTranslations("Desk");
   const [draft, setDraft] = useState("");
   const [focusKey, setFocusKey] = useState<number | undefined>(undefined);
   const onKeyDown = useRowEnter(() => setFocusKey((key) => (key ?? 0) + 1));
@@ -197,7 +198,7 @@ export function AsksYouRow({
       className={cn(ROW_CLASS, className)}
     >
       <div data-testid="desk-row-head" className={ROW_HEAD_CLASS}>
-        <Stamp tone="asks">ASKS YOU</Stamp>
+        <Stamp tone="asks">{t("rows.asksYou")}</Stamp>
         <IdentityChip
           label={item.readableId ?? project?.shortName ?? "—"}
           tone={projectTone(project?.colorIndex ?? 0)}
@@ -220,7 +221,7 @@ export function AsksYouRow({
           value={draft}
           onChange={setDraft}
           onSubmit={send}
-          placeholder="Répondre à l'agent…"
+          placeholder={t("rows.replyPlaceholder")}
           fill="field"
           autoFocusKey={focusKey}
           disabled={pending}
@@ -232,7 +233,7 @@ export function AsksYouRow({
             "w-full max-w-[300px] min-w-[120px] shrink",
             "max-lg:max-w-none max-lg:flex-[1_1_240px]",
           )}
-          aria-label="Répondre à l'agent"
+          aria-label={t("rows.replyLabel")}
         />
         <div data-testid="desk-row-buttons" className={ROW_BUTTONS_CLASS}>
           <PillButton
@@ -243,7 +244,7 @@ export function AsksYouRow({
             disabled={pending || draft.trim().length === 0}
             className="gap-1.5 px-[14px]"
           >
-            Send
+            {t("rows.send")}
           </PillButton>
           <PillButton
             variant="outline"
@@ -253,11 +254,11 @@ export function AsksYouRow({
             disabled={pending}
             className="gap-1.5"
           >
-            Send to dev
+            {t("rows.sendToDev")}
           </PillButton>
           {onDismiss ? (
             <DismissButton
-              label="Écarter cette question"
+              label={t("rows.dismissQuestion")}
               onDismiss={() => void onDismiss(item)}
               disabled={pending}
             />
@@ -293,6 +294,7 @@ export function FailedRow({
   className,
 }: FailedRowProps) {
   const onKeyDown = useRowEnter(() => void onRetry(item));
+  const t = useTranslations("Desk");
   const locale = useLocale();
   // "21m ago" — the frame's relative stamp, counted in seconds while fresh.
   const age = formatRelative(item.failedAt, { locale, precision: "second" }) || "—";
@@ -307,7 +309,7 @@ export function FailedRow({
       className={cn(ROW_CLASS, className)}
     >
       <div data-testid="desk-row-head" className={ROW_HEAD_CLASS}>
-        <Stamp tone="failed">FAILED</Stamp>
+        <Stamp tone="failed">{t("rows.failed")}</Stamp>
         <IdentityChip
           label={item.readableId ?? project?.shortName ?? "—"}
           tone={projectTone(project?.colorIndex ?? 0)}
@@ -327,17 +329,17 @@ export function FailedRow({
           icon={RefreshCw}
           onClick={() => void onRetry(item)}
           pending={pending}
-          pendingLabel="Retrying"
+          pendingLabel={t("rows.retrying")}
           className="gap-1.5 px-[14px]"
         >
-          Retry
+          {t("rows.retry")}
         </PillButton>
         <PillButton variant="outline" size="md" onClick={() => onOpenLog(item)}>
-          Log
+          {t("rows.log")}
         </PillButton>
         {onDismiss ? (
           <DismissButton
-            label="Écarter cet échec"
+            label={t("rows.dismissFailure")}
             onDismiss={() => void onDismiss(item)}
             disabled={pending}
           />
@@ -371,6 +373,7 @@ export function ConflictRow({
   pending = false,
   className,
 }: ConflictRowProps) {
+  const t = useTranslations("Desk");
   // A conflict-resolution agent merges main into the branch. That repairs a
   // genuine merge conflict and does NOTHING for committed conflict markers —
   // it would find a clean merge and leave the markers in place — so the
@@ -389,7 +392,7 @@ export function ConflictRow({
       className={cn(ROW_CLASS, className)}
     >
       <div data-testid="desk-row-head" className={ROW_HEAD_CLASS}>
-        <Stamp tone="conflict">CONFLICT</Stamp>
+        <Stamp tone="conflict">{t("rows.conflict")}</Stamp>
         <IdentityChip
           label={item.readableId ?? project?.shortName ?? "—"}
           tone={projectTone(project?.colorIndex ?? 0)}
@@ -402,7 +405,8 @@ export function ConflictRow({
             "max-sm:line-clamp-2",
           )}
         >
-          {resolvable ? "Conflit avec main · " : "Marqueurs de conflit commités · "}
+          {resolvable ? t("rows.conflictWithMain") : t("rows.conflictMarkers")}
+          {" · "}
           <Mono size={12} tone="muted">
             {item.branchName ?? item.title}
           </Mono>
@@ -416,18 +420,18 @@ export function ConflictRow({
             icon={GitMerge}
             onClick={() => void onResolve(item)}
             pending={pending}
-            pendingLabel="Resolving"
+            pendingLabel={t("rows.resolving")}
             className="gap-1.5 px-[14px]"
           >
-            Resolve with agent
+            {t("rows.resolveWithAgent")}
           </PillButton>
         ) : null}
         <PillButton variant="outline" size="md" onClick={() => onOpenDiff(item)}>
-          Diff
+          {t("rows.diff")}
         </PillButton>
         {onDismiss ? (
           <DismissButton
-            label="Écarter ce conflit"
+            label={t("rows.dismissConflict")}
             onDismiss={() => void onDismiss(item)}
             disabled={pending}
           />

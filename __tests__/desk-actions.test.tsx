@@ -155,7 +155,7 @@ describe("desk mutations", () => {
     const fetchMock = mockFetch(() => ({ body: { data: { ok: true } } }));
     render(<NowDesk />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Écarter cet échec" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Dismiss this failure" }));
 
     await waitFor(() => expect(calls(fetchMock, "/api/desk/dismiss").length).toBe(1));
     const [url, init] = calls(fetchMock, "/api/desk/dismiss")[0];
@@ -184,9 +184,9 @@ describe("desk mutations", () => {
     );
     render(<NowDesk />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Écarter cet échec" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Dismiss this failure" }));
 
-    expect(await screen.findByText("Impossible d'écarter ce signal")).toBeInTheDocument();
+    expect(await screen.findByText("Could not dismiss this signal")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalled();
   });
 
@@ -427,7 +427,7 @@ describe("desk mutations", () => {
     fireEvent.keyDown(input, { key: "Enter" });
     const status = await screen.findByRole("status");
     expect(status).toHaveTextContent("Visible confirmation");
-    expect(screen.getByRole("link", { name: "Voir le ticket" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "View the ticket" })).toHaveAttribute(
       "href", "/projects/p1?ticket=new-epic",
     );
     fireEvent.click(screen.getByRole("button", { name: "Fermer la notification" }));
@@ -444,11 +444,11 @@ describe("desk mutations", () => {
     fireEvent.change(input, { target: { value: "Created before disconnect" } });
     fireEvent.keyDown(input, { key: "Enter", shiftKey: true });
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("Ticket créé");
-    expect(alert).toHaveTextContent("lancement du build");
+    expect(alert).toHaveTextContent("Ticket created");
+    expect(alert).toHaveTextContent("could not be confirmed");
     expect(input).toHaveValue("");
     expect(calls(fetchMock, "/epics").filter((call) => !call[0].endsWith("/build"))).toHaveLength(1);
-    expect(screen.getByRole("link", { name: "Voir le ticket" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "View the ticket" })).toHaveAttribute(
       "href", "/projects/p1?ticket=new-epic",
     );
   });
@@ -475,7 +475,9 @@ describe("desk mutations", () => {
     const input = await screen.findByTestId("desk-composer-input");
     fireEvent.change(input, { target: { value: "Saved ticket" } });
     fireEvent.keyDown(input, { key: "Enter", shiftKey: true });
-    expect(await screen.findByRole("alert")).toHaveTextContent("Ticket créé, mais le lancement du build a échoué : Build already running");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Ticket created, but the build failed to launch: Build already running",
+    );
     expect(input).toHaveValue("");
   });
 

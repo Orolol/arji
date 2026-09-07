@@ -7,10 +7,11 @@
  * one, and that the footer counts what is held back.
  */
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 
-import { ReadyToLandBand, landMeta } from "@/components/desk/ReadyToLandBand";
+import { resetTestUiLocale, setTestUiLocale } from "@/__tests__/support/next-intl-mock";
+import { ReadyToLandBand } from "@/components/desk/ReadyToLandBand";
 import { deriveProjects } from "@/lib/control-desk/aggregate";
 import type { DeskLandRow } from "@/lib/control-desk/types";
 
@@ -65,9 +66,10 @@ describe("land rows", () => {
   });
 
   it("omits the PR number when there is no PR", () => {
-    expect(landMeta(row({ epicId: "83", prNumber: null, usCount: 3, usDone: 3 }))).toBe(
-      "clean · 3/3 US",
-    );
+    renderBand({
+      rows: [row({ epicId: "83", prNumber: null, usCount: 3, usDone: 3 })],
+    });
+    expect(screen.getByText("clean · 3/3 US")).toBeInTheDocument();
   });
 
   it("names the open findings without refusing the merge", () => {
@@ -89,7 +91,7 @@ describe("land rows", () => {
     // Queued counts: merging removes the worktree a queued build would land in.
     renderBand({ rows: [row({ epicId: "107", agentBusy: true })] });
     expect(screen.queryByTestId("desk-land-button")).not.toBeInTheDocument();
-    expect(screen.getByText("agent au travail")).toBeInTheDocument();
+    expect(screen.getByText("agent at work")).toBeInTheDocument();
   });
 
   it("locks every other row while one merge is in flight", () => {
@@ -148,22 +150,59 @@ describe("batch land", () => {
 });
 
 describe("held back", () => {
+  afterEach(() => resetTestUiLocale());
+
   it("reports how many to_merge tickets a blocker holds back", () => {
     renderBand({ rows: [row({ epicId: "1" })], heldBackCount: 2 });
     expect(
-      screen.getByText("2 autres bloqués par des findings ouverts →"),
+      screen.getByText("2 more blocked by open findings →"),
     ).toBeInTheDocument();
   });
 
   it("agrees with itself in the singular", () => {
     renderBand({ heldBackCount: 1 });
     expect(
+      screen.getByText("1 more blocked by open findings →"),
+    ).toBeInTheDocument();
+  });
+
+  /*
+    English does not inflect this line, so the agreement the original French
+    copy carried now lives in the French catalogue seed. Reading it through the
+    same component is what keeps that ICU plural honest.
+  */
+  it("agrees in the French seed, where the line does inflect", () => {
+    setTestUiLocale("fr");
+    const { unmount } = render(
+      <ReadyToLandBand
+        rows={[]}
+        heldBackCount={1}
+        projectsById={projectsById}
+        onLand={vi.fn()}
+        onLandAll={vi.fn()}
+      />,
+    );
+    expect(
       screen.getByText("1 autre bloqué par des findings ouverts →"),
+    ).toBeInTheDocument();
+    unmount();
+
+    render(
+      <ReadyToLandBand
+        rows={[]}
+        heldBackCount={2}
+        projectsById={projectsById}
+        onLand={vi.fn()}
+        onLandAll={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByText("2 autres bloqués par des findings ouverts →"),
     ).toBeInTheDocument();
   });
 
   it("says nothing when nothing is held back", () => {
     renderBand({ rows: [row({ epicId: "1" })] });
-    expect(screen.queryByText(/bloqué/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/blocked by open findings/)).not.toBeInTheDocument();
   });
 });

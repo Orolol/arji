@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { FolderKanban } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { IdentityChip, pillButtonVariants, projectTone } from "@/components/piscine";
 import {
@@ -13,19 +14,25 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { DeskProject } from "@/lib/control-desk/types";
+import type { TranslationKey } from "@/lib/i18n/catalogue";
 
-const PROJECT_PAGES = [
-  { segment: "", label: "Board" },
-  { segment: "/spec", label: "Spec & Memory" },
-  { segment: "/sessions", label: "Sessions" },
-  { segment: "/documents", label: "Docs" },
-  { segment: "/qa", label: "QA" },
-  { segment: "/frictions", label: "Frictions" },
-  { segment: "/releases", label: "Releases" },
-  { segment: "/git-sync", label: "Git Sync" },
-  { segment: "/github-issues", label: "GitHub Issues" },
-  { segment: "/settings", label: "Settings" },
-] as const;
+/**
+ * A module-scope copy table, so it holds catalogue KEY REFERENCES and the menu
+ * resolves them at render with the namespace-less translator
+ * (`lib/i18n/catalogue.ts`, pattern 3).
+ */
+const PROJECT_PAGES: ReadonlyArray<{ segment: string; labelKey: TranslationKey }> = [
+  { segment: "", labelKey: "Desk.projectMenu.pages.board" },
+  { segment: "/spec", labelKey: "Desk.projectMenu.pages.spec" },
+  { segment: "/sessions", labelKey: "Desk.projectMenu.pages.sessions" },
+  { segment: "/documents", labelKey: "Desk.projectMenu.pages.documents" },
+  { segment: "/qa", labelKey: "Desk.projectMenu.pages.qa" },
+  { segment: "/frictions", labelKey: "Desk.projectMenu.pages.frictions" },
+  { segment: "/releases", labelKey: "Desk.projectMenu.pages.releases" },
+  { segment: "/git-sync", labelKey: "Desk.projectMenu.pages.gitSync" },
+  { segment: "/github-issues", labelKey: "Desk.projectMenu.pages.githubIssues" },
+  { segment: "/settings", labelKey: "Desk.projectMenu.pages.settings" },
+];
 
 export interface DeskProjectMenuProps {
   projects: readonly DeskProject[];
@@ -37,11 +44,13 @@ export interface DeskProjectMenuProps {
  * changing that filtering interaction.
  */
 export function DeskProjectMenu({ projects }: DeskProjectMenuProps) {
+  const t = useTranslations();
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
         data-testid="desk-project-pages"
-        aria-label="Project pages"
+        aria-label={t("Desk.projectMenu.label")}
         disabled={projects.length === 0}
         className={pillButtonVariants({
           variant: "outline",
@@ -57,7 +66,7 @@ export function DeskProjectMenu({ projects }: DeskProjectMenuProps) {
         className="w-[min(360px,calc(100vw-16px))] max-h-[min(560px,calc(100vh-80px))]"
       >
         <DropdownMenuLabel className="font-mono text-[10.5px] font-bold uppercase text-muted-foreground">
-          Project pages
+          {t("Desk.projectMenu.label")}
         </DropdownMenuLabel>
         {projects.map((project, index) => (
           <div key={project.id}>
@@ -82,7 +91,7 @@ export function DeskProjectMenu({ projects }: DeskProjectMenuProps) {
                     href={`/projects/${project.id}${page.segment}`}
                     className="min-w-0 truncate text-[12.5px]"
                   >
-                    {page.label}
+                    {t(page.labelKey)}
                   </Link>
                 </DropdownMenuItem>
               ))}

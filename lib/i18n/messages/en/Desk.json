@@ -1,0 +1,141 @@
+{
+  "controls": {
+    "fullAuto": "Full Auto · {on}/{total}"
+  },
+  "projectMenu": {
+    "label": "Project pages",
+    "pages": {
+      "board": "Board",
+      "spec": "Spec & Memory",
+      "sessions": "Sessions",
+      "documents": "Docs",
+      "qa": "QA",
+      "frictions": "Frictions",
+      "releases": "Releases",
+      "gitSync": "Git Sync",
+      "githubIssues": "GitHub Issues",
+      "settings": "Settings"
+    }
+  },
+  "fullAuto": {
+    "defaultAgent": "Default",
+    "live": "{count} live"
+  },
+  "working": {
+    "label": "Working",
+    "meta": "{agents, plural, one {# agent} other {# agents}} · {queued} queued",
+    "night": "NIGHT",
+    "stalled": "STALLED",
+    "stopSession": "Stop this session"
+  },
+  "queued": {
+    "label": "QUEUED · {count}"
+  },
+  "today": {
+    "label": "TODAY",
+    "landed": "landed",
+    "failed": "failed",
+    "projects": "{count, plural, one {{value} project} other {{value} projects}}",
+    "sessions": "{count, plural, one {{value} session} other {{value} sessions}}"
+  },
+  "waves": {
+    "wave": "Wave {current}/{total}",
+    "nightWave": "Night wave {current}/{total}",
+    "batchTitle": "DAG batch build: dependency waves run in order",
+    "nightTitle": "Night run: dependency waves, each epic chained through the autonomous pipeline",
+    "stopNightRun": "Stop night run",
+    "stopping": "Stopping…",
+    "stopTitle": "Stop the night run: no new epic is launched. Epics already running finish their pipeline."
+  },
+  "yourTurn": {
+    "label": "Your turn",
+    "hint": "↹ browse · ⏎ reply",
+    "overflow": "+{count} more"
+  },
+  "rows": {
+    "asksYou": "ASKS YOU",
+    "failed": "FAILED",
+    "conflict": "CONFLICT",
+    "replyPlaceholder": "Reply to the agent…",
+    "replyLabel": "Reply to the agent",
+    "send": "Send",
+    "sendToDev": "Send to dev",
+    "retry": "Retry",
+    "retrying": "Retrying",
+    "log": "Log",
+    "conflictWithMain": "Conflict with main",
+    "conflictMarkers": "Committed conflict markers",
+    "resolveWithAgent": "Resolve with agent",
+    "resolving": "Resolving",
+    "diff": "Diff",
+    "dismissQuestion": "Dismiss this question",
+    "dismissFailure": "Dismiss this failure",
+    "dismissConflict": "Dismiss this conflict"
+  },
+  "land": {
+    "label": "Ready to land",
+    "land": "Land",
+    "landBoth": "Land both",
+    "landAll": "Land all {count}",
+    "landing": "Landing…",
+    "clean": "clean",
+    "findings": "{count, plural, one {# finding} other {# findings}}",
+    "userStories": "{done}/{count} US",
+    "agentBusy": "agent at work",
+    "heldBack": "{count} more blocked by open findings →"
+  },
+  "upNext": {
+    "label": "Up next",
+    "hint": "the order Full Auto picks from",
+    "chipBlocked": "{id} blocked",
+    "chipAwaiting": "{id} waiting",
+    "chipSpec": "{label} · spec",
+    "blockedBy": "Blocked by {ids}"
+  },
+  "composer": {
+    "label": "Describe a feature",
+    "placeholder": "Describe a feature — ⏎ writes the epic and its stories, ⇧⏎ sends it to dev"
+  },
+  "palette": {
+    "dialogLabel": "Search",
+    "inputLabel": "Search",
+    "placeholder": "Search a ticket, a project, a session…",
+    "empty": "Nothing matches.",
+    "hintProject": "open the project",
+    "hintSession": "{taskType} running",
+    "hintYourTurn": "your turn",
+    "hintFailed": "failed",
+    "hintConflict": "conflict",
+    "hintReadyToLand": "ready to land",
+    "hintUpNext": "up next"
+  },
+  "toasts": {
+    "replySent": "Reply sent",
+    "replyFailed": "Failed to post the reply",
+    "sentToDev": "Sent to dev",
+    "buildFailed": "Failed to launch the build",
+    "retrying": "Retrying build for epic",
+    "retryFailed": "Failed to retry build",
+    "dismissFailed": "Could not dismiss this signal",
+    "merged": "Merged into the base branch",
+    "conflictAgentDispatched": "Merge conflict — resolution agent dispatched",
+    "resolveFailed": "Failed to resolve the merge",
+    "mergeFailed": "Failed to merge",
+    "mergeFixAgent": "Launched merge-fix agent",
+    "mergedCount": "{count, plural, one {Merged # epic} other {Merged # epics}}",
+    "mergeFixAgentCount": "{count, plural, one {Launched merge-fix agent for # epic} other {Launched merge-fix agent for # epics}}",
+    "mergesFailed": "{count, plural, one {# merge failed} other {# merges failed}}",
+    "sessionStopped": "Session stopped",
+    "stopSessionFailed": "Failed to stop the session",
+    "captureFailed": "Failed to capture the idea",
+    "viewTicket": "View the ticket",
+    "ticketCreated": "Ticket created in the backlog: {title}",
+    "ticketCreatedAndDispatched": "Ticket created and sent to dev: {title}",
+    "ticketCreatedDispatchFailed": "Ticket created, but the build failed to launch: {reason}",
+    "ticketCreatedDispatchUnconfirmed": "Ticket created, but the build launch could not be confirmed: {title}",
+    "autoAgentFailed": "Failed to change the Full Auto agent",
+    "autoFailed": "Failed to change Full Auto",
+    "autoOn": "Full Auto Mode is on",
+    "autoOff": "Full Auto Mode is off"
+  }
+}

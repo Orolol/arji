@@ -177,7 +177,7 @@ const CORAL_CONTROL_SELECTOR = [
  *
  * HORIZONTAL, deliberately. YOUR TURN caps and scrolls its own row list, so a
  * row past the fold is legitimately off screen VERTICALLY — that is the
- * design, and the "+N de plus" marker says so. The reported defect is the
+ * design, and the "+N more" marker says so. The reported defect is the
  * other axis: a control whose box lies outside the viewport's width can never
  * be reached at all, however far the user scrolls.
  */
@@ -514,7 +514,7 @@ test.describe("the desk on a phone", () => {
     // below fail for a reason that has nothing to do with the layout.
     const send = row.getByRole("button", { name: "Send", exact: true });
     await expect(send).toBeDisabled();
-    await row.getByRole("textbox", { name: "Répondre à l'agent" }).fill("Supprime-le.");
+    await row.getByRole("textbox", { name: "Reply to the agent" }).fill("Supprime-le.");
     await expect(send).toBeEnabled();
 
     // Every control of the first row hit-tests to itself.
@@ -546,7 +546,7 @@ test.describe("the desk on a phone", () => {
 
     try {
       // The mutation. Real route, real (isolated) database.
-      await row.getByRole("button", { name: "Écarter cette question" }).click();
+      await row.getByRole("button", { name: "Dismiss this question" }).click();
       await expect
         .poll(
           () =>

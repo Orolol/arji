@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
 
 import { BandHeader, Mono, StrataBand } from "@/components/piscine";
 import type { DeskDismissalKind } from "@/lib/control-desk/aggregate";
@@ -25,13 +26,13 @@ import { AsksYouRow, ConflictRow, FailedRow } from "./AttentionRow";
  * That is the design's own promise: "un matin sans blocage, l'abricot se
  * replie en une ligne."
  *
- * OVERFLOW: the band caps at 30vh and the row list scrolls. A mono "+N de plus"
+ * OVERFLOW: the band caps at 30vh and the row list scrolls. A mono "+N more"
  * line under the list says so, because an overflow marker inside a scroll
  * container is only visible once you have already scrolled.
  *
  * N IS MEASURED, NOT GUESSED. It used to be `count - 3`, on the assumption that
  * three rows fit. What fits is 30vh divided by the row height: at 1440x1300 a
- * fourth row is on screen and "+3 de plus" was simply false. The count now comes
+ * fourth row is on screen and "+3 more" was simply false. The count now comes
  * from the scroll container — rows whose bottom edge falls past the fold — so it
  * stays true on any viewport, and it decreases as the user scrolls.
  *
@@ -79,6 +80,7 @@ export function YourTurnBand({
   onDismiss,
   className,
 }: YourTurnBandProps) {
+  const t = useTranslations("Desk");
   const count = awaitingReply.length + failed.length + conflicts.length;
 
   const listRef = useRef<HTMLDivElement | null>(null);
@@ -98,7 +100,7 @@ export function YourTurnBand({
    *
    * The marker lives INSIDE the capped band, so showing it shrinks the very
    * scroll container it describes: one measurement reports a count for a
-   * layout that no longer exists, which is how "+4 de plus" appeared over
+   * layout that no longer exists, which is how "+4 more" appeared over
    * three hidden rows at 1440x950. Re-measuring after each commit settles it
    * in two or three passes.
    *
@@ -215,21 +217,21 @@ export function YourTurnBand({
         50vh below `lg` — B-arij-M9zsQujUTCoR. A stacked coral row is ~166px at
         390px (identity, question over two lines, field, three buttons) against
         53px on a desktop, so 30vh of an 844px screen left ONE partial row and
-        "+6 de plus". Half the viewport shows two whole rows and still stops the
+        "+6 more". Half the viewport shows two whole rows and still stops the
         stratum from taking the page; below `lg` the desk scrolls, so the cap is
         no longer what keeps the bands under it reachable.
       */
       className={cn("mx-[14px] mt-[10px] max-h-[30vh] max-lg:max-h-[50vh]", className)}
     >
       <BandHeader
-        label="Your turn"
+        label={t("yourTurn.label")}
         stratum="you"
         labelSize={13}
         meta={count > 0 ? String(count) : undefined}
         right={
           count > 0 ? (
             <Mono size={11} tone="you-mid">
-              ↹ parcourir · ⏎ répondre
+              {t("yourTurn.hint")}
             </Mono>
           ) : undefined
         }
@@ -294,7 +296,7 @@ export function YourTurnBand({
         // spread), so the test hook lives on the wrapper.
         <div data-testid="desk-your-turn-overflow" className="shrink-0">
           <Mono size={11} tone="you-mid">
-            {`+${hiddenCount} de plus`}
+            {t("yourTurn.overflow", { count: hiddenCount })}
           </Mono>
         </div>
       ) : null}

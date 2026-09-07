@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { GitMerge } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import {
   BandHeader,
@@ -48,16 +49,23 @@ export interface ReadyToLandBandProps {
   className?: string;
 }
 
+/**
+ * The three phrases the meta line is made of, already resolved by the caller's
+ * translator — `landMeta` composes, it does not hold copy. Agreement on the
+ * finding count is the catalogue's ICU plural, not an `=== 1` here.
+ */
+export interface LandMetaCopy {
+  findings: (count: number) => string;
+  clean: string;
+  userStories: (done: number, count: number) => string;
+}
+
 /** "#218 · clean · 4/4 US" — the PR number is optional, as in the frame. */
-export function landMeta(row: DeskLandRow): string {
+export function landMeta(row: DeskLandRow, copy: LandMetaCopy): string {
   const parts: string[] = [];
   if (row.prNumber !== null && row.prNumber !== undefined) parts.push(`#${row.prNumber}`);
-  parts.push(
-    row.openFindings > 0
-      ? `${row.openFindings} finding${row.openFindings === 1 ? "" : "s"}`
-      : "clean",
-  );
-  parts.push(`${row.usDone}/${row.usCount} US`);
+  parts.push(row.openFindings > 0 ? copy.findings(row.openFindings) : copy.clean);
+  parts.push(copy.userStories(row.usDone, row.usCount));
   return parts.join(" · ");
 }
 
@@ -102,7 +110,13 @@ export function ReadyToLandBand({
   selectedEpicIds,
   className,
 }: ReadyToLandBandProps) {
+  const t = useTranslations("Desk");
   const landable = rows.filter((row) => !row.agentBusy);
+  const metaCopy: LandMetaCopy = {
+    findings: (count) => t("land.findings", { count }),
+    clean: t("land.clean"),
+    userStories: (done, count) => t("land.userStories", { done, count }),
+  };
 
   return (
     <StrataBand
@@ -112,7 +126,7 @@ export function ReadyToLandBand({
       className={cn("min-w-0", className)}
     >
       <BandHeader
-        label="Ready to land"
+        label={t("land.label")}
         stratum="land"
         labelSize={13}
         meta={rows.length > 0 ? String(rows.length) : undefined}
@@ -123,10 +137,12 @@ export function ReadyToLandBand({
               size="sm"
               onClick={() => void onLandAll(landable)}
               pending={landingAll}
-              pendingLabel="Landing…"
+              pendingLabel={t("land.landing")}
               data-testid="desk-land-all"
             >
-              {landable.length === 2 ? "Land both" : `Land all ${landable.length}`}
+              {landable.length === 2
+                ? t("land.landBoth")
+                : t("land.landAll", { count: landable.length })}
             </PillButton>
           ) : undefined
         }
@@ -164,11 +180,11 @@ export function ReadyToLandBand({
             </div>
             <div data-testid="desk-land-row-actions" className={ROW_ACTIONS_CLASS}>
               <Mono size={10.5} tone="muted" className="shrink-0">
-                {landMeta(row)}
+                {landMeta(row, metaCopy)}
               </Mono>
               {row.agentBusy ? (
                 <Mono size={10.5} tone="land-mid" className="shrink-0">
-                  agent au travail
+                  {t("land.agentBusy")}
                 </Mono>
               ) : (
                 <PillButton
@@ -177,11 +193,11 @@ export function ReadyToLandBand({
                   icon={GitMerge}
                   onClick={() => void onLand(row)}
                   pending={landingEpicId === row.epicId}
-                  pendingLabel="Landing…"
+                  pendingLabel={t("land.landing")}
                   disabled={landingAll || (landingEpicId !== null && landingEpicId !== undefined)}
                   data-testid="desk-land-button"
                 >
-                  Land
+                  {t("land.land")}
                 </PillButton>
               )}
             </div>
@@ -191,7 +207,7 @@ export function ReadyToLandBand({
 
       {heldBackCount > 0 ? (
         <QuietLink tone="land" size={11.5} onClick={onShowHeldBack}>
-          {`${heldBackCount} autre${heldBackCount === 1 ? "" : "s"} bloqué${heldBackCount === 1 ? "" : "s"} par des findings ouverts →`}
+          {t("land.heldBack", { count: heldBackCount })}
         </QuietLink>
       ) : null}
     </StrataBand>
