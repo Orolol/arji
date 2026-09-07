@@ -231,22 +231,58 @@ export function createPipelineStageDriver(
   const reviewAgentType: AgentType =
     REVIEW_TYPE_TO_AGENT_TYPE[PIPELINE_REVIEW_TYPE];
 
+  /**
+   * The as-configured resolution for the stage entry currently in flight.
+   *
+   * Populated when the runner sizes the ladder (`attemptBudget`, attempt 1)
+   * and read by every attempt of that stage entry, so the budget and the
+   * agents it spends come from ONE resolution rather than from independent
+   * repeats of an expensive, live-query-backed path.
+   */
+  const configuredByStage = new Map<PipelineStageKind, ResolvedAgent>();
+
+  const configuredAgent = async (
+    stage: PipelineStageKind,
+    refresh = false
+  ): Promise<ResolvedAgent> => {
+    const cached = configuredByStage.get(stage);
+    if (cached && !refresh) return cached;
+    const resolved = await resolveConfiguredStageAgent(
+      init,
+      stage,
+      codeAgentType,
+      reviewAgentType
+    );
+    configuredByStage.set(stage, resolved);
+    return resolved;
+  };
+
   return {
-    attemptBudget: (stage, configuredMaxAttempts) =>
-      resolveStageAttemptBudget(
-        init,
-        stage,
-        configuredMaxAttempts,
-        codeAgentType,
-        reviewAgentType
-      ),
+    attemptBudget: async (stage, configuredMaxAttempts) => {
+      // A new stage entry: re-resolve rather than reuse the previous entry's
+      // answer, since a run can revisit review after a fix cycle.
+      let configured: ResolvedAgent | null = null;
+      try {
+        configured = await configuredAgent(stage, true);
+      } catch {
+        // An emptied composite. Leave the cache untouched so the dispatch
+        // raises the real error rather than this sizing call.
+        configuredByStage.delete(stage);
+      }
+      return resolveStageAttemptBudget(configured, configuredMaxAttempts);
+    },
 
     launchStage: async (request) => {
       try {
         if (request.stage === "grading") {
           return await dispatchPipelineGradingStage(init);
         }
-        return await dispatchPipelineStage(init, request, reviewOutputs);
+        return await dispatchPipelineStage(
+          init,
+          request,
+          reviewOutputs,
+          configuredAgent
+        );
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "Stage dispatch failed";
@@ -699,41 +735,62 @@ interface ResolvedStageAgent {
  * than propagating: the dispatch itself will fail with the real message, and
  * that is a clearer failure than one raised while merely sizing the ladder.
  */
-async function resolveStageAttemptBudget(
+/**
+ * The stage's AS-CONFIGURED agent, before the ladder picks a rank.
+ *
+ * Sizing the budget and picking the agent both need this, and they used to
+ * each resolve it for themselves — twice per stage entry. For a review that is
+ * not merely duplicated work: the path dynamic-imports ./review-segregation,
+ * runs `findLastSuccessfulBuildProvider`, and when the default resolution
+ * matches the builder's provider it awaits `getProvider(p).isAvailable()`
+ * across PROVIDER_OPTIONS until one answers — real subprocess probes, paid
+ * twice.
+ *
+ * It was also a correctness smell. The two calls were independent, and
+ * `findLastSuccessfulBuildProvider` is a live query, so a segregation decision
+ * that flipped between them would size the ladder from one resolution and run
+ * another. Resolving once and sharing the result removes the window rather
+ * than relying on the two agreeing.
+ */
+async function resolveConfiguredStageAgent(
   init: PipelineStageDriverInit,
   stage: PipelineStageKind,
-  configuredMaxAttempts: number,
   codeAgentType: AgentType,
   reviewAgentType: AgentType
-): Promise<number> {
-  try {
-    const configured =
-      stage === "review" || stage === "grading"
-        ? await resolveAgentForDispatch(
-            reviewAgentType,
-            init.projectId,
-            init.reviewNamedAgentId ?? null,
-            {
-              purpose: stage === "grading" ? "grading" : "review",
-              projectId: init.projectId,
-              epicId: init.epicId,
-              ...(init.scope === "story" && init.userStoryId
-                ? { storyId: init.userStoryId }
-                : {}),
-            }
-          )
-        : resolveAgentByNamedId(
-            codeAgentType,
-            init.projectId,
-            init.buildNamedAgentId
-          );
-
-    if (!configured.compositeAgentId) return configuredMaxAttempts;
-    const count = readCompositeMemberCount(configured.compositeAgentId);
-    return count && count > 0 ? count : 1;
-  } catch {
-    return 1;
+): Promise<ResolvedAgent> {
+  if (stage === "review" || stage === "grading") {
+    return resolveAgentForDispatch(
+      reviewAgentType,
+      init.projectId,
+      init.reviewNamedAgentId ?? null,
+      {
+        purpose: stage === "grading" ? "grading" : "review",
+        projectId: init.projectId,
+        epicId: init.epicId,
+        ...(init.scope === "story" && init.userStoryId
+          ? { storyId: init.userStoryId }
+          : {}),
+      }
+    );
   }
+  return resolveAgentByNamedId(
+    codeAgentType,
+    init.projectId,
+    init.buildNamedAgentId
+  );
+}
+
+async function resolveStageAttemptBudget(
+  configured: ResolvedAgent | null,
+  configuredMaxAttempts: number
+): Promise<number> {
+  // A resolution that already failed (an emptied composite) reports 1 rather
+  // than propagating: the dispatch itself will fail with the real message,
+  // and that is a clearer failure than one raised while merely sizing.
+  if (!configured) return 1;
+  if (!configured.compositeAgentId) return configuredMaxAttempts;
+  const count = readCompositeMemberCount(configured.compositeAgentId);
+  return count && count > 0 ? count : 1;
 }
 
 /**
@@ -750,33 +807,10 @@ async function resolveStageAttemptBudget(
  * default attempt cap of 2 and, when reached, threw the named agent away to
  * run a provider's default model.
  */
-async function resolveStageAgent(
-  init: PipelineStageDriverInit,
+function resolveStageAgent(
   request: PipelineStageRequest,
-  codeAgentType: AgentType,
-  reviewAgentType: AgentType
-): Promise<ResolvedStageAgent> {
-  const configured: ResolvedAgent =
-    request.stage === "review"
-      ? await resolveAgentForDispatch(
-          reviewAgentType,
-          init.projectId,
-          init.reviewNamedAgentId ?? null,
-          {
-            purpose: "review",
-            projectId: init.projectId,
-            epicId: init.epicId,
-            ...(init.scope === "story" && init.userStoryId
-              ? { storyId: init.userStoryId }
-              : {}),
-          }
-        )
-      : resolveAgentByNamedId(
-          codeAgentType,
-          init.projectId,
-          init.buildNamedAgentId
-        );
-
+  configured: ResolvedAgent
+): ResolvedStageAgent {
   // Simple agent — every attempt, including the first, is this agent.
   if (!configured.compositeAgentId) {
     return { resolved: configured, compositeDescent: null };
@@ -819,7 +853,9 @@ async function resolveStageAgent(
 async function dispatchPipelineStage(
   init: PipelineStageDriverInit,
   request: PipelineStageRequest,
-  reviewOutputs: Map<string, string>
+  reviewOutputs: Map<string, string>,
+  /** The driver's per-stage-entry resolution — see `resolveConfiguredStageAgent`. */
+  configuredAgent: (stage: PipelineStageKind) => Promise<ResolvedAgent>
 ): Promise<PipelineStageHandle> {
   const { projectId, epicId, userStoryId, scope } = init;
 
@@ -852,11 +888,9 @@ async function dispatchPipelineStage(
   const isReview = request.stage === "review";
   const agentType = isReview ? reviewAgentType : codeAgentType;
 
-  const { resolved, compositeDescent } = await resolveStageAgent(
-    init,
+  const { resolved, compositeDescent } = resolveStageAgent(
     request,
-    codeAgentType,
-    reviewAgentType
+    await configuredAgent(request.stage)
   );
 
   // ---------------------------------------------------------------------

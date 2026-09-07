@@ -1,4 +1,5 @@
 import type { ProjectTone } from "@/lib/piscine/tokens";
+import { PROVIDER_LABELS } from "@/lib/agent-config/constants";
 
 /**
  * Two-letter roster-avatar label. Words first ("Opus Builder" → "OB"), falling
@@ -48,4 +49,35 @@ export function sourceLabel(
   if (source === "project") return "This project";
   if (source === "global") return "All projects";
   return "Arij default";
+}
+
+/**
+ * The second line of an agent row in the two ROLE-ASSIGNMENT pickers.
+ *
+ * A composite has no CLI and no model of its own — `named_agents.provider`
+ * holds the documented sentinel, and `PROVIDER_LABELS` (keyed on
+ * `ChatModeProvider`) has no entry for it. Rendering the simple-agent shape
+ * for one therefore printed an empty label followed by " · CLI default
+ * model": a blank provider and a claim about a CLI it does not have.
+ *
+ * A composite's ladder is what predicts its run, so that is what this shows,
+ * matching the "composite · N" marker the two dispatch pickers already use.
+ * Shared because both assignment surfaces render the identical row and this
+ * is exactly the kind of duplicated vocabulary that drifts.
+ */
+export function assignmentAgentSubLabel(agent: {
+  kind?: "simple" | "composite";
+  provider: string;
+  model: string;
+  members?: Array<{ name: string }>;
+}): string {
+  if (agent.kind === "composite") {
+    const members = agent.members ?? [];
+    if (members.length === 0) return "composite · no members — unusable";
+    return `composite · ${members.map((member) => member.name).join(" → ")}`;
+  }
+  const label =
+    (PROVIDER_LABELS as Record<string, string>)[agent.provider] ??
+    agent.provider;
+  return agent.model ? `${label} · ${agent.model}` : `${label} · CLI default model`;
 }

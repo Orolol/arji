@@ -741,6 +741,57 @@ describe("review stage dispatch", () => {
     ).toBe("to_merge");
   });
 
+  it("resolves a review stage's agent ONCE per stage entry, not once per caller", async () => {
+    const { projectId, epicId } = seed("review");
+    processManagerState.result = {
+      success: true,
+      result: claudeEnvelope("**Overall Verdict: Complete**"),
+      duration: 100,
+    };
+    const driver = createPipelineStageDriver({
+      projectId,
+      scope: "epic",
+      epicId,
+      userStoryId: null,
+      buildNamedAgentId: null,
+    });
+
+    // Sizing the ladder and launching the stage are two separate calls FROM
+    // THE RUNNER, and each used to resolve for itself. On a review that path
+    // dynamic-imports review-segregation, queries the last successful
+    // builder, and can await getProvider(p).isAvailable() across
+    // PROVIDER_OPTIONS — real subprocess probes, previously paid twice per
+    // stage entry. Sharing one resolution also closes the window where the
+    // two could disagree and the ladder would be sized from a different
+    // agent than the one that runs.
+    resolutionMocks.resolveAgentForDispatch.mockClear();
+    await driver.attemptBudget("review", 2);
+    await driver.launchStage({
+      stage: "review",
+      attempt: 1,
+      fixCycle: 0,
+      previousAttemptSessionId: null,
+      lastCodeSessionId: null,
+    });
+
+    expect(resolutionMocks.resolveAgentForDispatch).toHaveBeenCalledTimes(1);
+
+    // Attempt 2 of the SAME stage entry reuses it too.
+    await driver.launchStage({
+      stage: "review",
+      attempt: 2,
+      fixCycle: 0,
+      previousAttemptSessionId: null,
+      lastCodeSessionId: null,
+    });
+    expect(resolutionMocks.resolveAgentForDispatch).toHaveBeenCalledTimes(1);
+
+    // A NEW stage entry re-resolves: a run revisits review after a fix cycle,
+    // and the segregation input (the last successful builder) has moved.
+    await driver.attemptBudget("review", 2);
+    expect(resolutionMocks.resolveAgentForDispatch).toHaveBeenCalledTimes(2);
+  });
+
   it("injects one compact line per passing command into the reviewer prompt", async () => {
     const { projectId, epicId } = seed("review");
     const driver = createPipelineStageDriver({

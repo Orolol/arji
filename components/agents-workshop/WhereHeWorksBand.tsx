@@ -18,11 +18,10 @@ import type {
 } from "@/hooks/useAgentConfig";
 import {
   AGENT_TYPE_LABELS,
-  PROVIDER_LABELS,
   type AgentType,
 } from "@/lib/agent-config/constants";
 
-import { sourceLabel } from "./agent-initials";
+import { assignmentAgentSubLabel, sourceLabel } from "./agent-initials";
 
 /**
  * WHERE HE WORKS — the turquoise band, and the ONE band on this screen that
@@ -170,11 +169,11 @@ export function WhereHeWorksBand({
                       >
                         <span className="flex flex-col items-start">
                           <span>{agent.name}</span>
-                          <span className="text-xs text-muted-foreground">
-                            {PROVIDER_LABELS[agent.provider]}
-                            {agent.model
-                              ? ` · ${agent.model}`
-                              : " · CLI default model"}
+                          <span
+                            data-testid={`assignment-agent-sub-${agent.id}`}
+                            className="text-xs text-muted-foreground"
+                          >
+                            {assignmentAgentSubLabel(agent)}
                           </span>
                         </span>
                       </DropdownMenuItem>

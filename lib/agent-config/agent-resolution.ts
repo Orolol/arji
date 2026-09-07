@@ -4,10 +4,13 @@ import { agentProviderDefaults, namedAgents } from "@/lib/db/schema";
 import {
   AGENT_TYPES,
   COMPOSITE_AGENT_KIND,
+  COMPOSITE_AGENT_PROVIDER,
   FALLBACK_PROVIDER,
+  SIMPLE_AGENT_KIND,
   isAgentProvider,
   type AgentProvider,
   type AgentType,
+  type NamedAgentKind,
 } from "./constants";
 import {
   listCompositeMembers,
@@ -24,8 +27,16 @@ export type AgentResolveSource = ProviderSource | "override";
 export interface NamedAgentLite {
   id: string;
   name: string;
+  /**
+   * A composite carries the documented `COMPOSITE_AGENT_PROVIDER` sentinel
+   * here, exactly as `NamedAgentRecord` does — it owns no CLI. Running its
+   * stored provider through `normalizeProvider` used to report it as
+   * `claude-code`, so the assignment routes described a composite as a
+   * specific CLI it does not have. Readers must branch on `kind` first.
+   */
   provider: AgentProvider;
   model: string;
+  kind: NamedAgentKind;
 }
 
 export interface ResolvedAgentProvider {
@@ -101,16 +112,27 @@ function mapNamedAgentsById(namedAgentIds: Array<string | null | undefined>): Ma
       name: namedAgents.name,
       provider: namedAgents.provider,
       model: namedAgents.model,
+      kind: namedAgents.kind,
     })
     .from(namedAgents)
     .all()
     .filter((row) => idSet.has(row.id))
-    .map((row) => ({
-      id: row.id,
-      name: row.name,
-      provider: normalizeProvider(row.provider),
-      model: row.model,
-    }));
+    .map((row) => {
+      const isComposite = row.kind === COMPOSITE_AGENT_KIND;
+      return {
+        id: row.id,
+        name: row.name,
+        // The sentinel, NOT the fallback: `normalizeProvider` rejects
+        // "composite" and would answer `claude-code`.
+        provider: isComposite
+          ? (COMPOSITE_AGENT_PROVIDER as unknown as AgentProvider)
+          : normalizeProvider(row.provider),
+        model: isComposite ? "" : row.model,
+        kind: (isComposite
+          ? COMPOSITE_AGENT_KIND
+          : SIMPLE_AGENT_KIND) as NamedAgentKind,
+      };
+    });
 
   const byId = new Map<string, NamedAgentLite>();
   for (const row of rows) {

@@ -25,8 +25,10 @@ export interface ResolvedAgentAssignment {
   namedAgent?: {
     id: string;
     name: string;
+    /** A composite carries the sentinel here; branch on `kind` first. */
     provider: AgentProvider;
     model: string;
+    kind?: "simple" | "composite";
   } | null;
 }
 

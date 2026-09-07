@@ -39,34 +39,8 @@ export interface CompositeMember {
   position: number;
 }
 
-export interface CompositeAgentRecord {
-  id: string;
-  name: string;
-  members: CompositeMember[];
-  createdAt: string | null;
-}
-
-/** Result shape shared by every write in this module. */
-export interface CompositeWriteResult {
-  data: CompositeAgentRecord | null;
-  error?: string;
-}
-
 function normalizeProvider(value: string | null | undefined): AgentProvider {
   return value && isAgentProvider(value) ? value : FALLBACK_PROVIDER;
-}
-
-/** True when `agentId` names a row whose kind is `composite`. */
-export function isCompositeAgentId(
-  agentId: string | null | undefined
-): boolean {
-  if (!agentId) return false;
-  const row = db
-    .select({ kind: namedAgents.kind })
-    .from(namedAgents)
-    .where(eq(namedAgents.id, agentId))
-    .get();
-  return row?.kind === COMPOSITE_AGENT_KIND;
 }
 
 /**
@@ -223,67 +197,44 @@ export function setCompositeMembers(
   if (error) return error;
 
   db.transaction((tx) => {
-    tx.delete(compositeAgentMembers)
-      .where(eq(compositeAgentMembers.compositeId, compositeId))
-      .run();
-    memberIds.forEach((memberId, index) => {
-      tx.insert(compositeAgentMembers)
-        .values({
-          id: createId(),
-          compositeId,
-          memberId,
-          position: index,
-          createdAt: new Date().toISOString(),
-        })
-        .run();
-    });
+    writeCompositeMembers(tx, compositeId, memberIds);
   });
 
   return null;
 }
 
-function toCompositeRecord(row: {
-  id: string;
-  name: string;
-  createdAt: string | null;
-}): CompositeAgentRecord {
-  return {
-    id: row.id,
-    name: row.name,
-    members: listCompositeMembers(row.id),
-    createdAt: row.createdAt,
-  };
-}
+/** The transaction handle drizzle hands a `db.transaction` callback. */
+type CompositeTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-export function getCompositeAgent(
-  compositeId: string
-): CompositeAgentRecord | null {
-  const row = db
-    .select({
-      id: namedAgents.id,
-      name: namedAgents.name,
-      kind: namedAgents.kind,
-      createdAt: namedAgents.createdAt,
-    })
-    .from(namedAgents)
-    .where(eq(namedAgents.id, compositeId))
-    .get();
-  if (!row || row.kind !== COMPOSITE_AGENT_KIND) return null;
-  return toCompositeRecord(row);
-}
-
-export function listCompositeAgents(): CompositeAgentRecord[] {
-  const rows = db
-    .select({
-      id: namedAgents.id,
-      name: namedAgents.name,
-      createdAt: namedAgents.createdAt,
-    })
-    .from(namedAgents)
-    .where(eq(namedAgents.kind, COMPOSITE_AGENT_KIND))
-    .orderBy(asc(namedAgents.name))
-    .all();
-  return rows.map(toCompositeRecord);
+/**
+ * The membership write itself — no validation, no transaction of its own.
+ *
+ * Split out so a caller that already holds a transaction can replace the list
+ * without nesting one: `updateCompositeAgent` renames the agent and rewrites
+ * its members together, and a refused half must not leave the other half
+ * committed. Validation stays the caller's job precisely because it has to
+ * happen BEFORE the transaction opens.
+ */
+export function writeCompositeMembers(
+  tx: CompositeTx,
+  compositeId: string,
+  memberIds: string[],
+  createdAt: string = new Date().toISOString()
+): void {
+  tx.delete(compositeAgentMembers)
+    .where(eq(compositeAgentMembers.compositeId, compositeId))
+    .run();
+  memberIds.forEach((memberId, index) => {
+    tx.insert(compositeAgentMembers)
+      .values({
+        id: createId(),
+        compositeId,
+        memberId,
+        position: index,
+        createdAt,
+      })
+      .run();
+  });
 }
 
 /* ------------------------------------------------------------------ */
@@ -352,17 +303,6 @@ export function setDefaultCompositeAgentId(
     })
     .run();
   return null;
-}
-
-/** Kind of a named agent row, or null when the row is gone. */
-export function readNamedAgentKind(agentId: string): string | null {
-  return (
-    db
-      .select({ kind: namedAgents.kind })
-      .from(namedAgents)
-      .where(eq(namedAgents.id, agentId))
-      .get()?.kind ?? null
-  );
 }
 
 export { COMPOSITE_AGENT_KIND, SIMPLE_AGENT_KIND };

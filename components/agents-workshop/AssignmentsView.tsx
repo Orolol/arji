@@ -4,7 +4,10 @@ import { useState } from "react";
 import { Loader2 } from "lucide-react";
 
 import { ScopeSwitcher } from "@/components/agents-workshop/ScopeSwitcher";
-import { sourceLabel } from "@/components/agents-workshop/agent-initials";
+import {
+  assignmentAgentSubLabel,
+  sourceLabel,
+} from "@/components/agents-workshop/agent-initials";
 import {
   BandHeader,
   Mono,
@@ -16,7 +19,6 @@ import { useAgentAssignments, useNamedAgents } from "@/hooks/useAgentConfig";
 import {
   AGENT_TYPES,
   AGENT_TYPE_LABELS,
-  PROVIDER_LABELS,
   type AgentType,
 } from "@/lib/agent-config/constants";
 
@@ -156,11 +158,11 @@ export function AssignmentsView({ projectId }: { projectId?: string }) {
                     >
                       <span className="flex flex-col items-start">
                         <span>{agent.name}</span>
-                        <span className="text-xs text-muted-foreground">
-                          {PROVIDER_LABELS[agent.provider]}
-                          {agent.model
-                            ? ` · ${agent.model}`
-                            : " · CLI default model"}
+                        <span
+                          data-testid={`assignment-agent-sub-${agent.id}`}
+                          className="text-xs text-muted-foreground"
+                        >
+                          {assignmentAgentSubLabel(agent)}
                         </span>
                       </span>
                     </DropdownMenuItem>

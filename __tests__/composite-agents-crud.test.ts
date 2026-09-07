@@ -395,6 +395,55 @@ describe("the designated default composite", () => {
   });
 });
 
+describe("updateNamedAgent on a composite is atomic", () => {
+  it("does not persist the rename when the member list is refused", async () => {
+    const { createCompositeAgent, updateNamedAgent, getNamedAgent } =
+      await import("@/lib/agent-config/named-agents");
+    const a = await makeSimple("A");
+    const b = await makeSimple("B");
+    const { data: composite } = await createCompositeAgent({
+      name: "Before",
+      memberIds: [a.id, b.id],
+    });
+
+    // A rename and an invalid reorder in ONE call. The rename used to commit
+    // first and the member write to refuse afterwards, so the route answered
+    // 400 while the new name had already persisted — and the workshop's hook
+    // only reloads on success, leaving the user looking at an error message
+    // next to a name that had silently changed.
+    const { error } = await updateNamedAgent(composite!.id, {
+      name: "After",
+      memberIds: [a.id, a.id],
+    });
+
+    expect(error).toMatch(/same member twice/i);
+    const reread = await getNamedAgent(composite!.id);
+    expect(reread?.name).toBe("Before");
+    expect(reread?.members.map((member) => member.name)).toEqual(["A", "B"]);
+  });
+
+  it("commits both halves when the member list is accepted", async () => {
+    const { createCompositeAgent, updateNamedAgent, getNamedAgent } =
+      await import("@/lib/agent-config/named-agents");
+    const a = await makeSimple("A");
+    const b = await makeSimple("B");
+    const { data: composite } = await createCompositeAgent({
+      name: "Before",
+      memberIds: [a.id, b.id],
+    });
+
+    const { error } = await updateNamedAgent(composite!.id, {
+      name: "After",
+      memberIds: [b.id, a.id],
+    });
+
+    expect(error).toBeUndefined();
+    const reread = await getNamedAgent(composite!.id);
+    expect(reread?.name).toBe("After");
+    expect(reread?.members.map((member) => member.name)).toEqual(["B", "A"]);
+  });
+});
+
 /**
  * An EMPTIED composite in the resolution chain.
  *

@@ -265,10 +265,6 @@ export type NamedAgentKind =
   | typeof SIMPLE_AGENT_KIND
   | typeof COMPOSITE_AGENT_KIND;
 
-export function isCompositeKind(value: string | null | undefined): boolean {
-  return value === COMPOSITE_AGENT_KIND;
-}
-
 /**
  * Sentinel written into the NOT NULL `named_agents.provider` column of a
  * composite, which owns no provider of its own.

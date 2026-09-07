@@ -14,9 +14,10 @@ import {
 } from "@/lib/agent-config/constants";
 import {
   listCompositeMembers,
+  listMembersByComposite,
   readDefaultCompositeAgentId,
-  setCompositeMembers,
   validateCompositeMembers,
+  writeCompositeMembers,
   type CompositeMember,
 } from "@/lib/agent-config/composite-agents";
 import {
@@ -82,7 +83,15 @@ function normalizePersonaPrompt(
  */
 function toRecord(
   row: typeof namedAgents.$inferSelect,
-  context?: { defaultCompositeId?: string | null },
+  context?: {
+    defaultCompositeId?: string | null;
+    /**
+     * Every composite's membership, fetched once by the caller. Absent means
+     * "read this row's members yourself", which is right for a single-row
+     * read and wrong for a list — see `listNamedAgents`.
+     */
+    membersByComposite?: Map<string, CompositeMember[]>;
+  },
 ): NamedAgentRecord {
   const kind: NamedAgentKind =
     row.kind === COMPOSITE_AGENT_KIND ? COMPOSITE_AGENT_KIND : SIMPLE_AGENT_KIND;
@@ -105,7 +114,10 @@ function toRecord(
       : parseStoredProviderOptions(row.provider, row.options),
     personaPrompt: isComposite ? null : (row.personaPrompt ?? null),
     kind,
-    members: isComposite ? listCompositeMembers(row.id) : [],
+    members: isComposite
+      ? (context?.membersByComposite?.get(row.id) ??
+        listCompositeMembers(row.id))
+      : [],
     isDefault: isComposite && row.id === defaultCompositeId,
     createdAt: row.createdAt,
   };
@@ -123,9 +135,15 @@ export async function listNamedAgents(): Promise<NamedAgentRecord[]> {
     .orderBy(namedAgents.name)
     .all();
 
-  // One settings read for the whole list rather than one per row.
+  // One settings read AND one membership join for the whole list, rather than
+  // one of each per row. This route feeds every agent picker in the app, so a
+  // query per composite here is the N+1 shape the codebase's own convention
+  // flags — `listMembersByComposite` exists for exactly this call site.
   const defaultCompositeId = readDefaultCompositeAgentId();
-  return rows.map((row) => toRecord(row, { defaultCompositeId }));
+  const membersByComposite = listMembersByComposite();
+  return rows.map((row) =>
+    toRecord(row, { defaultCompositeId, membersByComposite })
+  );
 }
 
 export async function getNamedAgent(agentId: string): Promise<NamedAgentRecord | null> {
@@ -313,6 +331,14 @@ async function updateCompositeAgent(
     };
   }
 
+  // VALIDATE EVERYTHING BEFORE WRITING ANYTHING. The rename and the member
+  // list are the whole of a composite's update, and they used to be two
+  // sequential writes: the rename committed first, then `setCompositeMembers`
+  // validated and could refuse. The route answered 400 and the workshop
+  // showed the error while the new name had already persisted — and because
+  // the hook only reloads the roster on success, the user was left looking at
+  // a failure message next to a name that had silently changed.
+  let nextName: string | null = null;
   if (typeof updates.name === "string") {
     const name = updates.name.trim();
     if (!name) {
@@ -331,17 +357,33 @@ async function updateCompositeAgent(
     if (duplicate) {
       return { data: null, error: "name already exists" };
     }
-    if (name !== existing.name) {
-      db.update(namedAgents)
-        .set({ name })
-        .where(eq(namedAgents.id, agentId))
-        .run();
-    }
+    if (name !== existing.name) nextName = name;
   }
 
   if (updates.memberIds !== undefined) {
-    const error = setCompositeMembers(agentId, updates.memberIds);
+    const error = validateCompositeMembers(agentId, updates.memberIds);
     if (error) return { data: null, error };
+  }
+
+  const memberIds = updates.memberIds;
+  if (nextName !== null || memberIds !== undefined) {
+    // One transaction, matching createCompositeAgent: a refused half can no
+    // longer leave the other half committed. Delete-then-insert rather than a
+    // diff for the same reason as setCompositeMembers — `position` is
+    // uniquely indexed per composite, so a reorder that moves two members
+    // past each other would collide mid-update.
+    const now = new Date().toISOString();
+    db.transaction((tx) => {
+      if (nextName !== null) {
+        tx.update(namedAgents)
+          .set({ name: nextName })
+          .where(eq(namedAgents.id, agentId))
+          .run();
+      }
+      if (memberIds !== undefined) {
+        writeCompositeMembers(tx, agentId, memberIds, now);
+      }
+    });
   }
 
   return { data: await getNamedAgent(agentId) };
