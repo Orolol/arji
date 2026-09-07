@@ -220,6 +220,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     worktreePath,
     cliSessionId,
     namedAgentId: resolvedAgent.namedAgentId ?? null,
+    compositeAgentId: resolvedAgent.compositeAgentId ?? null,
     agentType: "ticket_build",
     namedAgentName: resolvedAgent.name || null,
     model: resolvedAgent.model || null,

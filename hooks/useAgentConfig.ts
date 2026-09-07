@@ -263,6 +263,15 @@ export function useReviewAgents(
 // Named Agents
 // ---------------------------------------------------------------------------
 
+/** One member of a composite agent, in rank order. */
+export interface CompositeMember {
+  id: string;
+  name: string;
+  provider: AgentProvider;
+  model: string;
+  position: number;
+}
+
 export interface NamedAgent {
   id: string;
   name: string;
@@ -272,7 +281,16 @@ export interface NamedAgent {
   options: NamedAgentCliOptions;
   /** Persona injected at the head of the prompt; null injects nothing. */
   personaPrompt: string | null;
-  escalatesTo: string | null;
+  /**
+   * `'simple'` or `'composite'`. A composite is an ORDERED FALLBACK LIST of
+   * simple agents: attempt N of a pipeline stage runs member N-1, and the
+   * length of the list is the attempt budget.
+   */
+  kind: "simple" | "composite";
+  /** Populated for a composite; empty for a simple agent. */
+  members: CompositeMember[];
+  /** True for the one composite designated as the default agent. */
+  isDefault: boolean;
   createdAt: string | null;
 }
 
@@ -288,7 +306,6 @@ export function useNamedAgents() {
       model?: string;
       options?: NamedAgentCliOptions;
       personaPrompt?: string | null;
-      escalatesTo?: string | null;
     }) => {
       const res = await fetch("/api/agent-config/named-agents", {
         method: "POST",
@@ -311,7 +328,8 @@ export function useNamedAgents() {
         model?: string;
         options?: NamedAgentCliOptions;
         personaPrompt?: string | null;
-        escalatesTo?: string | null;
+        /** Composite only — the new ordered member list. */
+        memberIds?: string[];
       },
     ) => {
       const res = await fetch(`/api/agent-config/named-agents/${id}`, {
@@ -337,13 +355,53 @@ export function useNamedAgents() {
     [load],
   );
 
+  /**
+   * Creates a COMPOSITE. Separate from `createNamedAgent` because the two
+   * bodies share only the name: a composite carries an ordered member list
+   * and no CLI, model, options or persona at all.
+   */
+  const createCompositeAgent = useCallback(
+    async (input: { name: string; memberIds: string[] }) => {
+      const res = await fetch("/api/agent-config/named-agents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...input, kind: "composite" }),
+      });
+      if (res.ok) await load();
+      const json = await res.json();
+      return { ok: res.ok, error: json.error };
+    },
+    [load],
+  );
+
+  /**
+   * Designates the composite that answers "Default agent", or clears the
+   * designation with `null`. Reloads the roster because `isDefault` travels
+   * on the agent rows themselves.
+   */
+  const setDefaultCompositeAgent = useCallback(
+    async (compositeAgentId: string | null) => {
+      const res = await fetch("/api/agent-config/default-composite", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ compositeAgentId }),
+      });
+      if (res.ok) await load();
+      const json = await res.json();
+      return { ok: res.ok, error: json.error };
+    },
+    [load],
+  );
+
   return {
     data,
     loading,
     refresh: load,
     createNamedAgent,
+    createCompositeAgent,
     updateNamedAgent,
     deleteNamedAgent,
+    setDefaultCompositeAgent,
   };
 }
 
@@ -445,7 +503,6 @@ export interface NamedAgentStats {
   cleanRate: number | null;
   medianDurationMs: number | null;
   totalCostUsd: number | null;
-  escalationCount: number | null;
   /** Exactly `windowDays` entries, oldest first. */
   days: AgentDaySeriesPoint[];
   byRole: { role: string; runs: number }[];

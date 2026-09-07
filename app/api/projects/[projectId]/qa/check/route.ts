@@ -201,6 +201,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     logsPath,
     cliSessionId,
     namedAgentId: resolvedAgent.namedAgentId ?? null,
+    compositeAgentId: resolvedAgent.compositeAgentId ?? null,
     agentType,
     namedAgentName: resolvedAgent.name || null,
     model: resolvedAgent.model || null,

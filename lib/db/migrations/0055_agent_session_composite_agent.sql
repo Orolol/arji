@@ -1,0 +1,11 @@
+-- Which composite dispatched this session, when one did.
+--
+-- named_agent_id keeps naming the member that ACTUALLY RAN. That split is the
+-- whole point: getNamedAgentDispatchReliability() groups by named_agent_id, so
+-- recording the composite there would collapse every member's runs onto the
+-- composite and make the reliability badge, getAgentDayStats() and
+-- getNamedAgentStats() measure a list instead of an agent.
+--
+-- ON DELETE SET NULL rather than CASCADE: deleting a composite must not delete
+-- the history of the sessions it dispatched, exactly as for named_agent_id.
+ALTER TABLE agent_sessions ADD COLUMN composite_agent_id text REFERENCES named_agents(id) ON DELETE SET NULL;

@@ -365,6 +365,27 @@
       "when": 1786714900000,
       "tag": "0052_refinement_actions",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "6",
+      "when": 1786715000000,
+      "tag": "0053_composite_agents",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "6",
+      "when": 1786715100000,
+      "tag": "0054_drop_named_agent_escalation",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "6",
+      "when": 1786715200000,
+      "tag": "0055_agent_session_composite_agent",
+      "breakpoints": true
     }
   ]
 }

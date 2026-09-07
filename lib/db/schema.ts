@@ -256,6 +256,11 @@ export const agentSessions = sqliteTable("agent_sessions", {
   claudeSessionId: text("claude_session_id"),
   cliSessionId: text("cli_session_id"),
   namedAgentId: text("named_agent_id"),
+  // The COMPOSITE that dispatched this session, when one did; NULL for a
+  // simple-agent dispatch. `namedAgentId` above keeps naming the member that
+  // actually ran, because getNamedAgentDispatchReliability() groups by it —
+  // recording the composite there would measure a list instead of an agent.
+  compositeAgentId: text("composite_agent_id"),
   agentType: text("agent_type"),
   namedAgentName: text("named_agent_name"),
   model: text("model"),
@@ -514,15 +519,55 @@ export const namedAgents = sqliteTable(
     // NULL/blank injects nothing; new agents are created with the product
     // default (see createNamedAgent).
     personaPrompt: text("persona_prompt"),
-    escalatesTo: text("escalates_to").references(
-      (): AnySQLiteColumn => namedAgents.id,
-      { onDelete: "set null" }
-    ),
+    // 'simple' | 'composite'. A composite is an ORDERED FALLBACK LIST of
+    // simple agents (see compositeAgentMembers) that reuses this very table
+    // so it stays assignable through every existing named_agent_id foreign
+    // key. It owns no provider and no model: the two NOT NULL columns above
+    // carry COMPOSITE_AGENT_PROVIDER and '' as documented sentinels, and
+    // resolution unfolds to a member before either is read.
+    kind: text("kind").notNull().default("simple"),
     createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => ({
     nameUnique: uniqueIndex("named_agents_name_unique").on(table.name),
     readableAgentNameUnique: uniqueIndex("named_agents_readable_agent_name_unique").on(table.readableAgentName),
+  }),
+);
+
+/**
+ * Ordered membership of a composite agent: attempt N of a pipeline stage runs
+ * the member at `position` N-1.
+ *
+ * Nesting is refused at write time (a member must be `kind = 'simple'`), so
+ * this is a flat list rather than a graph — there is deliberately no cycle
+ * detection anywhere in the feature. Deleting a member removes it from every
+ * composite it belonged to; the composite continues with what is left, and a
+ * composite emptied that way resolves as UNUSABLE rather than falling back to
+ * an arbitrary default agent.
+ */
+export const compositeAgentMembers = sqliteTable(
+  "composite_agent_members",
+  {
+    id: text("id").primaryKey(),
+    compositeId: text("composite_id")
+      .notNull()
+      .references((): AnySQLiteColumn => namedAgents.id, { onDelete: "cascade" }),
+    memberId: text("member_id")
+      .notNull()
+      .references((): AnySQLiteColumn => namedAgents.id, { onDelete: "cascade" }),
+    position: integer("position").notNull(),
+    createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    positionUnique: uniqueIndex("composite_agent_members_position_unique").on(
+      table.compositeId,
+      table.position
+    ),
+    memberUnique: uniqueIndex("composite_agent_members_member_unique").on(
+      table.compositeId,
+      table.memberId
+    ),
+    memberIdx: index("composite_agent_members_member_idx").on(table.memberId),
   }),
 );
 

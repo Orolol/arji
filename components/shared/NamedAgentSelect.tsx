@@ -123,13 +123,43 @@ export function NamedAgentSelect({
           <SelectItem value={NO_AGENT_VALUE}>{clearLabel}</SelectItem>
         )}
         {agents.map((agent) => {
-          if (!dispatchRole) {
+          const isComposite = agent.kind === "composite";
+          // A COMPOSITE'S LADDER, in the row's title. The list is what
+          // predicts the run, and it is the whole difference between the two
+          // kinds of row.
+          const ladder = isComposite
+            ? agent.members.map((member) => member.name).join(" → ") ||
+              "no members — unusable"
+            : undefined;
+
+          const kindMark = isComposite ? (
+            <span
+              data-testid={`agent-kind-${agent.id}`}
+              className="shrink-0 font-mono text-[10px] uppercase tracking-[.06em] text-muted-foreground"
+            >
+              {agent.members.length > 0
+                ? `composite · ${agent.members.length}`
+                : "composite · empty"}
+            </span>
+          ) : null;
+
+          // NO RELIABILITY BADGE ON A COMPOSITE, and none invented. The
+          // aggregate groups by `agent_sessions.named_agent_id`, which records
+          // the MEMBER that ran and never the composite that dispatched it, so
+          // a composite has no row at all — a badge here would be a fabricated
+          // em-dash presented as a measurement. It carries its member count
+          // instead, which is a fact about it.
+          if (!dispatchRole || isComposite) {
             return (
-              <SelectItem key={agent.id} value={agent.id}>
-                {agent.name}
+              <SelectItem key={agent.id} value={agent.id} title={ladder}>
+                <span className="flex w-full min-w-0 items-center justify-between gap-3">
+                  <span className="truncate">{agent.name}</span>
+                  {kindMark}
+                </span>
               </SelectItem>
             );
           }
+
           const badge = formatReliabilityBadge(
             reliability.byAgentId.get(agent.id),
             dispatchRole,

@@ -247,6 +247,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       worktreePath,
       cliSessionId,
       namedAgentId: resolvedAgent.namedAgentId ?? null,
+      compositeAgentId: resolvedAgent.compositeAgentId ?? null,
       agentType: REVIEW_TYPE_TO_AGENT_TYPE[reviewType],
       namedAgentName: resolvedAgent.name || null,
       model: resolvedAgent.model || null,

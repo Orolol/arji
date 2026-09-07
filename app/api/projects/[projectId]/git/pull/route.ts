@@ -192,6 +192,7 @@ export async function POST(request: NextRequest, { params }: Params) {
           worktreePath: project.gitRepoPath,
           cliSessionId,
           namedAgentId: resolved.namedAgentId ?? null,
+          compositeAgentId: resolved.compositeAgentId ?? null,
           agentType: "merge",
           namedAgentName: resolved.name || null,
           model: model || null,

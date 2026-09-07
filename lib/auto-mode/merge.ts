@@ -772,6 +772,7 @@ async function dispatchMergeFixAgent(input: {
       worktreePath,
       cliSessionId,
       namedAgentId: resolved.namedAgentId ?? null,
+      compositeAgentId: resolved.compositeAgentId ?? null,
       agentType: "merge",
       namedAgentName: resolved.name || null,
       model: resolved.model || null,

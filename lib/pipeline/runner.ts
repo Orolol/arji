@@ -65,14 +65,13 @@ export interface PipelineStageHandle {
   sessionId: string | null;
   /** Resolves (never rejects) when the stage session reaches a terminal state. */
   settled: Promise<PipelineStageResult>;
-  /** Named agent selected by the opt-in same-provider effort rung, else null. */
-  escalatedToNamedAgent?: string | null;
   /**
-   * Provider the stage was escalated to (attempt >= 3 without a configured
-   * same-provider model escalation, or attempt >= 4 with one), else
-   * null/undefined. Drives the escalation trace.
+   * Set when this attempt moved DOWN one rank of a composite agent. Both ends
+   * travel, because an activity entry that names only the agent now running
+   * cannot tell the reader which agent was abandoned — and that is the half
+   * that explains the run.
    */
-  escalatedToProvider?: string | null;
+  compositeDescent?: { from: string; to: string } | null;
 }
 
 /** What the runner asks the stage launcher to dispatch. */
@@ -83,12 +82,18 @@ export interface PipelineStageRequest {
   /** 1-based fix cycle this dispatch belongs to (fix stages; else current count). */
   fixCycle: number;
   /**
-   * Failed previous attempt of THIS stage — attempt 2 resumes it when the
-   * machinery allows; attempt 3 uses its configured same-provider model
-   * escalation when present, then later attempts change provider. Null on
-   * attempt 1.
+   * Failed previous attempt of THIS stage. A simple agent resumes it on
+   * attempt 2 when the machinery allows; a composite never resumes, because
+   * attempt 2 is a different agent. Null on attempt 1.
    */
   previousAttemptSessionId: string | null;
+  /**
+   * Why the ladder advanced to this attempt — the previous attempt's verdict
+   * (`failed`, `silent`, `transition_refused`). Absent on attempt 1. Used in
+   * the composite rank-down activity entry, which has to say what the descent
+   * was FOR.
+   */
+  descentReason?: string;
   /**
    * Most recent successful code-writing session of the run (initial build or
    * previous fix). Fix stages resume it on attempt 1.
@@ -211,8 +216,21 @@ export interface PipelineRunnerCallbacks {
 }
 
 export interface RunPipelineOptions {
-  /** Per-stage attempt cap (clamped 1..5 by the caller). */
+  /**
+   * Per-stage attempt cap for a SIMPLE agent (clamped 1..5 by the caller).
+   * A composite ignores it — see `attemptBudget`.
+   */
   maxAttempts: number;
+  /**
+   * Attempts `stage` may spend, asked once per stage entry.
+   *
+   * A simple agent answers `maxAttempts`: it is retried as itself, so the
+   * configured cap is the only bound. A COMPOSITE answers its member count,
+   * because each attempt descends a rank and there is nothing below the last
+   * member. Absent — every pre-existing caller — means `maxAttempts` for
+   * every stage, which is byte-for-byte the historical behaviour.
+   */
+  attemptBudget?(stage: PipelineStageKind): number | Promise<number>;
   /** Review → fix → review cycle cap (0 = report-only). */
   maxFixCycles: number;
   /** Hard ceiling on sessions the run may own (PIPELINE_MAX_SESSIONS_PER_RUN). */
@@ -305,6 +323,23 @@ const RUNNING_STATE_BY_STAGE: Record<PipelineStageKind, PipelineState> = {
  * terminal summary; per-stage launch/session failures never reject (they
  * feed the retry ladder). A rejection here is an engine bug.
  */
+/**
+ * Why the ladder is about to advance, in the words the activity entry uses.
+ *
+ * The three verdicts a composite exists to absorb are named individually
+ * because "attempt 2 replaced Sonnet with Codex" is only half an explanation
+ * — a run abandoned for delivering NOTHING reads very differently from one
+ * abandoned for crashing, and the reader has to be able to tell them apart
+ * without opening the dead session.
+ */
+function descentReasonFor(result: PipelineStageResult): string {
+  if (result.outcome === "silent") return "the agent delivered nothing";
+  if (result.outcome === "transition_refused") {
+    return "its workflow transition was refused";
+  }
+  return "the session failed";
+}
+
 export async function runPipeline(
   options: RunPipelineOptions
 ): Promise<PipelineTerminalSummary> {
@@ -314,13 +349,24 @@ export async function runPipeline(
   const sessionIds: string[] = [options.initialBuild.sessionId];
   let stage: PipelineStageKind = "build";
   let stageAttempt = 1;
+  /**
+   * Attempts the CURRENT stage may spend. `maxAttempts` for a simple agent;
+   * the member count for a composite. Re-asked at every stage entry, because
+   * a run can hold a composite for its code stages and a simple agent for its
+   * review (or the reverse).
+   *
+   * Seeded with the configured cap rather than with the initial build's real
+   * budget: the initial build was dispatched by the ROUTE, before this engine
+   * existed, so its first retry is the first attempt this engine sizes.
+   */
+  let stageMaxAttempts = options.maxAttempts;
   let fixCycles = 0;
   let lastCodeSessionId: string | null = null;
   let reviewStageStartedAt = "";
   let handle: PipelineStageHandle = {
     sessionId: options.initialBuild.sessionId,
     settled: options.initialBuild.settled,
-    escalatedToProvider: null,
+    compositeDescent: null,
   };
   let currentRequest: PipelineStageRequest | null = null;
   /**
@@ -446,6 +492,27 @@ export async function runPipeline(
     stage = request.stage;
     stageAttempt = request.attempt;
     currentRequest = request;
+
+    // The budget is asked ONCE per stage entry (attempt 1), not per attempt:
+    // a composite whose members were edited mid-run must not change the
+    // ladder under a run already climbing it.
+    if (request.attempt === 1) {
+      stageMaxAttempts = options.maxAttempts;
+      if (options.attemptBudget) {
+        try {
+          const budget = await options.attemptBudget(request.stage);
+          if (Number.isFinite(budget) && budget >= 1) {
+            stageMaxAttempts = Math.floor(budget);
+          }
+        } catch (error) {
+          console.warn(
+            "[pipeline] Failed to size the attempt ladder; using the configured cap:",
+            error instanceof Error ? error.message : error
+          );
+        }
+      }
+    }
+
     callbacks.onStageChange?.(
       RUNNING_STATE_BY_STAGE[request.stage],
       request.stage,
@@ -471,8 +538,7 @@ export async function runPipeline(
           error:
             error instanceof Error ? error.message : "Stage dispatch failed",
         }),
-        escalatedToNamedAgent: null,
-        escalatedToProvider: null,
+        compositeDescent: null,
       };
     }
 
@@ -502,17 +568,15 @@ export async function runPipeline(
       }
     }
 
-    if (handle.escalatedToProvider) {
+    if (handle.compositeDescent) {
       callbacks.onTrace?.(
-        PIPELINE_REASONS.escalation(request.stage, handle.escalatedToProvider),
-        handle.sessionId
-      );
-    }
-    if (handle.escalatedToNamedAgent) {
-      callbacks.onTrace?.(
-        PIPELINE_REASONS.effortEscalation(
+        PIPELINE_REASONS.compositeRankDown(
           request.stage,
-          handle.escalatedToNamedAgent
+          handle.compositeDescent.from,
+          handle.compositeDescent.to,
+          request.descentReason ?? "failed",
+          request.attempt,
+          stageMaxAttempts
         ),
         handle.sessionId
       );
@@ -525,11 +589,17 @@ export async function runPipeline(
    * Failure path for the current stage: climb the retry ladder, or exhaust
    * into the forensic post-mortem and terminal failure.
    */
-  const handleStageFailure = async (): Promise<PipelineTerminalSummary | null> => {
-    if (stageAttempt < options.maxAttempts) {
+  const handleStageFailure = async (
+    descentReason?: string
+  ): Promise<PipelineTerminalSummary | null> => {
+    // The hard session ceiling cuts the ladder as well as the forensic
+    // dispatch. Without this a composite longer than the sessions a run has
+    // left would keep asking for members it can never spend.
+    const sessionsLeft = sessionIds.length < options.maxSessions;
+    if (stageAttempt < stageMaxAttempts && sessionsLeft) {
       const nextAttempt = stageAttempt + 1;
       callbacks.onTrace?.(
-        PIPELINE_REASONS.retry(stage, nextAttempt, options.maxAttempts),
+        PIPELINE_REASONS.retry(stage, nextAttempt, stageMaxAttempts),
         handle.sessionId
       );
       return dispatch({
@@ -538,6 +608,7 @@ export async function runPipeline(
         fixCycle: fixCycles,
         previousAttemptSessionId: handle.sessionId,
         lastCodeSessionId,
+        ...(descentReason ? { descentReason } : {}),
         ...(currentRequest?.verifyFailure
           ? { verifyFailure: currentRequest.verifyFailure }
           : {}),
@@ -559,7 +630,10 @@ export async function runPipeline(
     // cap blocking its dispatch).
     const failedStage = stage;
     const attempts = stageAttempt;
-    const reason = `stage ${failedStage} failed after ${attempts} attempts`;
+    const reason =
+      stageAttempt < stageMaxAttempts
+        ? `stage ${failedStage} failed after ${attempts} attempts (session ceiling reached)`
+        : `stage ${failedStage} failed after ${attempts} attempts`;
     callbacks.onTrace?.(
       PIPELINE_REASONS.failedStage(failedStage, attempts),
       handle.sessionId
@@ -623,7 +697,7 @@ export async function runPipeline(
     }
 
     if (!result.success) {
-      const summary = await handleStageFailure();
+      const summary = await handleStageFailure(descentReasonFor(result));
       if (summary) return summary;
       continue;
     }

@@ -325,6 +325,7 @@ export async function runForensic(
       logsPath,
       cliSessionId,
       namedAgentId: resolvedAgent.namedAgentId ?? null,
+      compositeAgentId: resolvedAgent.compositeAgentId ?? null,
       agentType: "forensic",
       namedAgentName: resolvedAgent.name || null,
       model: resolvedAgent.model || null,

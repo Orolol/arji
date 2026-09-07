@@ -1,0 +1,14 @@
+-- Removes the same-provider effort escalation (0039_named_agent_escalation).
+--
+-- The mechanism was unreachable by default: it fired at pipeline attempt 3
+-- while DEFAULT_PIPELINE_MAX_ATTEMPTS is 2, so without someone raising
+-- pipeline_max_attempts by hand the column was never read. Composite agents
+-- replace it with one ordered fallback list per agent, and the product model
+-- is now binary — a specific agent, or a composite; there is no third path.
+--
+-- Not written as a table rebuild: named_agents is referenced by
+-- agent_provider_defaults, chat_conversations, qa_reports, agent_sessions and
+-- composite_agent_members, and a rebuild would need foreign_keys OFF — which
+-- is a no-op inside drizzle's migration transaction (B-arij-251). SQLite's
+-- ALTER TABLE ... DROP COLUMN handles a self-referential FK column directly.
+ALTER TABLE named_agents DROP COLUMN escalates_to;

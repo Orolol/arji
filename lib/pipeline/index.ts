@@ -231,8 +231,14 @@ export function startPipelineRun(input: StartPipelineRunInput): {
     batchRunId: input.batchRunId ?? null,
   });
 
+  const configuredMaxAttempts = resolvePipelineMaxAttempts(input.projectId);
+
   const engine = runPipeline({
-    maxAttempts: resolvePipelineMaxAttempts(input.projectId),
+    maxAttempts: configuredMaxAttempts,
+    // A composite's member count replaces the configured cap for the stages
+    // it runs; `pipeline_max_attempts` no longer governs an agent switch.
+    attemptBudget: (stage) =>
+      driver.attemptBudget(stage, configuredMaxAttempts),
     maxFixCycles: resolvePipelineMaxFixCycles(input.projectId),
     maxSessions: PIPELINE_MAX_SESSIONS_PER_RUN,
     initialBuild: {

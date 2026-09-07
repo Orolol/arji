@@ -1019,6 +1019,7 @@ export async function dispatchDreamingSession(
     logsPath,
     cliSessionId,
     namedAgentId: resolvedAgent.namedAgentId ?? null,
+    compositeAgentId: resolvedAgent.compositeAgentId ?? null,
     agentType: DREAMING_AGENT_TYPE,
     namedAgentName: resolvedAgent.name || null,
     model: resolvedAgent.model || null,

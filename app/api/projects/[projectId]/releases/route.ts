@@ -230,6 +230,7 @@ ${ticketContext}
         agentType: "release_notes",
         namedAgentName: resolvedAgent.name || null,
         namedAgentId: resolvedAgent.namedAgentId || null,
+        compositeAgentId: resolvedAgent.compositeAgentId ?? null,
         model: resolvedAgent.model || null,
         createdAt: now,
       });

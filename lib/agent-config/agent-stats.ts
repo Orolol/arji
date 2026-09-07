@@ -16,12 +16,12 @@ import type { DispatchRole } from "./dispatch-reliability-constants";
  * agent. The only JS-side work is filling the 14-day calendar from at most 14
  * grouped rows.
  *
- * DEVIATION, stated plainly: the per-agent band needs four differently-shaped
- * results (scalars + median, a day series, a role split, an escalation count),
- * and SQLite cannot return them from one statement without json_group_array
- * gymnastics. It therefore issues FOUR statements for ONE agent — a constant,
- * not an N. The invariant that actually matters ("never a query per agent in a
- * list") is untouched.
+ * DEVIATION, stated plainly: the per-agent band needs three differently-shaped
+ * results (scalars + median, a day series, a role split), and SQLite cannot
+ * return them from one statement without json_group_array gymnastics. It
+ * therefore issues THREE statements for ONE agent — a constant, not an N. The
+ * invariant that actually matters ("never a query per agent in a list") is
+ * untouched.
  *
  * SCOPE: every agent_sessions row counts regardless of agent type, including
  * background 'memory_distill' and 'dreaming' runs — their tokens are real
@@ -70,8 +70,6 @@ export interface NamedAgentStats {
   cleanRate: number | null;
   medianDurationMs: number | null;
   totalCostUsd: number | null;
-  /** Blame-attributed escalations; null when the agent has no terminal run. */
-  escalationCount: number | null;
   /** Exactly `windowDays` entries, oldest first, zero-filled. */
   days: AgentDaySeriesPoint[];
   byRole: AgentRoleSplitRow[];
@@ -183,10 +181,6 @@ interface RawRoleRow {
   runs: number;
 }
 
-interface RawEscalationRow {
-  escalation_count: number;
-}
-
 /** `YYYY-MM-DD` for a Date, in UTC. */
 function utcDay(date: Date): string {
   return date.toISOString().slice(0, 10);
@@ -214,7 +208,7 @@ export function getNamedAgentStats(
   const now = query.nowIso ? new Date(query.nowIso) : new Date();
   const cutoff = windowCutoffIso(now, windowDays);
 
-  // 1/4 — run count, terminal split, cost sum and median duration.
+  // 1/3 — run count, terminal split, cost sum and median duration.
   //
   // SQLite has no MEDIAN(): rank the terminal durations with window functions
   // and average the middle row(s) — rn IN ((cnt+1)/2, (cnt+2)/2) picks the one
@@ -272,7 +266,7 @@ export function getNamedAgentStats(
   const failed = aggregate?.failed_count ?? 0;
   const terminal = completed + failed;
 
-  // 2/4 — one row per day that has sessions; JS zero-fills the calendar below.
+  // 2/3 — one row per day that has sessions; JS zero-fills the calendar below.
   const dayRows = db.all<RawDayRow>(sql`
     SELECT
       date(s.created_at) AS day,
@@ -295,7 +289,7 @@ export function getNamedAgentStats(
     cursor.setUTCDate(cursor.getUTCDate() + 1);
   }
 
-  // 3/4 — the task split, grouped by the SAME CASE expression the dispatcher's
+  // 3/3 — the task split, grouped by the SAME CASE expression the dispatcher's
   // reliability aggregate uses. Unmapped/legacy agent types fall through to
   // NULL and are dropped by the HAVING.
   const roleRows = db.all<RawRoleRow>(sql`
@@ -311,47 +305,6 @@ export function getNamedAgentStats(
     ORDER BY runs DESC, role
   `);
 
-  // 4/4 — escalations.
-  //
-  // BLAME HEURISTIC, NOT A RECORDED EVENT. There is no escalation table: the
-  // pipeline runner emits two trace strings (PIPELINE_REASONS.escalation /
-  // .effortEscalation) which lib/pipeline/index.ts persists into
-  // ticket_activity_log with actor='system'. Joining a trace to its OWN
-  // session under-counts badly, because a provider escalation drops the named
-  // agent entirely (lib/pipeline/stages.ts returns namedAgentId: null). So the
-  // responsible agent is taken to be the most recent FAILED session of the
-  // same epic that ended at or before the trace.
-  //
-  // Matching is on the reason PREFIX, never an exact string — PIPELINE_REASON_PREFIX
-  // exists precisely so new trace lines need no query change. The day a
-  // dedicated escalation event lands, this becomes exact.
-  const escalations = db.all<RawEscalationRow>(sql`
-    WITH traces AS (
-      SELECT t.id AS id, t.epic_id AS epic_id, t.created_at AS created_at
-      FROM ticket_activity_log t
-      WHERE t.actor = 'system'
-        AND (
-          t.reason LIKE 'Pipeline escalation:%'
-          OR t.reason LIKE 'Pipeline effort escalation:%'
-        )
-        AND t.created_at IS NOT NULL
-        AND julianday(t.created_at) >= julianday(${cutoff})
-    )
-    SELECT COUNT(*) AS escalation_count
-    FROM traces t
-    WHERE (
-      SELECT s.named_agent_id
-      FROM agent_sessions s
-      WHERE s.epic_id = t.epic_id
-        AND s.status = 'failed'
-        AND s.named_agent_id IS NOT NULL
-        AND s.ended_at IS NOT NULL
-        AND julianday(s.ended_at) <= julianday(t.created_at)
-      ORDER BY julianday(s.ended_at) DESC
-      LIMIT 1
-    ) = ${agentId}
-  `)[0];
-
   return {
     windowDays,
     runCount,
@@ -363,10 +316,6 @@ export function getNamedAgentStats(
         ? Math.round(aggregate.median_duration_ms)
         : null,
     totalCostUsd: aggregate?.total_cost_usd ?? null,
-    // A real 0 is meaningful ("nothing escalated"), but only once there is
-    // something to have escalated. With no terminal run the honest answer is
-    // "unknown", which the numeral renders as an em-dash.
-    escalationCount: terminal > 0 ? (escalations?.escalation_count ?? 0) : null,
     days,
     byRole: roleRows.map((row) => ({
       role: row.role as DispatchRole,

@@ -1,12 +1,24 @@
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { namedAgents } from "@/lib/db/schema";
+import { compositeAgentMembers, namedAgents } from "@/lib/db/schema";
 import {
+  COMPOSITE_AGENT_KIND,
+  COMPOSITE_AGENT_MODEL,
+  COMPOSITE_AGENT_PROVIDER,
   DEFAULT_PERSONA_PROMPT,
   PERSONA_PROMPT_MAX_CHARS,
+  SIMPLE_AGENT_KIND,
   isAgentProvider,
   type AgentProvider,
+  type NamedAgentKind,
 } from "@/lib/agent-config/constants";
+import {
+  listCompositeMembers,
+  readDefaultCompositeAgentId,
+  setCompositeMembers,
+  validateCompositeMembers,
+  type CompositeMember,
+} from "@/lib/agent-config/composite-agents";
 import {
   normalizeProviderOptions,
   parseStoredProviderOptions,
@@ -23,7 +35,15 @@ export interface NamedAgentRecord {
   options: NamedAgentCliOptions;
   /** Persona injected at the head of the prompt; null injects nothing. */
   personaPrompt: string | null;
-  escalatesTo: string | null;
+  /** 'simple' | 'composite'. See lib/agent-config/composite-agents.ts. */
+  kind: NamedAgentKind;
+  /**
+   * Ordered fallback list — populated for a composite, empty for a simple
+   * agent. Attempt N of a stage runs `members[N - 1]`.
+   */
+  members: CompositeMember[];
+  /** True for the composite currently designated as the default agent. */
+  isDefault: boolean;
   createdAt: string | null;
 }
 
@@ -53,16 +73,40 @@ function normalizePersonaPrompt(
   return { persona: trimmed };
 }
 
-function toRecord(row: typeof namedAgents.$inferSelect): NamedAgentRecord {
-  const provider = normalizeProvider(row.provider) || "claude-code";
+/**
+ * A composite carries the documented sentinels in the two NOT NULL columns it
+ * does not own. `toRecord` reports them verbatim rather than laundering them
+ * into `claude-code` / a model string, because a caller that reads a
+ * composite's provider is asking the wrong question and must not receive a
+ * plausible answer.
+ */
+function toRecord(
+  row: typeof namedAgents.$inferSelect,
+  context?: { defaultCompositeId?: string | null },
+): NamedAgentRecord {
+  const kind: NamedAgentKind =
+    row.kind === COMPOSITE_AGENT_KIND ? COMPOSITE_AGENT_KIND : SIMPLE_AGENT_KIND;
+  const isComposite = kind === COMPOSITE_AGENT_KIND;
+  const provider = isComposite
+    ? (COMPOSITE_AGENT_PROVIDER as unknown as AgentProvider)
+    : normalizeProvider(row.provider) || "claude-code";
+  const defaultCompositeId =
+    context?.defaultCompositeId !== undefined
+      ? context.defaultCompositeId
+      : readDefaultCompositeAgentId();
+
   return {
     id: row.id,
     name: row.name,
     provider,
-    model: row.model,
-    options: parseStoredProviderOptions(provider, row.options),
-    personaPrompt: row.personaPrompt ?? null,
-    escalatesTo: row.escalatesTo,
+    model: isComposite ? COMPOSITE_AGENT_MODEL : row.model,
+    options: isComposite
+      ? {}
+      : parseStoredProviderOptions(row.provider, row.options),
+    personaPrompt: isComposite ? null : (row.personaPrompt ?? null),
+    kind,
+    members: isComposite ? listCompositeMembers(row.id) : [],
+    isDefault: isComposite && row.id === defaultCompositeId,
     createdAt: row.createdAt,
   };
 }
@@ -79,7 +123,9 @@ export async function listNamedAgents(): Promise<NamedAgentRecord[]> {
     .orderBy(namedAgents.name)
     .all();
 
-  return rows.map(toRecord);
+  // One settings read for the whole list rather than one per row.
+  const defaultCompositeId = readDefaultCompositeAgentId();
+  return rows.map((row) => toRecord(row, { defaultCompositeId }));
 }
 
 export async function getNamedAgent(agentId: string): Promise<NamedAgentRecord | null> {
@@ -92,72 +138,6 @@ export async function getNamedAgent(agentId: string): Promise<NamedAgentRecord |
   if (!row) return null;
 
   return toRecord(row);
-}
-
-function normalizeEscalationTarget(value: string | null | undefined): string | null {
-  if (typeof value !== "string") return null;
-  return value.trim() || null;
-}
-
-/**
- * Validates the directed named-agent escalation graph before a write.
- *
- * The model ordering itself belongs to the user/provider configuration, but
- * every edge must stay on the same provider so the pipeline increases effort
- * before it changes provider. Walking the complete target chain rejects both
- * a direct self-link and longer cycles such as a -> b -> c -> a.
- */
-function validateEscalationTarget(input: {
-  agentId: string;
-  provider: AgentProvider;
-  escalatesTo: string | null;
-}): string | null {
-  if (!input.escalatesTo) return null;
-
-  const visited = new Set<string>();
-  let currentId: string | null = input.escalatesTo;
-
-  while (currentId) {
-    if (currentId === input.agentId || visited.has(currentId)) {
-      return "Escalation cycle detected";
-    }
-    visited.add(currentId);
-
-    const current = db
-      .select({
-        id: namedAgents.id,
-        provider: namedAgents.provider,
-        escalatesTo: namedAgents.escalatesTo,
-      })
-      .from(namedAgents)
-      .where(eq(namedAgents.id, currentId))
-      .get();
-    if (!current) {
-      return "Escalation agent not found";
-    }
-    if (current.provider !== input.provider) {
-      return "Escalation agent must use the same provider";
-    }
-    currentId = current.escalatesTo;
-  }
-
-  return null;
-}
-
-/** A provider change must not invalidate agents that escalate into this one. */
-function validateIncomingEscalations(
-  agentId: string,
-  provider: AgentProvider
-): string | null {
-  const incoming = db
-    .select({ provider: namedAgents.provider })
-    .from(namedAgents)
-    .where(eq(namedAgents.escalatesTo, agentId))
-    .all();
-
-  return incoming.some((agent) => agent.provider !== provider)
-    ? "Escalation agent must use the same provider"
-    : null;
 }
 
 export async function createNamedAgent(input: {
@@ -174,7 +154,6 @@ export async function createNamedAgent(input: {
    * distinguishable, which is why this is not defaulted at the schema layer.
    */
   personaPrompt?: string | null;
-  escalatesTo?: string | null;
 }): Promise<{ data: NamedAgentRecord | null; error?: string }> {
   const name = input.name.trim();
   const model = (input.model ?? "").trim();
@@ -212,15 +191,6 @@ export async function createNamedAgent(input: {
   }
 
   const id = input.id || createId();
-  const escalatesTo = normalizeEscalationTarget(input.escalatesTo);
-  const escalationError = validateEscalationTarget({
-    agentId: id,
-    provider,
-    escalatesTo,
-  });
-  if (escalationError) {
-    return { data: null, error: escalationError };
-  }
 
   db.insert(namedAgents)
     .values({
@@ -230,13 +200,151 @@ export async function createNamedAgent(input: {
       model,
       options: JSON.stringify(options),
       personaPrompt,
-      escalatesTo,
+      kind: SIMPLE_AGENT_KIND,
       createdAt: new Date().toISOString(),
     })
     .run();
 
   const created = await getNamedAgent(id);
   return { data: created };
+}
+
+/**
+ * Creates a composite agent: a `named_agents` row of kind `composite` plus its
+ * ordered membership.
+ *
+ * The row shares the name space (and the unique index) of simple agents on
+ * purpose — a composite is assignable everywhere a named agent is, so two
+ * agents called the same thing would be ambiguous in every picker.
+ *
+ * The provider and model columns receive their documented sentinels. Nothing
+ * ever spawns them: `COMPOSITE_AGENT_PROVIDER` is deliberately absent from
+ * `PROVIDER_OPTIONS`, so `isAgentProvider()` rejects it, and resolution
+ * unfolds to a member before any provider is read.
+ *
+ * Row and membership are written in ONE transaction. A composite that existed
+ * for even an instant with zero members would be an unusable agent that the
+ * pickers already offer.
+ */
+export async function createCompositeAgent(input: {
+  id?: string;
+  name: string;
+  memberIds: string[];
+}): Promise<{ data: NamedAgentRecord | null; error?: string }> {
+  const name = input.name.trim();
+  if (!name) {
+    return { data: null, error: "Name must not be empty" };
+  }
+
+  const duplicate = db
+    .select({ id: namedAgents.id })
+    .from(namedAgents)
+    .where(sql`LOWER(${namedAgents.name}) = LOWER(${name})`)
+    .get();
+  if (duplicate) {
+    return { data: null, error: "name already exists" };
+  }
+
+  const id = input.id || createId();
+  const membersError = validateCompositeMembers(id, input.memberIds);
+  if (membersError) {
+    return { data: null, error: membersError };
+  }
+
+  const createdAt = new Date().toISOString();
+  db.transaction((tx) => {
+    tx.insert(namedAgents)
+      .values({
+        id,
+        name,
+        provider: COMPOSITE_AGENT_PROVIDER,
+        model: COMPOSITE_AGENT_MODEL,
+        options: "{}",
+        personaPrompt: null,
+        kind: COMPOSITE_AGENT_KIND,
+        createdAt,
+      })
+      .run();
+    input.memberIds.forEach((memberId, index) => {
+      tx.insert(compositeAgentMembers)
+        .values({
+          id: createId(),
+          compositeId: id,
+          memberId,
+          position: index,
+          createdAt,
+        })
+        .run();
+    });
+  });
+
+  return { data: await getNamedAgent(id) };
+}
+
+/**
+ * Update path for a composite: its name and its ordered member list.
+ *
+ * Reordering is a full replacement of the membership rather than a diff — see
+ * `setCompositeMembers` for why the uniquely-indexed position column makes a
+ * diff collide with itself mid-update.
+ */
+async function updateCompositeAgent(
+  agentId: string,
+  existing: typeof namedAgents.$inferSelect,
+  updates: {
+    name?: string;
+    provider?: string;
+    model?: string;
+    options?: unknown;
+    personaPrompt?: string | null;
+    memberIds?: string[];
+  }
+): Promise<{ data: NamedAgentRecord | null; error?: string }> {
+  if (
+    updates.provider !== undefined ||
+    updates.model !== undefined ||
+    updates.options !== undefined ||
+    updates.personaPrompt !== undefined
+  ) {
+    return {
+      data: null,
+      error:
+        "A composite agent has no CLI, model, options or persona of its own — those belong to its members",
+    };
+  }
+
+  if (typeof updates.name === "string") {
+    const name = updates.name.trim();
+    if (!name) {
+      return { data: null, error: "name is required" };
+    }
+    const duplicate = db
+      .select({ id: namedAgents.id })
+      .from(namedAgents)
+      .where(
+        and(
+          sql`LOWER(${namedAgents.name}) = LOWER(${name})`,
+          sql`${namedAgents.id} != ${agentId}`
+        )
+      )
+      .get();
+    if (duplicate) {
+      return { data: null, error: "name already exists" };
+    }
+    if (name !== existing.name) {
+      db.update(namedAgents)
+        .set({ name })
+        .where(eq(namedAgents.id, agentId))
+        .run();
+    }
+  }
+
+  if (updates.memberIds !== undefined) {
+    const error = setCompositeMembers(agentId, updates.memberIds);
+    if (error) return { data: null, error };
+  }
+
+  return { data: await getNamedAgent(agentId) };
 }
 
 export async function updateNamedAgent(
@@ -247,7 +355,8 @@ export async function updateNamedAgent(
     model?: string;
     options?: unknown;
     personaPrompt?: string | null;
-    escalatesTo?: string | null;
+    /** Composite only: the new ordered member list. */
+    memberIds?: string[];
   }
 ): Promise<{ data: NamedAgentRecord | null; error?: string }> {
   const existing = db
@@ -257,6 +366,22 @@ export async function updateNamedAgent(
     .get();
   if (!existing) {
     return { data: null, error: "Named agent not found" };
+  }
+
+  // A COMPOSITE owns no provider, model, options or persona, so the update
+  // path for one is a different shape rather than the same one with fields
+  // ignored: name, and the ordered member list. Sending provider/model here
+  // is a caller bug, and it is refused rather than silently dropped — a
+  // silent drop is how a UI ends up believing it saved a CLI choice.
+  if (existing.kind === COMPOSITE_AGENT_KIND) {
+    return updateCompositeAgent(agentId, existing, updates);
+  }
+
+  if (updates.memberIds !== undefined) {
+    return {
+      data: null,
+      error: "Only a composite agent has members",
+    };
   }
 
   const patch: Partial<typeof namedAgents.$inferInsert> = {};
@@ -305,33 +430,12 @@ export async function updateNamedAgent(
     patch.personaPrompt = persona.persona;
   }
 
-  if (updates.escalatesTo !== undefined) {
-    patch.escalatesTo = normalizeEscalationTarget(updates.escalatesTo);
-  }
-
   const effectiveProvider = normalizeProvider(patch.provider ?? existing.provider);
   // Existing rows can only contain valid providers, but retain the defensive
   // check for databases modified outside Arij.
   if (!effectiveProvider) {
     return { data: null, error: "invalid provider" };
   }
-  const effectiveEscalatesTo =
-    updates.escalatesTo !== undefined
-      ? normalizeEscalationTarget(updates.escalatesTo)
-      : existing.escalatesTo;
-  const escalationError = validateEscalationTarget({
-    agentId,
-    provider: effectiveProvider,
-    escalatesTo: effectiveEscalatesTo,
-  });
-  if (escalationError) {
-    return { data: null, error: escalationError };
-  }
-  const incomingError = validateIncomingEscalations(agentId, effectiveProvider);
-  if (incomingError) {
-    return { data: null, error: incomingError };
-  }
-
   // Options are validated against the EFFECTIVE provider, and re-validated
   // even when the caller sent none: changing an agent's CLI has to drop the
   // previous CLI's options rather than leave them stored, unreachable from

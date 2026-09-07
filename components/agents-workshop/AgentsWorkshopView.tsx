@@ -6,6 +6,8 @@ import { Loader2 } from "lucide-react";
 import { AgentIdentityCard } from "@/components/agents-workshop/AgentIdentityCard";
 import { AgentRoster } from "@/components/agents-workshop/AgentRoster";
 import { CliOptionsBand } from "@/components/agents-workshop/CliOptionsBand";
+import { CompositeIdentityCard } from "@/components/agents-workshop/CompositeIdentityCard";
+import { CompositeMembersBand } from "@/components/agents-workshop/CompositeMembersBand";
 import { EditorFooterBar } from "@/components/agents-workshop/EditorFooterBar";
 import { PersonaBand } from "@/components/agents-workshop/PersonaBand";
 import { TheNumbersBand } from "@/components/agents-workshop/TheNumbersBand";
@@ -43,7 +45,12 @@ interface Draft {
   model: string;
   options: NamedAgentCliOptions;
   personaPrompt: string;
-  escalatesTo: string | null;
+  /**
+   * Composite only: the edited member order. Empty for a simple agent, and
+   * never sent for one — the server refuses `memberIds` on a simple agent
+   * rather than dropping it silently.
+   */
+  memberIds: string[];
 }
 
 function draftFrom(agent: NamedAgent): Draft {
@@ -54,18 +61,27 @@ function draftFrom(agent: NamedAgent): Draft {
     // `?? {}` covers a legacy row whose options were never written.
     options: agent.options ?? {},
     personaPrompt: agent.personaPrompt ?? "",
-    escalatesTo: agent.escalatesTo,
+    memberIds: agent.members.map((member) => member.id),
   };
 }
 
 function isDirty(draft: Draft, agent: NamedAgent): boolean {
+  if (agent.kind === "composite") {
+    // A composite owns nothing but its name and its order, so nothing else
+    // can make it dirty — comparing the CLI fields would report a permanent
+    // diff against the sentinels the row carries.
+    return (
+      draft.name !== agent.name ||
+      draft.memberIds.join("\u0000") !==
+        agent.members.map((member) => member.id).join("\u0000")
+    );
+  }
   return (
     draft.name !== agent.name ||
     draft.provider !== agent.provider ||
     draft.model !== agent.model ||
     JSON.stringify(draft.options) !== JSON.stringify(agent.options ?? {}) ||
-    draft.personaPrompt !== (agent.personaPrompt ?? "") ||
-    draft.escalatesTo !== agent.escalatesTo
+    draft.personaPrompt !== (agent.personaPrompt ?? "")
   );
 }
 
@@ -90,8 +106,10 @@ export function AgentsWorkshopView({ projectId }: { projectId?: string }) {
     data: agents,
     loading,
     createNamedAgent,
+    createCompositeAgent,
     updateNamedAgent,
     deleteNamedAgent,
+    setDefaultCompositeAgent,
   } = useNamedAgents();
   const { providers: availability, loading: availabilityLoading } =
     useProvidersAvailable();
@@ -128,6 +146,34 @@ export function AgentsWorkshopView({ projectId }: { projectId?: string }) {
 
   const dirty = !!agent && !!draft && isDirty(draft, agent);
   const busy = saving || deleting;
+  const isComposite = agent?.kind === "composite";
+  /** A composite may only contain simple agents; nesting is refused server-side. */
+  const simpleAgents = agents.filter(
+    (candidate) => candidate.kind !== "composite",
+  );
+  /**
+   * The DRAFT order rendered against the server's member records. Reordering
+   * is local until Save, so the band has to read the draft's id list rather
+   * than `agent.members`, which still carries the stored order.
+   */
+  const draftMembers = draft
+    ? draft.memberIds
+        .map((id) => {
+          const stored = agent?.members.find((member) => member.id === id);
+          if (stored) return stored;
+          const added = agents.find((candidate) => candidate.id === id);
+          return added
+            ? {
+                id: added.id,
+                name: added.name,
+                provider: added.provider,
+                model: added.model,
+                position: 0,
+              }
+            : null;
+        })
+        .filter((member): member is NamedAgent["members"][number] => !!member)
+    : [];
 
   const patchDraft = useCallback(
     (agentId: string, base: Draft, patch: Partial<Draft>) => {
@@ -148,20 +194,20 @@ export function AgentsWorkshopView({ projectId }: { projectId?: string }) {
     if (!agent || !draft) return;
     // Options are per-CLI: anything the new CLI does not declare goes back to
     // its default rather than lingering as a ghost value the editor can no
-    // longer show. And a cross-provider escalation edge is rejected by the
-    // server, so leaving one behind makes the agent permanently unsaveable
-    // over a field the user never touched.
-    const escalatesTo =
-      draft.escalatesTo &&
-      agents.find((candidate) => candidate.id === draft.escalatesTo)
-        ?.provider !== next
-        ? null
-        : draft.escalatesTo;
+    // longer show.
     patchDraft(agent.id, draft, {
       provider: next,
       options: resetOptionsForProvider(next, draft.options),
-      escalatesTo,
     });
+  }
+
+  async function handleToggleDefault(next: boolean) {
+    if (!agent) return;
+    setError(null);
+    const result = await setDefaultCompositeAgent(next ? agent.id : null);
+    if (!result.ok) {
+      setError(result.error || "Could not change the default agent.");
+    }
   }
 
   async function handleSave() {
@@ -169,14 +215,18 @@ export function AgentsWorkshopView({ projectId }: { projectId?: string }) {
     setError(null);
     setSaving(true);
     try {
-      const result = await updateNamedAgent(agent.id, {
-        name: draft.name.trim(),
-        provider: draft.provider,
-        model: draft.model.trim(),
-        options: draft.options,
-        personaPrompt: draft.personaPrompt,
-        escalatesTo: draft.escalatesTo,
-      });
+      const result = await updateNamedAgent(
+        agent.id,
+        agent.kind === "composite"
+          ? { name: draft.name.trim(), memberIds: draft.memberIds }
+          : {
+              name: draft.name.trim(),
+              provider: draft.provider,
+              model: draft.model.trim(),
+              options: draft.options,
+              personaPrompt: draft.personaPrompt,
+            },
+      );
       if (result.ok) {
         // The hook has already reloaded the roster, so dropping the draft is
         // how the fields stop showing text the server did not store — the
@@ -255,49 +305,74 @@ export function AgentsWorkshopView({ projectId }: { projectId?: string }) {
         availabilityLoading={availabilityLoading}
         onSelect={handleSelect}
         onCreate={createNamedAgent}
+        onCreateComposite={createCompositeAgent}
       />
 
       {agent && draft ? (
         <div className="flex min-w-0 flex-1 flex-col gap-[10px] md:overflow-y-auto">
-          <AgentIdentityCard
-            // Remount per agent: the "stronger model chosen but not yet
-            // targeted" state belongs to one agent's editing session.
-            key={agent.id}
-            agentId={agent.id}
-            agents={agents}
-            name={draft.name}
-            provider={draft.provider}
-            model={draft.model}
-            escalatesTo={draft.escalatesTo}
-            availability={availability}
-            availabilityLoading={availabilityLoading}
-            disabled={busy}
-            onNameChange={(value) => patchDraft(agent.id, draft, { name: value })}
-            onProviderChange={handleProviderChange}
-            onModelChange={(value) =>
-              patchDraft(agent.id, draft, { model: value })
-            }
-            onEscalatesToChange={(value) =>
-              patchDraft(agent.id, draft, { escalatesTo: value })
-            }
-          />
+          {isComposite ? (
+            // A composite has no CLI, model, options or persona of its own —
+            // those belong to its members — so the editor is its NAME and its
+            // ORDER, and the bands that would edit a CLI are not rendered
+            // rather than rendered disabled.
+            <>
+              <CompositeIdentityCard
+                name={draft.name}
+                memberCount={draft.memberIds.length}
+                disabled={busy}
+                onNameChange={(value: string) =>
+                  patchDraft(agent.id, draft, { name: value })
+                }
+              />
 
-          <TheNumbersBand stats={stats} />
+              <CompositeMembersBand
+                members={draftMembers}
+                candidates={simpleAgents}
+                disabled={busy}
+                isDefault={agent.isDefault}
+                onChange={(memberIds) =>
+                  patchDraft(agent.id, draft, { memberIds })
+                }
+                onToggleDefault={handleToggleDefault}
+              />
+            </>
+          ) : (
+            <>
+              <AgentIdentityCard
+                key={agent.id}
+                name={draft.name}
+                provider={draft.provider}
+                model={draft.model}
+                availability={availability}
+                availabilityLoading={availabilityLoading}
+                disabled={busy}
+                onNameChange={(value) =>
+                  patchDraft(agent.id, draft, { name: value })
+                }
+                onProviderChange={handleProviderChange}
+                onModelChange={(value) =>
+                  patchDraft(agent.id, draft, { model: value })
+                }
+              />
 
-          <PersonaBand
-            value={draft.personaPrompt}
-            onChange={(value) =>
-              patchDraft(agent.id, draft, { personaPrompt: value })
-            }
-            disabled={busy}
-          />
+              <TheNumbersBand stats={stats} />
 
-          <CliOptionsBand
-            provider={draft.provider}
-            options={draft.options}
-            onChange={(options) => patchDraft(agent.id, draft, { options })}
-            disabled={busy}
-          />
+              <PersonaBand
+                value={draft.personaPrompt}
+                onChange={(value) =>
+                  patchDraft(agent.id, draft, { personaPrompt: value })
+                }
+                disabled={busy}
+              />
+
+              <CliOptionsBand
+                provider={draft.provider}
+                options={draft.options}
+                onChange={(options) => patchDraft(agent.id, draft, { options })}
+                disabled={busy}
+              />
+            </>
+          )}
 
           <WhereHeWorksBand
             assignments={assignments}

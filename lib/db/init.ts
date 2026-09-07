@@ -176,6 +176,25 @@ const POST_BASELINE_COLUMN_MIGRATIONS: Array<{
   },
   // 0052_refinement_actions
   { folderMillis: 1786714900000, table: "agent_sessions", column: "refinement_actions" },
+  // 0053_composite_agents. Only the ALTER belongs here: the migration's
+  // CREATE TABLE / CREATE INDEX halves are all IF NOT EXISTS and re-run
+  // harmlessly, but the column ALTER cannot.
+  { folderMillis: 1786715000000, table: "named_agents", column: "kind" },
+  // 0055_agent_session_composite_agent.
+  //
+  // 0054_drop_named_agent_escalation sits BETWEEN these two and has no entry
+  // of its own, because it drops a column rather than adding one — there is
+  // nothing to probe for. That is correct rather than an omission: a database
+  // carrying `composite_agent_id` raises the ceiling past 0054, and such a
+  // database has provably already run it (nothing else removes
+  // `escalates_to`), so skipping the un-re-runnable DROP is exactly right. A
+  // database with `kind` but not `composite_agent_id` stops the ceiling at
+  // 0053 and still has `escalates_to` for 0054 to drop.
+  {
+    folderMillis: 1786715200000,
+    table: "agent_sessions",
+    column: "composite_agent_id",
+  },
 ];
 
 /** Default on-disk location of the drizzle migration files. */

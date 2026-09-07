@@ -192,6 +192,7 @@ const TABLE_COLUMNS: Record<string, { sqlName: string; columns: ColumnSpec }> = 
       claudeSessionId: "claude_session_id",
       cliSessionId: "cli_session_id",
       namedAgentId: "named_agent_id",
+      compositeAgentId: "composite_agent_id",
       agentType: "agent_type",
       namedAgentName: "named_agent_name",
       model: "model",
@@ -334,7 +335,17 @@ const TABLE_COLUMNS: Record<string, { sqlName: string; columns: ColumnSpec }> = 
       readableAgentName: "readable_agent_name",
       options: "options",
       personaPrompt: "persona_prompt",
-      escalatesTo: "escalates_to",
+      kind: "kind",
+      createdAt: "created_at",
+    },
+  },
+  compositeAgentMembers: {
+    sqlName: "composite_agent_members",
+    columns: {
+      id: "id",
+      compositeId: "composite_id",
+      memberId: "member_id",
+      position: "position",
       createdAt: "created_at",
     },
   },
@@ -929,6 +940,23 @@ const INDEXES: Record<string, IndexSpec[]> = {
       name: "named_agents_readable_agent_name_unique",
       unique: true,
       columns: ["readable_agent_name"],
+    },
+  ],
+  compositeAgentMembers: [
+    {
+      name: "composite_agent_members_position_unique",
+      unique: true,
+      columns: ["composite_id", "position"],
+    },
+    {
+      name: "composite_agent_members_member_unique",
+      unique: true,
+      columns: ["composite_id", "member_id"],
+    },
+    {
+      name: "composite_agent_members_member_idx",
+      unique: false,
+      columns: ["member_id"],
     },
   ],
   agentProviderDefaults: [

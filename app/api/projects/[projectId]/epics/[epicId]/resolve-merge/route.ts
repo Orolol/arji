@@ -277,6 +277,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     worktreePath,
     cliSessionId,
     namedAgentId: resolved.namedAgentId ?? null,
+    compositeAgentId: resolved.compositeAgentId ?? null,
     agentType: "merge",
     namedAgentName: resolved.name || null,
     model: resolved.model || null,

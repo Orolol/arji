@@ -208,6 +208,7 @@ export async function dispatchSpecUpdateSession(
     logsPath,
     cliSessionId,
     namedAgentId: resolvedAgent.namedAgentId ?? null,
+    compositeAgentId: resolvedAgent.compositeAgentId ?? null,
     agentType: SPEC_UPDATE_AGENT_TYPE,
     namedAgentName: resolvedAgent.name || null,
     model: resolvedAgent.model || null,

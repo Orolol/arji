@@ -52,7 +52,6 @@ export function TheNumbersBand({ stats }: TheNumbersBandProps) {
   const cleanRate = stats?.cleanRate ?? null;
   const medianMs = stats?.medianDurationMs ?? null;
   const cost = stats?.totalCostUsd ?? null;
-  const escalations = stats?.escalationCount ?? null;
 
   const medianLabel = formatReliabilityDuration(medianMs);
   const hasRuns = (runCount ?? 0) > 0;
@@ -124,13 +123,6 @@ export function TheNumbersBand({ stats }: TheNumbersBandProps) {
             captionStratum="land"
             caption="COST"
             value={formatCostUsd(cost)}
-          />
-          <StatNumeral
-            size={22}
-            captionStratum="land"
-            caption="ESCALATIONS"
-            tone={escalations !== null && escalations > 0 ? "danger" : "ink"}
-            value={escalations}
           />
         </div>
 
