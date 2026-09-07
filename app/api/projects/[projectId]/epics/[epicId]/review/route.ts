@@ -1,3 +1,4 @@
+import { withAgentResolutionErrors } from "@/lib/api/agent-resolution-response";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { loadPromptComments } from "@/lib/claude/prompt-comments";
@@ -77,7 +78,7 @@ const REVIEW_LABELS: Record<ReviewType, string> = {
   feature_review: "Feature Review",
 };
 
-export async function POST(request: NextRequest, { params }: Params) {
+export const POST = withAgentResolutionErrors(async function POST(request: NextRequest, { params }: Params) {
   const { projectId, epicId } = await params;
   const body = await request.json().catch(() => ({}));
 
@@ -425,4 +426,4 @@ export async function POST(request: NextRequest, { params }: Params) {
       resolutions,
     },
   });
-}
+});

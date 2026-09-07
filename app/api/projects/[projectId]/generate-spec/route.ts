@@ -1,3 +1,4 @@
+import { withAgentResolutionErrors } from "@/lib/api/agent-resolution-response";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { projects, chatMessages, epics, userStories } from "@/lib/db/schema";
@@ -18,7 +19,7 @@ import {
 } from "@/lib/documents/mentions";
 import { createUnresolvedMentionsNotification } from "@/lib/notifications/create";
 
-export async function POST(
+export const POST = withAgentResolutionErrors(async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -216,4 +217,4 @@ export async function POST(
   } finally {
     activityRegistry.unregister(specActivityId);
   }
-}
+});

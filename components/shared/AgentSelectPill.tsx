@@ -224,6 +224,7 @@ export function AgentSelectPill({
         value={agentValue(agent.id)}
         data-testid={`chat-option-agent-${agent.id}`}
         title={isComposite ? ladder || "no members — unusable" : undefined}
+        disabled={isComposite && members.length === 0}
         onSelect={() =>
           onSelect({ namedAgentId: agent.id, provider: agent.provider })
         }

@@ -1,3 +1,4 @@
+import { withAgentResolutionErrors } from "@/lib/api/agent-resolution-response";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import {
@@ -58,7 +59,7 @@ import {
 
 type Params = { params: Promise<{ projectId: string; storyId: string }> };
 
-export async function POST(request: NextRequest, { params }: Params) {
+export const POST = withAgentResolutionErrors(async function POST(request: NextRequest, { params }: Params) {
   const { projectId, storyId } = await params;
   const body = await request.json().catch(() => ({}));
   const namedAgentId: string | null = body.namedAgentId || null;
@@ -356,4 +357,4 @@ export async function POST(request: NextRequest, { params }: Params) {
   return NextResponse.json({
     data: { sessionId, branchName, worktreePath, pipeline },
   });
-}
+});

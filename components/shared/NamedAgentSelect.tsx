@@ -148,7 +148,7 @@ export function NamedAgentSelect({
           // instead, which is a fact about it.
           if (!dispatchRole || isComposite) {
             return (
-              <SelectItem key={agent.id} value={agent.id} title={ladder}>
+              <SelectItem key={agent.id} value={agent.id} title={ladder} disabled={isComposite && members.length === 0}>
                 <span className="flex w-full min-w-0 items-center justify-between gap-3">
                   <span className="truncate">{agent.name}</span>
                   {kindMark}

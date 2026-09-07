@@ -1,3 +1,4 @@
+import { withAgentResolutionErrors } from "@/lib/api/agent-resolution-response";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import {
@@ -75,7 +76,7 @@ import {
 
 type Params = { params: Promise<{ projectId: string; epicId: string }> };
 
-export async function POST(request: NextRequest, { params }: Params) {
+export const POST = withAgentResolutionErrors(async function POST(request: NextRequest, { params }: Params) {
   const { projectId, epicId } = await params;
   const body = await request.json().catch(() => ({}));
   const ciAutofix =
@@ -506,4 +507,4 @@ export async function POST(request: NextRequest, { params }: Params) {
       ...(ciAutofix ? { ciAutofix: { launched: true } } : {}),
     },
   });
-}
+});

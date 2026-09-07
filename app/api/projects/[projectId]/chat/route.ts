@@ -1,3 +1,4 @@
+import { withAgentResolutionErrors } from "@/lib/api/agent-resolution-response";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { chatMessages, chatAttachments } from "@/lib/db/schema";
@@ -70,7 +71,7 @@ export async function GET(
   return NextResponse.json({ data: messagesWithAttachments });
 }
 
-export async function POST(
+export const POST = withAgentResolutionErrors(async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -243,4 +244,4 @@ export async function POST(
 
     return NextResponse.json({ data: { userMessage: userMsgId, assistantMessage: errorMsgId } });
   }
-}
+});

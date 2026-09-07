@@ -136,7 +136,8 @@ export function AgentsWorkshopView({ projectId }: { projectId?: string }) {
   const agent = agents.find((candidate) => candidate.id === activeId) ?? null;
   const draft = agent ? (drafts[agent.id] ?? draftFrom(agent)) : null;
 
-  const { data: stats } = useNamedAgentStats(activeId);
+  const isComposite = agent?.kind === "composite";
+  const { data: stats } = useNamedAgentStats(isComposite ? null : activeId);
 
   const dirtyIds = new Set(
     agents
@@ -149,7 +150,6 @@ export function AgentsWorkshopView({ projectId }: { projectId?: string }) {
 
   const dirty = !!agent && !!draft && isDirty(draft, agent);
   const busy = saving || deleting;
-  const isComposite = agent?.kind === "composite";
   /** A composite may only contain simple agents; nesting is refused server-side. */
   const simpleAgents = agents.filter(
     (candidate) => candidate.kind !== "composite",

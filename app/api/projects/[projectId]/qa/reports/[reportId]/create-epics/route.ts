@@ -1,3 +1,4 @@
+import { withAgentResolutionErrors } from "@/lib/api/agent-resolution-response";
 import { NextRequest, NextResponse } from "next/server";
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
@@ -132,7 +133,7 @@ function toGeneratedEpics(value: unknown, epicType: "feature" | "bug" = "feature
     .filter((epic): epic is GeneratedEpic => epic !== null);
 }
 
-export async function POST(_request: NextRequest, { params }: Params) {
+export const POST = withAgentResolutionErrors(async function POST(_request: NextRequest, { params }: Params) {
   const { projectId, reportId } = await params;
 
   const found = getProjectOr404(projectId);
@@ -392,4 +393,4 @@ ${epicTypeRule}
   }
 
   return NextResponse.json({ data: { epics: created } });
-}
+});

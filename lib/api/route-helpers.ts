@@ -1,3 +1,4 @@
+import { compositeAgentErrorResponse } from "./agent-resolution-response";
 import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
@@ -128,6 +129,8 @@ export function errorResponse(
   fallback: string,
   status = 500
 ): NextResponse {
+  const resolutionError = compositeAgentErrorResponse(error);
+  if (resolutionError) return resolutionError;
   return NextResponse.json(
     { error: error instanceof Error ? error.message : fallback },
     { status }

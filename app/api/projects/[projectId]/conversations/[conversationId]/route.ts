@@ -130,6 +130,7 @@ export async function PATCH(
         .select({
           id: namedAgents.id,
           provider: namedAgents.provider,
+          kind: namedAgents.kind,
         })
         .from(namedAgents)
         .where(eq(namedAgents.id, namedAgentIdInput))
@@ -140,7 +141,9 @@ export async function PATCH(
       }
 
       updates.namedAgentId = namedAgent.id;
-      updates.provider = namedAgent.provider;
+      // A composite owns no provider. Preserve the conversation's real
+      // fallback provider if the named agent is later removed from the roster.
+      if (namedAgent.kind !== "composite") updates.provider = namedAgent.provider;
       updates.cliSessionId = null;
       // Also clear the legacy column so stale legacy-row fallbacks cannot
       // resurrect a session from the previous agent.

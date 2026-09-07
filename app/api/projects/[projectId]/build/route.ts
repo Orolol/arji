@@ -1,3 +1,4 @@
+import { withAgentResolutionErrors } from "@/lib/api/agent-resolution-response";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
@@ -99,7 +100,7 @@ const batchBuildOptionsSchema = z.object({
   costCapUsd: z.number().positive().optional(),
 });
 
-export async function POST(
+export const POST = withAgentResolutionErrors(async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
@@ -1017,4 +1018,4 @@ export async function POST(
       { status: 500 }
     );
   }
-}
+});
