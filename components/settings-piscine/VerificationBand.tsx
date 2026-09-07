@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { BandHeader, Mono, StrataBand } from "@/components/piscine";
 import {
   BUG_REGRESSION_CHECK_SETTING_KEY,
@@ -37,24 +39,27 @@ export interface VerificationBandProps {
 }
 
 export function VerificationBand({ draft }: VerificationBandProps) {
+  const t = useTranslations("Settings");
   const gateOn = draft.flag(BUG_REGRESSION_CHECK_SETTING_KEY);
 
   return (
-    <SettingsSection testId="verify-settings" heading="Deterministic verification">
+    <SettingsSection
+      testId="verify-settings"
+      heading={t("verification.heading")}
+    >
       <StrataBand stratum="next">
         <BandHeader
           stratum="next"
-          label="Vérification"
+          label={t("verification.label")}
           meta={
             <span className="font-sans text-[11.5px] leading-normal">
-              lancée dans le worktree après un build réussi — un tableau vide
-              désactive l&apos;étape
+              {t("verification.meta")}
             </span>
           }
         />
 
         <SettingField
-          kicker="COMMANDES (JSON)"
+          kicker={t("verification.commands")}
           stratum="next"
           htmlFor="verify-commands"
         >
@@ -71,11 +76,11 @@ export function VerificationBand({ draft }: VerificationBandProps) {
           />
         </SettingField>
         <Mono size={10.5} tone="next-mid" as="div">
-          {`exemple : [{"name":"test","command":"npm test"}]`}
+          {t("verification.commandsExample")}
         </Mono>
 
         <SettingField
-          kicker="TIMEOUT PAR COMMANDE (MS)"
+          kicker={t("verification.timeout")}
           stratum="next"
           htmlFor="verify-timeout-ms"
           width={190}
@@ -98,20 +103,20 @@ export function VerificationBand({ draft }: VerificationBandProps) {
             <SettingToggle
               on={gateOn}
               onChange={(next) => draft.set(BUG_REGRESSION_CHECK_SETTING_KEY, next)}
-              label="Mandatory regression test on bug tickets"
+              label={t("verification.regressionGate")}
               testId="bug-regression-toggle"
             />
           }
           off={!gateOn}
-          label="Mandatory regression test on bug tickets"
-          suffix="· rouge sans le fix, vert avec"
+          label={t("verification.regressionGate")}
+          suffix={t("verification.regressionGateSuffix")}
           suffixTone="next-mid"
         />
 
         {gateOn ? (
           <div className="flex flex-col gap-[10px] border-l-[1.5px] border-strata-next-under pl-[14px]">
             <SettingField
-              kicker="COMMANDE DE RÉGRESSION"
+              kicker={t("verification.regressionCommand")}
               stratum="next"
               htmlFor="bug-regression-command"
             >
@@ -126,11 +131,14 @@ export function VerificationBand({ draft }: VerificationBandProps) {
               />
             </SettingField>
             <Mono size={10.5} tone="next-mid" as="div">
-              {`lancée sur la branche puis sur le merge-base · ${REGRESSION_COMMAND_FILE_PLACEHOLDER} est remplacé par les tests détectés (défaut ${DEFAULT_BUG_REGRESSION_COMMAND})`}
+              {t("verification.regressionCommandNote", {
+                placeholder: REGRESSION_COMMAND_FILE_PLACEHOLDER,
+                default: DEFAULT_BUG_REGRESSION_COMMAND,
+              })}
             </Mono>
 
             <SettingField
-              kicker="MOTIFS DE FICHIERS DE TEST"
+              kicker={t("verification.testFilePatterns")}
               stratum="next"
               htmlFor="test-file-patterns"
             >
@@ -145,7 +153,9 @@ export function VerificationBand({ draft }: VerificationBandProps) {
               />
             </SettingField>
             <Mono size={10.5} tone="next-mid" as="div">
-              {`globs séparés par des virgules, appliqués au diff de la branche (défaut ${DEFAULT_TEST_FILE_PATTERNS.join(", ")})`}
+              {t("verification.testFilePatternsNote", {
+                default: DEFAULT_TEST_FILE_PATTERNS.join(", "),
+              })}
             </Mono>
           </div>
         ) : null}

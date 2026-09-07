@@ -2,5 +2,122 @@
   "tabs": {
     "integrations": "Intégrations",
     "appearance": "Apparence"
+  },
+  "footer": {
+    "note": "les changements s'appliquent aux prochaines sessions"
+  },
+  "draft": {
+    "loadFailed": "impossible de lire les réglages — recharge la page"
+  },
+  "workspace": {
+    "note": "un clone par dépôt dans ‹dossier›/owner-repo · ne change que les futurs imports"
+  },
+  "fullAuto": {
+    "meta": "le pilote qui dispatche tout seul — ces règles le bornent",
+    "maxParallel": "AGENTS EN PARALLÈLE, MAX",
+    "offLadder": "réglé sur {value} — hors des paliers",
+    "defaultAgents": "AGENTS PAR DÉFAUT",
+    "roleDefaultAgent": "Agent {role} par défaut",
+    "smartDispatch": "Choisir l'agent d'après son historique",
+    "smartDispatchSuffix": "· rôles non assignés",
+    "secondOpinion": "Second avis indépendant avant le land",
+    "secondOpinionSuffix": "· un slot review",
+    "openFindings": "Refuser les tickets avec findings ouverts",
+    "openFindingsSuffix": "· toujours",
+    "chaining": "Chaîne review puis land automatiquement si clean · land sans confirmation humaine",
+    "blastRadius": "arme {count, plural, one {# projet} other {# projets}} · {optedOut, plural, one {# l'a désactivé} other {# l'ont désactivé}}",
+    "blastRadiusUnknown": "arme — projets · {optedOut, plural, one {# l'a désactivé} other {# l'ont désactivé}}"
+  },
+  "nightRuns": {
+    "meta": "les vagues nocturnes — le matin, tout est dans Your turn ou Ready to land",
+    "budget": "BUDGET / NUIT",
+    "circuitBreaker": "ÉCHECS D'AFFILÉE AVANT ARRÊT",
+    "dream": "Dream après chaque night run",
+    "perProject": "la fenêtre et les vagues sont propres à chaque projet — elles se règlent dans ses routines",
+    "skipDependents": "Sauter les dépendants d'un epic échoué",
+    "skipDependentsSuffix": "· halt, défaut de chaque run",
+    "defaults": "ces valeurs sont les défauts — chaque run peut les redéfinir"
+  },
+  "notifications": {
+    "configureAll": "tout configurer →",
+    "empty": "aucun projet — crée un projet pour brancher une notification",
+    "note": "une session qui se termine et une release publiée sont postées au webhook du projet"
+  },
+  "budget": {
+    "monthlyCap": "PLAFOND MENSUEL",
+    "monthlyCapPlaceholder": "Aucun plafond",
+    "weeklyCap": "PLAFOND HEBDO · CLAUDE",
+    "promptTokens": "BUDGET TOKENS / PROMPT",
+    "spend": "{spent} dépensés · alerte à {percent} %",
+    "note": "Le plafond est indicatif : rien ne met Full Auto ni les night runs en pause automatiquement. Le cap par night run, lui, arrête bien les vagues suivantes."
+  },
+  "pipeline": {
+    "meta": "chaîne une review sur chaque build — un run vert laisse le ticket en Review, il n'approuve jamais",
+    "enabledSuffix": "· chaque dispatch peut encore le forcer",
+    "graderSuffix": "· entre verify et review",
+    "maxAttemptsNote": "combien de fois un build, un fix ou une review en échec est relancé avant l'abandon ({min}–{max})",
+    "maxFixCyclesNote": "combien de fois des findings bloquants renvoient le ticket à un agent de fix ({min}–{max} ; 0 rapporte les findings sans les corriger)"
+  },
+  "verification": {
+    "label": "Vérification",
+    "meta": "lancée dans le worktree après un build réussi — un tableau vide désactive l'étape",
+    "commands": "COMMANDES (JSON)",
+    "commandsExample": "exemple : ['{'\"name\":\"test\",\"command\":\"npm test\"'}']",
+    "timeout": "TIMEOUT PAR COMMANDE (MS)",
+    "regressionGateSuffix": "· rouge sans le fix, vert avec",
+    "regressionCommand": "COMMANDE DE RÉGRESSION",
+    "regressionCommandNote": "lancée sur la branche puis sur le merge-base · {placeholder} est remplacé par les tests détectés (défaut {default})",
+    "testFilePatterns": "MOTIFS DE FICHIERS DE TEST",
+    "testFilePatternsNote": "globs séparés par des virgules, appliqués au diff de la branche (défaut {default})"
+  },
+  "agentsMemory": {
+    "label": "Agents & mémoire",
+    "meta": "ce qu'une session d'agent reçoit, et ce qu'elle laisse derrière elle",
+    "mcpTools": "Outils MCP Arij",
+    "mcpToolsSuffix": "· on par défaut",
+    "mcpToolsNote": "lire son ticket, commenter, changer le statut, poser une question bloquante, déposer un finding — sans conventions en prose. Off : les nouvelles sessions démarrent sans le canal, les sessions en cours ne bougent pas.",
+    "memoryDistill": "Distiller la mémoire après un build réussi",
+    "memoryDistillNote": "un agent de distillation fusionne les nouvelles conventions dans la mémoire du projet, injectée ensuite dans chaque prompt. Off par défaut.",
+    "specRewrite": "Réécrire la spec après chaque release",
+    "specRewriteNote": "à la publication d'une release, un agent en plan-mode réécrit la spécification pour coller à ce qui a réellement été livré. Sautée pendant une mise à jour manuelle. Off par défaut."
+  },
+  "globalPrompt": {
+    "label": "Prompt global",
+    "note": "injecté en tête de chaque session, tous projets confondus"
+  },
+  "github": {
+    "meta": "pour les pull requests, les issues et l'API des releases",
+    "connect": "Se connecter avec GitHub",
+    "connecting": "Connexion…",
+    "connectHint": "Arij vous montre un code à saisir sur github.com — aucun token à copier.",
+    "deviceSteps": "1. Copiez ce code · 2. ouvrez GitHub · 3. collez-le pour autoriser Arij.",
+    "copyCode": "Copier le code",
+    "copied": "Copié",
+    "openGitHub": "Ouvrir GitHub",
+    "awaitingAuthorisation": "En attente de votre autorisation sur GitHub…",
+    "cancel": "Annuler",
+    "retry": "Réessayer",
+    "connected": "Connecté en tant que {login}",
+    "viaManual": "token personnel",
+    "obtainedAt": "depuis le {date}",
+    "disconnect": "Déconnecter",
+    "disconnecting": "Déconnexion…",
+    "connectSucceeded": "Connexion GitHub réussie.",
+    "disconnected": "GitHub déconnecté.",
+    "manualHint": "Ou collez un token personnel à la main."
+  },
+  "openAi": {
+    "label": "API OpenAI-compatible",
+    "meta": "répondre au chat depuis un endpoint local ou hébergé, en streaming token par token"
+  },
+  "webhooks": {
+    "meta": "une notification JSON quand une session se termine ou qu'une release est publiée — vide = désactivé"
+  },
+  "appearance": {
+    "heading": "Thème",
+    "label": "Thème",
+    "day": "Jour",
+    "night": "Nuit",
+    "note": "les grounds pastel deviennent une seule encre chaude la nuit — la strate se lit à son libellé"
   }
 }

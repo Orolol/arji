@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { BandHeader, Mono, StrataBand } from "@/components/piscine";
 import { PROJECTS_ROOT_SETTING_KEY } from "@/lib/projects/workspace-constants";
 
@@ -24,15 +26,16 @@ export interface WorkspaceBandProps {
 }
 
 export function WorkspaceBand({ draft }: WorkspaceBandProps) {
+  const t = useTranslations("Settings");
   const fallbackRoot = draft.defaults[PROJECTS_ROOT_SETTING_KEY];
 
   return (
     <SettingsSection testId="workspace-settings">
       <StrataBand stratum="card">
-        <BandHeader stratum="card" label="Workspace" standalone />
+        <BandHeader stratum="card" label={t("workspace.label")} standalone />
         <div className="flex flex-wrap items-end gap-[20px]">
           <SettingField
-            kicker="PROJECTS ROOT"
+            kicker={t("workspace.projectsRoot")}
             stratum="card"
             htmlFor="projects-root"
             flex={1.4}
@@ -52,8 +55,7 @@ export function WorkspaceBand({ draft }: WorkspaceBandProps) {
           </SettingField>
         </div>
         <Mono size={10.5} tone="muted" as="div">
-          un clone par dépôt dans ‹dossier›/owner-repo · ne change que les futurs
-          imports
+          {t("workspace.note")}
         </Mono>
       </StrataBand>
     </SettingsSection>

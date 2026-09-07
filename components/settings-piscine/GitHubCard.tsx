@@ -1,6 +1,6 @@
 "use client";
 
-import { useLocale } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { formatDateTime } from "@/lib/i18n/format";
 import type { UiLocale } from "@/lib/i18n/locales";
 import { useEffect, useRef, useState } from "react";
@@ -62,6 +62,7 @@ function formatObtainedAt(iso: string, locale: UiLocale): string {
 }
 
 export function GitHubCard({ hasSavedToken, oauthMeta = null }: GitHubCardProps) {
+  const t = useTranslations("Settings");
   const locale = useLocale();
   const [token, setToken] = useState("");
   const [saving, setSaving] = useState(false);
@@ -101,7 +102,7 @@ export function GitHubCard({ hasSavedToken, oauthMeta = null }: GitHubCardProps)
     // different facts. This line exists for the live region — it announces the
     // TRANSITION, which a screen reader would otherwise have to infer from a
     // panel that silently swapped.
-    setMessage("Connexion GitHub réussie.");
+    setMessage(t("github.connectSucceeded"));
   });
 
   async function copyUserCode(userCode: string) {
@@ -120,7 +121,7 @@ export function GitHubCard({ hasSavedToken, oauthMeta = null }: GitHubCardProps)
     setMessage(null);
     setError(null);
     if (!token.trim()) {
-      setError("Enter a GitHub personal access token before validating.");
+      setError(t("github.tokenRequiredToValidate"));
       return;
     }
     setValidating(true);
@@ -132,15 +133,15 @@ export function GitHubCard({ hasSavedToken, oauthMeta = null }: GitHubCardProps)
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload?.data?.valid) {
-        setError(payload?.error ?? "Token validation failed. Verify the token and retry.");
+        setError(payload?.error ?? t("github.validationFailed"));
         return;
       }
       const login = payload?.data?.login;
       setMessage(
-        login ? `Token is valid for GitHub account: ${login}.` : "Token is valid.",
+        login ? t("github.tokenValidFor", { login }) : t("github.tokenValid"),
       );
     } catch {
-      setError("Could not validate token right now. Check your network and try again.");
+      setError(t("github.validationOffline"));
     } finally {
       setValidating(false);
     }
@@ -183,7 +184,7 @@ export function GitHubCard({ hasSavedToken, oauthMeta = null }: GitHubCardProps)
     setMessage(null);
     setError(null);
     if (!token.trim()) {
-      setError("Enter a GitHub personal access token before saving.");
+      setError(t("github.tokenRequiredToSave"));
       return;
     }
     setSaving(true);
@@ -204,9 +205,7 @@ export function GitHubCard({ hasSavedToken, oauthMeta = null }: GitHubCardProps)
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
-        setError(
-          payload?.error ?? "Failed to save GitHub token. Check the error details and retry.",
-        );
+        setError(payload?.error ?? t("github.saveFailed"));
         return;
       }
       // A hand-pasted token supersedes whatever the device flow left behind,
@@ -215,9 +214,9 @@ export function GitHubCard({ hasSavedToken, oauthMeta = null }: GitHubCardProps)
       setTokenOverride(true);
       setMetaOverride(manualMeta);
       setToken("");
-      setMessage("GitHub token saved.");
+      setMessage(t("github.tokenSaved"));
     } catch {
-      setError("Failed to save GitHub token. Check your connection and retry.");
+      setError(t("github.saveOffline"));
     } finally {
       setSaving(false);
     }
@@ -240,31 +239,29 @@ export function GitHubCard({ hasSavedToken, oauthMeta = null }: GitHubCardProps)
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
-        setError(
-          payload?.error ?? "Failed to disconnect GitHub. Check the error details and retry.",
-        );
+        setError(payload?.error ?? t("github.disconnectFailed"));
         return;
       }
       flow.cancel();
       setTokenOverride(false);
       setMetaOverride(null);
-      setMessage("GitHub déconnecté.");
+      setMessage(t("github.disconnected"));
     } catch {
-      setError("Failed to disconnect GitHub. Check your connection and retry.");
+      setError(t("github.disconnectOffline"));
     } finally {
       setDisconnecting(false);
     }
   }
 
   return (
-    <SettingsSection testId="github-settings" heading="GitHub">
+    <SettingsSection testId="github-settings" heading={t("github.heading")}>
       <StrataBand stratum="card">
         <BandHeader
           stratum="card"
-          label="GitHub"
+          label={t("github.label")}
           meta={
             <span className="font-sans text-[11.5px] leading-normal">
-              pour les pull requests, les issues et l&apos;API des releases
+              {t("github.meta")}
             </span>
           }
         />
@@ -273,12 +270,12 @@ export function GitHubCard({ hasSavedToken, oauthMeta = null }: GitHubCardProps)
 
         <div className="flex flex-col gap-[8px] border-t border-border pt-[12px]">
           <Mono size={10.5} tone="muted" as="div">
-            Ou collez un token personnel à la main.
+            {t("github.manualHint")}
           </Mono>
 
           <div className="flex flex-wrap items-end gap-[12px]">
             <SettingField
-              kicker="GitHub PAT"
+              kicker={t("github.pat")}
               stratum="card"
               htmlFor="github-pat"
               flex={1}
@@ -289,7 +286,7 @@ export function GitHubCard({ hasSavedToken, oauthMeta = null }: GitHubCardProps)
                 data-testid="github-pat"
                 chrome="paper"
                 type="password"
-                placeholder="ghp_..."
+                placeholder={t("github.patPlaceholder")}
                 value={token}
                 onChange={(event) => setToken(event.target.value)}
               />
@@ -303,9 +300,9 @@ export function GitHubCard({ hasSavedToken, oauthMeta = null }: GitHubCardProps)
               size="lg"
               onClick={() => void validate()}
               pending={validating}
-              pendingLabel="Validating..."
+              pendingLabel={t("github.validating")}
             >
-              Validate Token
+              {t("github.validate")}
             </PillButton>
             <PillButton
               variant="outline"
@@ -313,9 +310,9 @@ export function GitHubCard({ hasSavedToken, oauthMeta = null }: GitHubCardProps)
               size="lg"
               onClick={() => void save()}
               pending={saving}
-              pendingLabel="Saving..."
+              pendingLabel={t("github.savingToken")}
             >
-              Save Token
+              {t("github.saveToken")}
             </PillButton>
           </div>
         </div>
@@ -352,8 +349,7 @@ export function GitHubCard({ hasSavedToken, oauthMeta = null }: GitHubCardProps)
           className="flex flex-col gap-[10px]"
         >
           <Mono size={10.5} tone="muted" as="div">
-            1. Copiez ce code · 2. ouvrez GitHub · 3. collez-le pour autoriser
-            Arij.
+            {t("github.deviceSteps")}
           </Mono>
 
           <div className="flex flex-wrap items-center gap-[10px]">
@@ -371,7 +367,7 @@ export function GitHubCard({ hasSavedToken, oauthMeta = null }: GitHubCardProps)
               onClick={() => void copyUserCode(userCode)}
               data-testid="github-device-copy"
             >
-              {copied ? "Copié" : "Copier le code"}
+              {copied ? t("github.copied") : t("github.copyCode")}
             </PillButton>
             <a
               href={verificationUri}
@@ -381,7 +377,7 @@ export function GitHubCard({ hasSavedToken, oauthMeta = null }: GitHubCardProps)
               className={pillButtonVariants({ variant: "filled", size: "lg" })}
             >
               <ArrowUpRight size={13} aria-hidden="true" />
-              Ouvrir GitHub
+              {t("github.openGitHub")}
             </a>
           </div>
 
@@ -390,13 +386,13 @@ export function GitHubCard({ hasSavedToken, oauthMeta = null }: GitHubCardProps)
                 user, not on the network. */}
             <div role="status" aria-live="polite">
               <Mono size={10.5} tone="muted" as="div">
-                En attente de votre autorisation sur GitHub…
+                {t("github.awaitingAuthorisation")}
               </Mono>
             </div>
             {/* QuietDangerAction forwards no `data-testid` — it has no
                 `...rest`. Its label IS its handle, here and below. */}
             <QuietDangerAction size={11.5} onClick={() => flow.cancel()}>
-              Annuler
+              {t("github.cancel")}
             </QuietDangerAction>
           </div>
         </div>
@@ -418,7 +414,7 @@ export function GitHubCard({ hasSavedToken, oauthMeta = null }: GitHubCardProps)
               onClick={() => flow.start()}
               data-testid="github-flow-retry"
             >
-              Réessayer
+              {t("github.retry")}
             </PillButton>
           </div>
         </div>
@@ -430,22 +426,22 @@ export function GitHubCard({ hasSavedToken, oauthMeta = null }: GitHubCardProps)
       return (
         <div data-testid="github-connected" className="flex flex-col gap-[8px]">
           <Mono size={12} tone="ink" as="div">
-            {`Connecté en tant que ${meta.login}`}
+            {t("github.connected", { login: meta.login })}
           </Mono>
           <Mono size={10.5} tone="muted" as="div">
             {[
               meta.tokenSource === "oauth_device"
-                ? "via GitHub"
-                : "token personnel",
+                ? t("github.viaOauth")
+                : t("github.viaManual"),
               meta.scopes.length > 0 ? meta.scopes.join(", ") : null,
-              obtainedAt ? `depuis le ${obtainedAt}` : null,
+              obtainedAt ? t("github.obtainedAt", { date: obtainedAt }) : null,
             ]
               .filter(Boolean)
               .join(" · ")}
           </Mono>
           <div>
             <QuietDangerAction onClick={() => void disconnect()}>
-              {disconnecting ? "Déconnexion…" : "Déconnecter"}
+              {disconnecting ? t("github.disconnecting") : t("github.disconnect")}
             </QuietDangerAction>
           </div>
         </div>
@@ -458,11 +454,11 @@ export function GitHubCard({ hasSavedToken, oauthMeta = null }: GitHubCardProps)
       return (
         <div data-testid="github-connected" className="flex flex-col gap-[8px]">
           <Mono size={10.5} tone="muted" as="div">
-            A GitHub token is already saved for this workspace.
+            {t("github.tokenAlreadySaved")}
           </Mono>
           <div>
             <QuietDangerAction onClick={() => void disconnect()}>
-              {disconnecting ? "Déconnexion…" : "Déconnecter"}
+              {disconnecting ? t("github.disconnecting") : t("github.disconnect")}
             </QuietDangerAction>
           </div>
         </div>
@@ -476,14 +472,13 @@ export function GitHubCard({ hasSavedToken, oauthMeta = null }: GitHubCardProps)
           size="lg"
           onClick={() => flow.start()}
           pending={flow.state.status === "starting"}
-          pendingLabel="Connexion…"
+          pendingLabel={t("github.connecting")}
           data-testid="github-connect"
         >
-          Se connecter avec GitHub
+          {t("github.connect")}
         </PillButton>
         <Mono size={10.5} tone="muted" as="div">
-          Arij vous montre un code à saisir sur github.com — aucun token à
-          copier.
+          {t("github.connectHint")}
         </Mono>
       </div>
     );

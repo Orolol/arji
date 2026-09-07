@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { Check } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { Mono, PillButton } from "@/components/piscine";
 import { cn } from "@/lib/utils";
@@ -39,6 +40,7 @@ export function SettingsFooter({
   disabled = false,
   className,
 }: SettingsFooterProps) {
+  const t = useTranslations("Settings");
   const failed = messageTone === "danger";
 
   return (
@@ -50,7 +52,7 @@ export function SettingsFooter({
       )}
     >
       <Mono size={10.5} tone="muted">
-        les changements s&apos;appliquent aux prochaines sessions
+        {t("footer.note")}
       </Mono>
       <div
         role={failed ? "alert" : "status"}
@@ -73,7 +75,7 @@ export function SettingsFooter({
           onClick={onDiscard}
           data-testid="settings-discard"
         >
-          Discard
+          {t("footer.discard")}
         </PillButton>
         <PillButton
           variant="filled"
@@ -81,11 +83,11 @@ export function SettingsFooter({
           icon={Check}
           disabled={disabled || !dirty}
           pending={saving}
-          pendingLabel="Saving…"
+          pendingLabel={t("footer.saving")}
           onClick={onSave}
           data-testid="settings-save"
         >
-          Save
+          {t("footer.save")}
         </PillButton>
       </div>
     </div>

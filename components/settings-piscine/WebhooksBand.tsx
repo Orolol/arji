@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 
 import { BandHeader, Mono, PillButton, StrataBand } from "@/components/piscine";
 
@@ -23,6 +24,7 @@ export interface WebhookRow {
 }
 
 export function WebhooksBand() {
+  const t = useTranslations("Settings");
   const [rows, setRows] = useState<WebhookRow[]>([]);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -64,40 +66,37 @@ export function WebhooksBand() {
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
-        setError(
-          payload?.error ?? "Failed to save webhook URL. Check the error details and retry.",
-        );
+        setError(payload?.error ?? t("webhooks.saveFailed"));
         return;
       }
       setMessage(
         row.url.trim()
-          ? `Webhook saved for ${row.projectName}.`
-          : `Webhook cleared for ${row.projectName}.`,
+          ? t("webhooks.saved", { project: row.projectName })
+          : t("webhooks.cleared", { project: row.projectName }),
       );
     } catch {
-      setError("Failed to save webhook URL. Check your connection and retry.");
+      setError(t("webhooks.saveOffline"));
     } finally {
       setSavingId(null);
     }
   }
 
   return (
-    <SettingsSection testId="webhooks-settings" heading="Webhooks">
+    <SettingsSection testId="webhooks-settings" heading={t("webhooks.heading")}>
       <StrataBand stratum="feed" gap={9}>
         <BandHeader
           stratum="feed"
-          label="Webhooks"
+          label={t("webhooks.label")}
           meta={
             <span className="font-sans text-[11.5px] leading-normal">
-              une notification JSON quand une session se termine ou qu&apos;une
-              release est publiée — vide = désactivé
+              {t("webhooks.meta")}
             </span>
           }
         />
 
         {rows.length === 0 ? (
           <Mono size={11} tone="feed-deep" as="div">
-            No projects yet. Create a project to configure a webhook.
+            {t("webhooks.empty")}
           </Mono>
         ) : (
           rows.map((row) => (
@@ -113,7 +112,7 @@ export function WebhooksBand() {
                   id={`webhook-${row.projectId}`}
                   chrome="ground"
                   type="url"
-                  placeholder="https://ntfy.sh/my-topic"
+                  placeholder={t("webhooks.placeholder")}
                   value={row.url}
                   onChange={(event) => edit(row.projectId, event.target.value)}
                 />
@@ -124,9 +123,9 @@ export function WebhooksBand() {
                 size="lg"
                 onClick={() => void save(row.projectId)}
                 pending={savingId === row.projectId}
-                pendingLabel="Saving..."
+                pendingLabel={t("webhooks.saving")}
               >
-                Save
+                {t("webhooks.save")}
               </PillButton>
             </div>
           ))

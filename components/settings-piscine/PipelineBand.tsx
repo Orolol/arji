@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { BandHeader, Mono, StrataBand } from "@/components/piscine";
 import {
   PIPELINE_ENABLED_SETTING_KEY,
@@ -28,16 +30,17 @@ export interface PipelineBandProps {
 }
 
 export function PipelineBand({ draft }: PipelineBandProps) {
+  const t = useTranslations("Settings");
+
   return (
-    <SettingsSection testId="pipeline-settings" heading="Autonomous Pipeline">
+    <SettingsSection testId="pipeline-settings" heading={t("pipeline.heading")}>
       <StrataBand stratum="land">
         <BandHeader
           stratum="land"
-          label="Pipeline"
+          label={t("pipeline.label")}
           meta={
             <span className="font-sans text-[11.5px] leading-normal">
-              chaîne une review sur chaque build — un run vert laisse le ticket
-              en Review, il n&apos;approuve jamais
+              {t("pipeline.meta")}
             </span>
           }
         />
@@ -47,13 +50,13 @@ export function PipelineBand({ draft }: PipelineBandProps) {
             <SettingToggle
               on={draft.flag(PIPELINE_ENABLED_SETTING_KEY)}
               onChange={(next) => draft.set(PIPELINE_ENABLED_SETTING_KEY, next)}
-              label="Run the pipeline by default"
+              label={t("pipeline.enabled")}
               testId="pipeline-enabled-toggle"
             />
           }
           off={!draft.flag(PIPELINE_ENABLED_SETTING_KEY)}
-          label="Run the pipeline by default"
-          suffix="· chaque dispatch peut encore le forcer"
+          label={t("pipeline.enabled")}
+          suffix={t("pipeline.enabledSuffix")}
           suffixTone="land-mid"
         />
         <SettingRow
@@ -63,19 +66,19 @@ export function PipelineBand({ draft }: PipelineBandProps) {
               onChange={(next) =>
                 draft.set(PIPELINE_GRADER_ENABLED_SETTING_KEY, next)
               }
-              label="Grade acceptance criteria"
+              label={t("pipeline.grader")}
               testId="pipeline-grader-toggle"
             />
           }
           off={!draft.flag(PIPELINE_GRADER_ENABLED_SETTING_KEY)}
-          label="Grade acceptance criteria"
-          suffix="· entre verify et review"
+          label={t("pipeline.grader")}
+          suffix={t("pipeline.graderSuffix")}
           suffixTone="land-mid"
         />
 
         <div className="flex flex-wrap items-end gap-[20px]">
           <SettingField
-            kicker="Attempts per stage"
+            kicker={t("pipeline.maxAttempts")}
             stratum="land"
             htmlFor="pipeline-max-attempts"
             width={170}
@@ -94,7 +97,7 @@ export function PipelineBand({ draft }: PipelineBandProps) {
             />
           </SettingField>
           <SettingField
-            kicker="Review → fix cycles"
+            kicker={t("pipeline.maxFixCycles")}
             stratum="land"
             htmlFor="pipeline-max-fix-cycles"
             width={170}
@@ -115,10 +118,16 @@ export function PipelineBand({ draft }: PipelineBandProps) {
         </div>
 
         <Mono size={10.5} tone="land-mid" as="div">
-          {`combien de fois un build, un fix ou une review en échec est relancé avant l'abandon (${PIPELINE_MAX_ATTEMPTS_RANGE.min}–${PIPELINE_MAX_ATTEMPTS_RANGE.max})`}
+          {t("pipeline.maxAttemptsNote", {
+            min: PIPELINE_MAX_ATTEMPTS_RANGE.min,
+            max: PIPELINE_MAX_ATTEMPTS_RANGE.max,
+          })}
         </Mono>
         <Mono size={10.5} tone="land-mid" as="div">
-          {`combien de fois des findings bloquants renvoient le ticket à un agent de fix (${PIPELINE_MAX_FIX_CYCLES_RANGE.min}–${PIPELINE_MAX_FIX_CYCLES_RANGE.max} ; 0 rapporte les findings sans les corriger)`}
+          {t("pipeline.maxFixCyclesNote", {
+            min: PIPELINE_MAX_FIX_CYCLES_RANGE.min,
+            max: PIPELINE_MAX_FIX_CYCLES_RANGE.max,
+          })}
         </Mono>
       </StrataBand>
     </SettingsSection>

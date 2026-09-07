@@ -174,7 +174,7 @@ describe("Settings — Full Auto agents", () => {
     await renderArmed({});
 
     expect(screen.getByTestId("full-auto-settings").textContent).toMatch(
-      /rôles non assignés/i,
+      /roles unassigned/i,
     );
   });
 });

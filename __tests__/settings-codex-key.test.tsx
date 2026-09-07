@@ -1,5 +1,5 @@
 /**
- * The GitHub PAT card (Settings → Intégrations) and the global prompt
+ * The GitHub PAT card (Settings → Integrations) and the global prompt
  * (Settings → Pipeline).
  *
  * They used to share one 1862-line page; they now live on the two tabs whose
@@ -8,7 +8,7 @@
  * prompt is an ordinary batched key and rides the tab footer.
  *
  * Scope note: this file pins the MANUAL path, which is now the fallback under
- * "Se connecter avec GitHub". The OAuth Device Flow half of the same card —
+ * "Sign in with GitHub". The OAuth Device Flow half of the same card —
  * and the no-regression case for this path standing beside it — lives in
  * `settings-github-device-flow-ui.test.tsx`.
  */
@@ -71,7 +71,7 @@ beforeEach(() => {
     });
 });
 
-describe("Settings → Intégrations — GitHub", () => {
+describe("Settings → Integrations — GitHub", () => {
   it("renders GitHub PAT input with validate and save actions", () => {
     render(<IntegrationsSettingsPage />);
     expect(screen.getByRole("heading", { name: "GitHub" })).toBeInTheDocument();
@@ -105,7 +105,7 @@ describe("Settings → Intégrations — GitHub", () => {
     // The token still goes out under the SAME key it always did — that is
     // what keeps clone/PR/issue/release code unchanged. What is new is the
     // provenance riding along, so a hand-pasted PAT cannot leave a stale
-    // "connecté en tant que @someone-else" from an earlier OAuth sign-in.
+    // "Connected as @someone-else" from an earlier OAuth sign-in.
     // Whole-object equality is deliberate: it fails if a third key appears.
     await waitFor(() => {
       expect(patchCalls).toHaveLength(1);
