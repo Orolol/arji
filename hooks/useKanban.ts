@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   KANBAN_COLUMNS,
@@ -27,6 +29,7 @@ export interface UseKanbanOptions {
 }
 
 export function useKanban(projectId: string, options?: UseKanbanOptions) {
+  const tErrors = useTranslations("ClientErrors");
   const [board, setBoard] = useState<BoardState>({
     columns: {
       backlog: [],
@@ -354,11 +357,11 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
       // guard.
       mutationSeqRef.current += 1;
 
-      postReorder(reorderItems, "Failed to move epic", {
+      postReorder(reorderItems, tErrors("failedToMoveEpic"), {
         onAccepted: onMoveAccepted,
       });
     },
-    [postReorder]
+    [postReorder, tErrors]
   );
   /**
    * "Sort by priority": rewrite the column's positions so the board's
@@ -412,7 +415,7 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
           status: column,
           position: epic.position,
         })),
-        "Failed to sort column",
+        tErrors("failedToSortColumn"),
         // Sorting is never a move. Without this, a card the server has since
         // promoted (Full Auto picking it up, another tab, an arji.json
         // import) would be read as a requested transition — failing the whole
@@ -420,7 +423,7 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
         { reorderOnly: true }
       );
     },
-    [board, postReorder]
+    [board, postReorder, tErrors]
   );
 
   return {

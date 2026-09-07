@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { useState, useEffect, useCallback } from "react";
 
 export interface DependencyRecord {
@@ -18,6 +20,7 @@ export interface EpicDependencyData {
 }
 
 export function useEpicDependencies(projectId: string, epicId: string | null) {
+  const tErrors = useTranslations("ClientErrors");
   const [data, setData] = useState<EpicDependencyData>({
     predecessors: [],
     successors: [],
@@ -64,19 +67,19 @@ export function useEpicDependencies(projectId: string, epicId: string | null) {
         );
         const json = await res.json();
         if (!res.ok) {
-          setError(json.error || "Failed to update dependencies");
+          setError(json.error || tErrors("failedToUpdateDependencies"));
           return false;
         }
         await fetchDeps();
         return true;
       } catch {
-        setError("Failed to update dependencies");
+        setError(tErrors("failedToUpdateDependencies"));
         return false;
       } finally {
         setSaving(false);
       }
     },
-    [projectId, epicId, fetchDeps]
+    [projectId, epicId, fetchDeps, tErrors]
   );
 
   return {

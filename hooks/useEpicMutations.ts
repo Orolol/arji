@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { useState, useRef, useCallback } from "react";
 
 interface UseEpicMutationsOptions {
@@ -19,6 +21,7 @@ export function useEpicMutations(
   epicId: string | null,
   { onMergeSuccess, onDeleteSuccess }: UseEpicMutationsOptions = {}
 ) {
+  const tErrors = useTranslations("ClientErrors");
   const [merging, setMerging] = useState(false);
   const [mergeError, setMergeError] = useState<string | null>(null);
   const [mergeConflict, setMergeConflict] = useState(false);
@@ -40,7 +43,7 @@ export function useEpicMutations(
       );
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.error) {
-        setMergeError(data.error || "Failed to merge");
+        setMergeError(data.error || tErrors("failedToMerge"));
         const isConflict = data.reason === "conflict" || data.mergeFailed === true;
         setMergeConflict(isConflict);
         if (Array.isArray(data.conflictFiles) && data.conflictFiles.length > 0) {
@@ -50,12 +53,12 @@ export function useEpicMutations(
         onMergeSuccess?.();
       }
     } catch {
-      setMergeError("Failed to merge");
+      setMergeError(tErrors("failedToMerge"));
       setMergeConflict(false);
       setConflictFiles(undefined);
     }
     setMerging(false);
-  }, [projectId, epicId, onMergeSuccess]);
+  }, [projectId, epicId, onMergeSuccess, tErrors]);
 
   const deleteEpic = useCallback(async () => {
     if (!epicId || deleteInFlightRef.current) return;
@@ -70,18 +73,18 @@ export function useEpicMutations(
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok || data.error) {
-        setDeleteEpicError(data.error || "Failed to delete epic");
+        setDeleteEpicError(data.error || tErrors("failedToDeleteEpic"));
         return;
       }
 
       onDeleteSuccess?.();
     } catch {
-      setDeleteEpicError("Failed to delete epic");
+      setDeleteEpicError(tErrors("failedToDeleteEpic"));
     } finally {
       deleteInFlightRef.current = false;
       setDeletingEpic(false);
     }
-  }, [projectId, epicId, onDeleteSuccess]);
+  }, [projectId, epicId, onDeleteSuccess, tErrors]);
 
   return {
     merging,

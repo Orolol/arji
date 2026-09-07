@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { useState, useEffect, useCallback } from "react";
 
 interface EpicContext {
@@ -24,6 +26,7 @@ interface StoryDetail {
 }
 
 export function useStoryDetail(projectId: string, storyId: string) {
+  const tErrors = useTranslations("ClientErrors");
   const [story, setStory] = useState<StoryDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -49,10 +52,10 @@ export function useStoryDetail(projectId: string, storyId: string) {
       const res = await fetch(storyUrl);
       applyStory(await res.json());
     } catch {
-      setError("Failed to load story");
+      setError(tErrors("failedToLoadStory"));
       setLoading(false);
     }
-  }, [storyUrl, applyStory]);
+  }, [storyUrl, applyStory, tErrors]);
 
   useEffect(() => {
     let cancelled = false;
@@ -63,13 +66,13 @@ export function useStoryDetail(projectId: string, storyId: string) {
       })
       .catch(() => {
         if (cancelled) return;
-        setError("Failed to load story");
+        setError(tErrors("failedToLoadStory"));
         setLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [storyUrl, applyStory]);
+  }, [storyUrl, applyStory, tErrors]);
 
   const updateStory = useCallback(
     async (updates: Partial<StoryDetail>) => {

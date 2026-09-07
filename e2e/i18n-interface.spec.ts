@@ -13,7 +13,9 @@ async function checkScreen(page: Page, url: string, text: string, info: TestInfo
     await page.goto(url);
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
     await expect(page.getByText(text, { exact: false }).first()).toBeVisible();
-    // Project SSE streams deliberately stay open; networkidle is not a load signal.
+    await expect(page.locator("main .animate-spin")).toHaveCount(0);
+    await expect(page.locator("main")).not.toContainText("Loading...");
+    // Project SSE streams deliberately stay open; visible content is the load signal.
     await expect(page.locator("body")).not.toContainText(keyLeak);
     await expect(page.locator("body")).not.toContainText(/Application error|Internal Server Error/);
     expect(errors).toEqual([]);
@@ -38,7 +40,7 @@ for (const width of [1280, 390]) {
       ["/agents/limits", "Limits"], ["/usage", "Refresh"], ["/inbox", "Inbox"],
       ["/settings", "Workspace"], ["/settings/pipeline", "Pipeline"],
       ["/settings/integrations", "Integrations"], ["/settings/appearance", "Appearance"],
-      ["/projects/new", "project"], ["/projects/import", "Import"],
+      ["/projects/new", "project"], ["/projects/import", "Import"], ["/tickets/new", "New"],
     ]) await checkScreen(page, url, copy, info);
   });
 

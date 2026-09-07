@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { useCallback, useEffect, useState } from "react";
 import type { UsageRange, UsageReport } from "@/lib/types/usage";
 
@@ -26,6 +28,7 @@ import type { UsageRange, UsageReport } from "@/lib/types/usage";
  * `?range=30d` would be a different string for an identical read.
  */
 export function useUsage() {
+  const tErrors = useTranslations("ClientErrors");
   const [report, setReport] = useState<UsageReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -51,22 +54,22 @@ export function useUsage() {
           setError(
             typeof body?.error === "string"
               ? body.error
-              : "Failed to load the usage report."
+              : tErrors("failedToLoadTheUsageReport")
           );
           return;
         }
         if (!body?.data) {
-          setError("Failed to load the usage report.");
+          setError(tErrors("failedToLoadTheUsageReport"));
           return;
         }
         setReport(body.data as UsageReport);
       } catch {
-        setError("Failed to load the usage report.");
+        setError(tErrors("failedToLoadTheUsageReport"));
       } finally {
         setLoading(false);
       }
     },
-    [range]
+    [range, tErrors]
   );
 
   useEffect(() => {

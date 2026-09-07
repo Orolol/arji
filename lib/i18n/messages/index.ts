@@ -5,6 +5,7 @@ import en_AgentsWorkshop from "./en/AgentsWorkshop.json";
 import en_AutoMode from "./en/AutoMode.json";
 import en_Chat from "./en/Chat.json";
 import en_ChatLegacy from "./en/ChatLegacy.json";
+import en_ClientErrors from "./en/ClientErrors.json";
 import en_Dependencies from "./en/Dependencies.json";
 import en_Desk from "./en/Desk.json";
 import en_Documents from "./en/Documents.json";
@@ -69,6 +70,7 @@ export const en = {
   AutoMode: en_AutoMode,
   Chat: en_Chat,
   ChatLegacy: en_ChatLegacy,
+  ClientErrors: en_ClientErrors,
   Dependencies: en_Dependencies,
   Desk: en_Desk,
   Documents: en_Documents,

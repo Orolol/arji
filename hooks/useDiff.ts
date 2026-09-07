@@ -1,9 +1,12 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { useState, useEffect, useCallback } from "react";
 import type { FileDiff, DiffMetadata } from "@/lib/git/diff";
 
 export function useDiff(projectId: string, epicId: string | null) {
+  const tErrors = useTranslations("ClientErrors");
   const [files, setFiles] = useState<FileDiff[]>([]);
   const [metadata, setMetadata] = useState<DiffMetadata | null>(null);
   const [loading, setLoading] = useState(false);
@@ -27,13 +30,13 @@ export function useDiff(projectId: string, epicId: string | null) {
         setMetadata(data.data?.metadata || null);
       }
     } catch {
-      setError("Failed to load diff");
+      setError(tErrors("failedToLoadDiff"));
       setFiles([]);
       setMetadata(null);
     } finally {
       setLoading(false);
     }
-  }, [projectId, epicId]);
+  }, [projectId, epicId, tErrors]);
 
   useEffect(() => {
     fetchDiff();

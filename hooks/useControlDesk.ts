@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { useCallback, useMemo, useRef, useState } from "react";
 
 import { usePolling } from "@/hooks/usePolling";
@@ -31,6 +33,7 @@ export function useControlDesk(
   error: string | null;
   refresh: () => Promise<void>;
 } {
+  const tErrors = useTranslations("ClientErrors");
   const [data, setData] = useState<ControlDeskPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -75,7 +78,7 @@ export function useControlDesk(
       if (!res.ok) {
         if (stale()) return;
         appliedSeqRef.current = requestSeq;
-        setError(`Failed to load the desk (${res.status})`);
+        setError(tErrors("deskHttp", { status: res.status }));
         return;
       }
       const body = await res.json();
@@ -90,11 +93,11 @@ export function useControlDesk(
     } catch {
       if (stale()) return;
       appliedSeqRef.current = requestSeq;
-      setError("Failed to load the desk");
+      setError(tErrors("failedToLoadTheDesk"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [tErrors]);
 
   /**
    * Re-read the desk after a confirmed write.

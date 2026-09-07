@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { QuestionData } from "@/lib/claude/spawn";
 
@@ -21,6 +23,7 @@ export interface ChatMessage {
 }
 
 export function useChat(projectId: string, conversationId: string | null) {
+  const tErrors = useTranslations("ClientErrors");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
@@ -124,7 +127,7 @@ export function useChat(projectId: string, conversationId: string | null) {
 
         if (!res.ok || !res.body) {
           const payload = await res.json().catch(() => ({}));
-          throw new Error(payload.error || "Stream request failed");
+          throw new Error(payload.error || tErrors("streamRequestFailed"));
         }
 
         const reader = res.body.getReader();
@@ -187,7 +190,7 @@ export function useChat(projectId: string, conversationId: string | null) {
           setMessages((prev) =>
             prev.filter((m) => m.id !== userTempId && m.id !== assistantTempId)
           );
-          setError(err instanceof Error ? err.message : "Failed to send message");
+          setError(err instanceof Error ? err.message : tErrors("failedToSendMessage"));
         }
       }
       if (!isStale()) {
@@ -195,7 +198,7 @@ export function useChat(projectId: string, conversationId: string | null) {
         setStreamStatus(null);
       }
     },
-    [projectId, conversationId, loadMessages]
+    [projectId, conversationId, loadMessages, tErrors]
   );
 
   const answerQuestions = useCallback(

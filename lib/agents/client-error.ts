@@ -11,7 +11,7 @@ export interface AgentRequestError extends Error {
 
 export function toAgentRequestError(
   payload: unknown,
-  fallbackMessage = "Agent request failed"
+  fallbackMessage: string
 ): AgentRequestError {
   const message =
     payload && typeof payload === "object" && typeof (payload as { error?: unknown }).error === "string"

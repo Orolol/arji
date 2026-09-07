@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { useState, useCallback } from "react";
 import { usePolling } from "@/hooks/usePolling";
 import { toAgentRequestError } from "@/lib/agents/client-error";
@@ -15,6 +16,7 @@ export type AgentDispatchTarget =
  * epic targets only).
  */
 export function useAgentDispatch(projectId: string, target: AgentDispatchTarget) {
+  const tErrors = useTranslations("ClientErrors");
   const kind = target.kind;
   const epicId = target.epicId ?? null;
   const storyId = kind === "story" ? target.storyId : null;
@@ -64,11 +66,11 @@ export function useAgentDispatch(projectId: string, target: AgentDispatchTarget)
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.error) {
-        throw toAgentRequestError(data);
+        throw toAgentRequestError(data, tErrors("agentRequestFailed"));
       }
       return data.data;
     },
-    []
+    [tErrors]
   );
 
   const sendToDev = useCallback(
@@ -165,10 +167,10 @@ export function useAgentDispatch(projectId: string, target: AgentDispatchTarget)
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.error) {
-      throw toAgentRequestError(data);
+      throw toAgentRequestError(data, tErrors("agentRequestFailed"));
     }
     return data.data;
-  }, [kind, targetPath]);
+  }, [kind, targetPath, tErrors]);
 
   const isRunning = activeSessions.some((s) => s.status === "running");
   const activeSession = activeSessions[0] ?? null;

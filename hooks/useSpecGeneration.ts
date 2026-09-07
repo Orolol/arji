@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -9,6 +11,7 @@ import { useRouter } from "next/navigation";
  * router on success.
  */
 export function useSpecGeneration(projectId: string, provider: string) {
+  const tErrors = useTranslations("ClientErrors");
   const router = useRouter();
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -24,15 +27,15 @@ export function useSpecGeneration(projectId: string, provider: string) {
       });
       const json = await res.json();
       if (!res.ok || json.error) {
-        setError(json.error || `Spec generation failed (HTTP ${res.status})`);
+        setError(json.error || tErrors("specHttp", { status: res.status }));
       } else {
         router.refresh();
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Spec generation request failed");
+      setError(err instanceof Error ? err.message : tErrors("specGenerationRequestFailed"));
     }
     setGenerating(false);
-  }, [projectId, provider, router]);
+  }, [projectId, provider, router, tErrors]);
 
   return { generateSpec, generating, error };
 }

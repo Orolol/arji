@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { useState, useCallback } from "react";
 import { usePolling } from "@/hooks/usePolling";
 
@@ -28,6 +30,7 @@ export function useTicketComments(
   projectId: string | null | undefined,
   target: TicketCommentsTarget,
 ) {
+  const tErrors = useTranslations("ClientErrors");
   const kind = target.kind;
   const epicId = kind === "epic" ? target.epicId : null;
   const storyId = kind === "story" ? target.storyId : null;
@@ -83,14 +86,14 @@ export function useTicketComments(
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.error) {
-        throw new Error(data.error || "Failed to add comment");
+        throw new Error(data.error || tErrors("failedToAddComment"));
       }
       if (data.data) {
         setComments((prev) => [...prev, data.data]);
       }
       return data.data;
     },
-    [commentsUrl]
+    [commentsUrl, tErrors]
   );
 
   return { comments, loading, addComment, refresh: loadComments };

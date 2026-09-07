@@ -1,9 +1,12 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { useState, useEffect, useCallback } from "react";
 import type { DashboardProject, ProjectFilter } from "@/lib/types/dashboard";
 
 export function useProjects() {
+  const tErrors = useTranslations("ClientErrors");
   const [projects, setProjects] = useState<DashboardProject[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -14,19 +17,19 @@ export function useProjects() {
     try {
       const res = await fetch("/api/projects");
       if (!res.ok) {
-        setError(`Failed to load projects (${res.status})`);
+        setError(tErrors("projectsHttp", { status: res.status }));
         setProjects([]);
         return;
       }
       const data = await res.json();
       setProjects(data.data || []);
     } catch {
-      setError("Failed to load projects");
+      setError(tErrors("failedToLoadProjects"));
       setProjects([]);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [tErrors]);
 
   useEffect(() => {
     loadProjects();

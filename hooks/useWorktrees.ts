@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { useCallback, useEffect, useState } from "react";
 
 /** What a worktree is doing right now, from the agent's point of view. */
@@ -41,6 +43,7 @@ export function useWorktrees(
   projectId: string,
   enabled: boolean = true
 ): WorktreesResult {
+  const tErrors = useTranslations("ClientErrors");
   const [worktrees, setWorktrees] = useState<WorktreeSummary[]>([]);
   const [count, setCount] = useState<number | null>(null);
   const [orphanCount, setOrphanCount] = useState(0);
@@ -68,18 +71,18 @@ export function useWorktrees(
       const json = await res.json();
       if (!res.ok) {
         setCount(null);
-        setError(json?.error || "Failed to read worktrees.");
+        setError(json?.error || tErrors("failedToReadWorktrees"));
         return;
       }
       setError(null);
       apply(json?.data);
     } catch {
       setCount(null);
-      setError("Failed to read worktrees.");
+      setError(tErrors("failedToReadWorktrees"));
     } finally {
       setLoading(false);
     }
-  }, [projectId, enabled, apply]);
+  }, [projectId, enabled, apply, tErrors]);
 
   const prune = useCallback(async () => {
     if (!enabled) return;
@@ -91,17 +94,17 @@ export function useWorktrees(
       });
       const json = await res.json();
       if (!res.ok) {
-        setError(json?.error || "Failed to clean worktrees.");
+        setError(json?.error || tErrors("failedToCleanWorktrees"));
         return;
       }
       setError(null);
       apply(json?.data);
     } catch {
-      setError("Failed to clean worktrees.");
+      setError(tErrors("failedToCleanWorktrees"));
     } finally {
       setPruning(false);
     }
-  }, [projectId, enabled, apply]);
+  }, [projectId, enabled, apply, tErrors]);
 
   useEffect(() => {
     void refresh();
