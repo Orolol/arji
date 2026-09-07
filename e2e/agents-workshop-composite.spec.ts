@@ -99,23 +99,55 @@ function expectPaintedRing(reading: FocusReading | null, where: string) {
 }
 
 /**
- * Tab forward until `testId` takes focus, then read its computed outline.
- * Restarts from the document top so each control is reached the way a
- * keyboard user reaches it.
+ * Put keyboard focus on `testId` the way a keyboard user does, then read its
+ * computed outline.
+ *
+ * NOT a tab walk from the top of the document. This roster is a list of
+ * focusable cards, one per named agent, and it grows with whatever else is in
+ * the shared database — so a fixed tab budget makes the spec's reach depend on
+ * how many agents happen to exist, which is the global-state race in another
+ * costume. (It bit: leftover rows from earlier runs pushed the band past a
+ * 60-press budget and the spec failed on controls that were rendering fine.)
+ *
+ * Instead: focus the element immediately BEFORE the target in tab order with a
+ * script, then press Tab once. The last interaction is still a real key press,
+ * which is all Chrome's `:focus-visible` heuristic cares about — a scripted
+ * `.focus()` on the target itself would not match it, and that is the whole
+ * point of the assertion. The distance is always exactly one press, whatever
+ * the roster holds.
  */
-async function tabTo(
+async function focusByKeyboard(
   page: Page,
   testId: string,
-  budget = 60,
 ): Promise<FocusReading | null> {
-  await page.locator("body").click({ position: { x: 2, y: 2 } });
-  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-  for (let i = 0; i < budget; i++) {
-    await page.keyboard.press("Tab");
-    const reading = await readFocused(page);
-    if (reading?.testId === testId) return reading;
-  }
-  return null;
+  const positioned = await page.evaluate((wanted) => {
+    const focusable = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      ),
+    ).filter(
+      (el) =>
+        !el.hasAttribute("disabled") &&
+        el.getAttribute("aria-hidden") !== "true" &&
+        el.offsetParent !== null,
+    );
+    const index = focusable.findIndex(
+      (el) => el.getAttribute("data-testid") === wanted,
+    );
+    if (index === -1) return false;
+    focusable[index]?.scrollIntoView({ block: "center" });
+    if (index === 0) {
+      (document.activeElement as HTMLElement | null)?.blur();
+      return true;
+    }
+    focusable[index - 1].focus();
+    return true;
+  }, testId);
+
+  if (!positioned) return null;
+  await page.keyboard.press("Tab");
+  const reading = await readFocused(page);
+  return reading?.testId === testId ? reading : null;
 }
 
 /** Two simple agents and a composite over them, created through the real API. */
@@ -129,7 +161,9 @@ async function seedComposite(page: Page, token: string): Promise<Composite> {
       data: member,
     });
     expect(response.ok(), await response.text()).toBeTruthy();
-    memberIds.push((await response.json()).data.id);
+    const memberId = (await response.json()).data.id;
+    memberIds.push(memberId);
+    createdAgentIds.push(memberId);
   }
 
   const name = `E2E Ladder ${token}`;
@@ -137,7 +171,11 @@ async function seedComposite(page: Page, token: string): Promise<Composite> {
     data: { kind: "composite", name, memberIds },
   });
   expect(response.ok(), await response.text()).toBeTruthy();
-  return { id: (await response.json()).data.id, name, memberIds };
+  const id = (await response.json()).data.id;
+  // Unshifted, not pushed: afterEach deletes in reverse, so the composite
+  // goes before the members it cascades from.
+  createdAgentIds.unshift(id);
+  return { id, name, memberIds };
 }
 
 /** Open /agents and select the composite this run created, by its own name. */
@@ -153,8 +191,28 @@ async function openComposite(page: Page, composite: Composite): Promise<void> {
 }
 
 let runToken = "";
+/** Ids this test created, deleted in `afterEach` whatever the outcome. */
+let createdAgentIds: string[] = [];
+
 test.beforeEach(() => {
   runToken = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  createdAgentIds = [];
+});
+
+/**
+ * Named agents are GLOBAL rows, so a spec that seeds them and walks away
+ * grows the shared database on every run for ever. That is not only untidy:
+ * the roster is a list of focusable cards, so the leftovers change what other
+ * specs measure. Deleting the composite first lets `ON DELETE CASCADE` clear
+ * its membership before the members go.
+ */
+test.afterEach(async ({ page }) => {
+  for (const id of [...createdAgentIds].reverse()) {
+    await page
+      .request.delete(`/api/agent-config/named-agents/${id}`)
+      .catch(() => undefined);
+  }
+  createdAgentIds = [];
 });
 
 for (const theme of THEMES) {
@@ -190,7 +248,7 @@ for (const theme of THEMES) {
 
       for (const testId of controls) {
         await expect(page.getByTestId(testId)).toBeVisible();
-        const reading = await tabTo(page, testId);
+        const reading = await focusByKeyboard(page, testId);
         expectPaintedRing(reading, `${testId} (${theme.name})`);
       }
 
