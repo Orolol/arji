@@ -24,6 +24,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createTestDb } from "@/lib/db/test-utils";
+import type { ProviderType } from "@/lib/providers";
 
 const { db: testDb, sqlite: testSqlite } = createTestDb();
 vi.mock("@/lib/db", () => ({ db: testDb, sqlite: testSqlite }));
@@ -138,14 +139,16 @@ function seedSessionRow(sessionId: string, projectId = "proj-1"): void {
  */
 async function dispatchAndWait(
   sessionId: string,
-  provider: string,
+  provider: ProviderType,
   model: string
 ): Promise<void> {
   const { processManager } = await import("@/lib/claude/process-manager");
+  // `mode: "code"` is the posture a build dispatch uses; it is what decides the
+  // providers' tool allowlist, so a review posture would assemble other argv.
   processManager.start(
     sessionId,
-    { prompt: "stub prompt", cwd: process.cwd(), model },
-    provider as never
+    { mode: "code", prompt: "stub prompt", cwd: process.cwd(), model },
+    provider
   );
   for (let i = 0; i < 200; i++) {
     const info = processManager.getStatus(sessionId);
