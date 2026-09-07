@@ -173,6 +173,23 @@ describe("the composer's keyboard contract", () => {
       ),
     ).toBeInTheDocument();
   });
+
+  it("truncates the placeholder on one line with ellipsis when the field is narrow", async () => {
+    await renderComposer();
+    const input = field();
+    const classList = (input.getAttribute("class") ?? "").split(/\s+/);
+    // The placeholder is 51 characters. Without truncation/nowrap, it wraps to two lines
+    // when the field is narrower than ~380px, causing the second line ("doc") to be clipped
+    // at the bottom of the single-row band. Truncation keeps it on a single line with an ellipsis.
+    const hasTruncate = classList.includes("placeholder:truncate");
+    const hasNowrapEllipsis =
+      classList.includes("placeholder:whitespace-nowrap") &&
+      classList.includes("placeholder:text-ellipsis");
+    expect(
+      hasTruncate || hasNowrapEllipsis,
+      "chat composer input textarea must carry placeholder:truncate or placeholder:whitespace-nowrap + placeholder:text-ellipsis",
+    ).toBe(true);
+  });
 });
 
 describe("attachments", () => {
