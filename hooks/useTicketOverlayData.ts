@@ -41,7 +41,7 @@ import { useProjectEpicsList } from "@/hooks/useProjectEpicsList";
 import { useProjectEvents } from "@/hooks/useProjectEvents";
 import { useTicketComments } from "@/hooks/useTicketComments";
 import type { ArijActionItem } from "@/components/shared/ArijActionsList";
-import { fetchUnifiedSessions } from "@/lib/agent-sessions/session-list";
+import { findUnifiedSession } from "@/lib/agent-sessions/session-list";
 import { aggregateGradingStatus, type GradingStatus } from "@/lib/grading/report";
 import { buildActivityFeed } from "@/lib/kanban/activity-feed";
 import { projectTone, type ProjectTone } from "@/lib/piscine/tokens";
@@ -321,32 +321,45 @@ export function useTicketOverlayData(
 
   useEffect(() => {
     if (!open || !activeEpicId) return;
-    let cancelled = false;
+    // The cleanup has to STOP the walk, not only disown its result: the list
+    // is read page by page, and every page fetched after the overlay closed
+    // or the ticket changed is a request nobody reads. The overlay opens and
+    // closes far more often than a page navigates, and the cross-project desk
+    // changes this hook's ticket and project under a mount that stays put.
+    // The same signal is the stale-write guard — once aborted, nothing below
+    // may land.
+    const controller = new AbortController();
+    const { signal } = controller;
 
     async function load(currentEpicId: string) {
       try {
-        const rows = await fetchUnifiedSessions<UnifiedSessionRow>(projectId);
-        // The route already sorts newest-first, across pages.
-        const latest = rows.find(
+        // Newest first, stopped at the page holding the match: the question
+        // is "this ticket's newest session", and the pages after that one
+        // hold only older ones. A ticket with no session still walks to the
+        // end — the one case a route-level filter would shorten.
+        const latest = await findUnifiedSession<UnifiedSessionRow>(
+          projectId,
           (row) => row.kind === "agent_session" && row.epicId === currentEpicId,
+          { signal },
         );
-        if (!latest || cancelled) return;
+        if (!latest || signal.aborted) return;
         setSessionId(latest.id);
 
-        const res = await fetch(`/api/projects/${projectId}/sessions/${latest.id}`);
+        const res = await fetch(`/api/projects/${projectId}/sessions/${latest.id}`, {
+          signal,
+        });
         if (!res.ok) return;
         const json = await res.json();
         const next = (json?.data?.arijActions ?? []) as ArijActionItem[];
-        if (!cancelled) setSessionActions(Array.isArray(next) ? next : []);
+        if (!signal.aborted) setSessionActions(Array.isArray(next) ? next : []);
       } catch {
         // Best-effort ambient detail — the band collapses to its label line.
+        // Our own abort lands here too, and is nothing to report.
       }
     }
 
     void load(activeEpicId);
-    return () => {
-      cancelled = true;
-    };
+    return () => controller.abort();
   }, [projectId, activeEpicId, open, sessionRefreshToken]);
 
   const agentType = activeAgentType(

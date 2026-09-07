@@ -12,6 +12,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   fetchUnifiedSessions,
+  findUnifiedSession,
   UnifiedSessionListIncompleteError,
   SESSION_LIST_MAX_PAGES,
 } from "@/lib/agent-sessions/session-list";
@@ -29,10 +30,12 @@ function serveRows(total: number, pageSize: number) {
     id: `row-${i}`,
   }));
   const requests: string[] = [];
+  const signals: Array<AbortSignal | undefined> = [];
 
-  const fetchMock = vi.fn(async (input: string | URL) => {
+  const fetchMock = vi.fn(async (input: string | URL, init?: { signal?: AbortSignal }) => {
     const url = new URL(String(input));
     requests.push(url.search);
+    signals.push(init?.signal);
     const cursor = url.searchParams.get("cursor");
     const start = cursor ? rows.findIndex((r) => r.id === cursor) + 1 : 0;
     const page = rows.slice(start, start + pageSize);
@@ -45,7 +48,7 @@ function serveRows(total: number, pageSize: number) {
   });
 
   vi.stubGlobal("fetch", fetchMock);
-  return { requests, fetchMock };
+  return { requests, signals, fetchMock };
 }
 
 beforeEach(() => {
@@ -184,5 +187,83 @@ describe("fetchUnifiedSessions", () => {
     await expect(fetchUnifiedSessions<Row>("proj-1")).rejects.toThrow(
       "Sessions list request failed (500)"
     );
+  });
+});
+
+/**
+ * `findUnifiedSession` — the one-row reader over the same pages.
+ *
+ * The ticket overlay needs "the newest agent session of this ticket", and the
+ * route already sorts newest-first across pages, so the first match IS the
+ * answer and every page after it is unread. This reader stops there. What it
+ * keeps from its sibling is the incompleteness contract: a walk that cannot
+ * reach a verdict rejects, it never reports "none".
+ */
+describe("findUnifiedSession", () => {
+  it("stops at the page that holds the first match", async () => {
+    const { requests } = serveRows(40, 10);
+
+    const found = await findUnifiedSession<Row>("proj-1", (r) => r.id === "row-15", {
+      limit: 10,
+    });
+
+    expect(found).toEqual({ id: "row-15" });
+    // Pages 0–9 and 10–19. Pages 20–39 exist and were never requested.
+    expect(requests).toHaveLength(2);
+  });
+
+  it("answers null only once the whole list has been walked", async () => {
+    const { requests } = serveRows(40, 10);
+
+    const found = await findUnifiedSession<Row>("proj-1", () => false, { limit: 10 });
+
+    expect(found).toBeNull();
+    expect(requests).toHaveLength(4);
+  });
+
+  it("takes the first match in list order, which is the newest", async () => {
+    const { requests } = serveRows(40, 10);
+
+    const found = await findUnifiedSession<Row>(
+      "proj-1",
+      (r) => r.id === "row-3" || r.id === "row-27",
+      { limit: 10 }
+    );
+
+    expect(found).toEqual({ id: "row-3" });
+    expect(requests).toHaveLength(1);
+  });
+
+  it("rejects instead of answering null when the cursor stops advancing", async () => {
+    let calls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        calls += 1;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ data: [{ id: `row-${calls}` }], nextCursor: "stuck" }),
+        } as Response;
+      })
+    );
+
+    await expect(
+      findUnifiedSession<Row>("proj-1", () => false)
+    ).rejects.toBeInstanceOf(UnifiedSessionListIncompleteError);
+    expect(calls).toBe(2);
+  });
+
+  it("hands the caller's signal to every page request", async () => {
+    const { signals } = serveRows(30, 10);
+    const controller = new AbortController();
+
+    await findUnifiedSession<Row>("proj-1", () => false, {
+      limit: 10,
+      signal: controller.signal,
+    });
+
+    expect(signals).toHaveLength(3);
+    for (const signal of signals) expect(signal).toBe(controller.signal);
   });
 });

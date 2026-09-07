@@ -8,6 +8,17 @@ for (const scope of ["global", "project"] as const) {
     await page.goto(scope === "global" ? "/" : project.boardUrl);
     const input = page.getByRole("textbox", { name: "Describe a feature" });
     await expect(input).toBeEnabled();
+    // The cross-project desk has no project of its own, so the composer falls
+    // back to `projects[0]` (DeskComposer.tsx) — under `fullyParallel` that is
+    // whichever project another worker happened to seed first, and the ticket
+    // would be written there while the toast still appeared here. Target this
+    // fixture's project by name, which the worker index keeps unique.
+    // NOT done for the `project` scope: that run's subject IS the route's own
+    // project being the default.
+    if (scope === "global") {
+      await page.getByTestId("desk-project-select").click();
+      await page.getByRole("menuitem", { name: project.name, exact: true }).click();
+    }
     const title = `Notification ${scope} ${project.id}`;
     await input.fill(title);
     await input.press("Enter");

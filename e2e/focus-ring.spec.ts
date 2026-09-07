@@ -144,6 +144,17 @@ test.describe("TopBar — keyboard focus paints a visible ring", () => {
           parseFloat(reading!.outlineWidth),
           `${where}: outline-width is ${reading!.outlineWidth}`,
         ).toBeGreaterThanOrEqual(2);
+
+        // A ring the same colour as what it sits on is not a ring, and a fully
+        // transparent one still reports style `solid` and a 2px width. The
+        // unit sweep resolves this colour from app/globals.css in both themes
+        // (__tests__/focus-ring-color.test.ts); this is the reading of it
+        // against a real ground, in the default theme (night — see
+        // e2e/focus-ring-inputs.spec.ts for both themes on two inputs).
+        expect(
+          reading!.outlineColor,
+          `${where}: outline-color is ${reading!.outlineColor}`,
+        ).not.toMatch(/rgba\([^)]*,\s*0\)$/);
       }
     }
   });

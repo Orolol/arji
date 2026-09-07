@@ -45,7 +45,9 @@ import {
   scanSources,
 } from "./helpers/class-list-scan";
 import {
+  THEMES,
   classTokens,
+  colorPaints,
   resolveFocusVisibleOutline,
 } from "./helpers/tailwind-outline";
 
@@ -194,6 +196,14 @@ describe("TopBar — every control paints a keyboard focus ring", () => {
         `so no ring is painted (width ${resolved.width}, colour ${resolved.color}). ` +
         `Class list: ${control.className}`,
     ).toBe(true);
+    for (const theme of THEMES) {
+      expect(
+        colorPaints(resolved.colorIn[theme]),
+        `${testId}: outline-color resolves to ${resolved.colorIn[theme]} in ` +
+          `${theme} (declared ${resolved.color}), so the ring is drawn in a ` +
+          `colour nobody can see. Class list: ${control.className}`,
+      ).toBe(true);
+    }
   });
 });
 
@@ -320,6 +330,22 @@ describe("every class list that pairs outline-none with an outline focus ring", 
           `colour ${resolved.color}). State the style explicitly ` +
           `(focus-visible:outline-solid) or drop outline-none.`,
       ).toBe(true);
+
+      // The third thing a ring needs. `outline-style: solid` and a 2px width
+      // are satisfied by a transparent ring, and by a `--ring` blanked in one
+      // theme; the colour is resolved from app/globals.css per theme so those
+      // fail here rather than pass (`focus-ring-color.test.ts`).
+      for (const theme of THEMES) {
+        expect(
+          colorPaints(resolved.colorIn[theme]),
+          `${describeSite(site)}\n\n` +
+            `the ring is drawn but its colour paints nothing in ${theme}: ` +
+            `outline-color resolves to ${resolved.colorIn[theme]} (declared ` +
+            `${resolved.color ?? "by no utility — the base layer's ring applies"}). ` +
+            `Use focus-visible:outline-ring, or fix the --ring token in ` +
+            `app/globals.css.`,
+        ).toBe(true);
+      }
     },
   );
 });
