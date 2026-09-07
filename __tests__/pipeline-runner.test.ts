@@ -59,6 +59,11 @@ interface HarnessConfig {
    * every pre-existing caller had and must keep behaving identically.
    */
   attemptBudget?: number;
+  /**
+   * Per-stage budget, for a run holding a composite on one stage and a simple
+   * agent on another. Takes precedence over the flat `attemptBudget`.
+   */
+  attemptBudgetByStage?: Partial<Record<string, number>>;
   maxFixCycles?: number;
   maxSessions?: number;
   forensicSessionId?: string | null;
@@ -118,10 +123,23 @@ function runScripted(config: HarnessConfig = {}) {
         error: build.error ?? null,
       });
 
+  const budgetedStages: string[] = [];
+  const budgetFor = (stage: string): number | undefined =>
+    config.attemptBudgetByStage?.[stage] ?? config.attemptBudget;
+
   const promise = runPipeline({
     maxAttempts: config.maxAttempts ?? 2,
-    ...(config.attemptBudget !== undefined
-      ? { attemptBudget: () => config.attemptBudget as number }
+    ...(config.attemptBudget !== undefined ||
+    config.attemptBudgetByStage !== undefined
+      ? {
+          attemptBudget: (stage: string) => {
+            budgetedStages.push(stage);
+            // `NaN` for an unbudgeted stage: the runner rejects a
+            // non-finite budget and keeps the configured cap, which is the
+            // real shape of "this stage resolved to a simple agent".
+            return budgetFor(stage) ?? Number.NaN;
+          },
+        }
       : {}),
     maxFixCycles: config.maxFixCycles ?? 2,
     maxSessions: config.maxSessions ?? 12,
@@ -246,6 +264,7 @@ function runScripted(config: HarnessConfig = {}) {
     forensicInputs,
     guardCalls,
     rowStatus,
+    budgetedStages,
     reasons: () => traces.map((t) => t.reason),
     finished: () => finished,
   };
@@ -499,6 +518,86 @@ describe("runPipeline — retry ladder and forensic", () => {
     expect(summary.reason).toBe("stage review failed after 3 attempts");
     expect(h.requests.map((r) => r.attempt)).toEqual([1, 2, 3]);
     expect(h.reasons()).toContain(PIPELINE_REASONS.retry("review", 3, 3));
+  });
+
+  /**
+   * THE BUILD STAGE IS SIZED TOO — the case every other ladder test misses.
+   *
+   * The initial build never passes through the runner's `dispatch()`: the
+   * ROUTE launched it and hands it in as `options.initialBuild`. So the one
+   * place its budget can be asked is before the loop, and while it was not,
+   * `pipeline_max_attempts` still governed a build composite — the exact
+   * mechanism this epic removed, surviving on the stage a build composite
+   * exists for.
+   *
+   * These two cases fail in opposite directions on the unfixed runner, which
+   * is why both are here: a list LONGER than the cap loses its tail, and a
+   * list SHORTER than the cap sends `launchStage` after a rank that does not
+   * exist.
+   */
+  it("spends a BUILD composite's member count, not the configured attempt cap", async () => {
+    const h = runScripted({
+      maxAttempts: 2,
+      attemptBudget: 4,
+      build: { success: false },
+      stages: [
+        { success: false },
+        { success: false },
+        { success: false },
+        { success: false },
+      ],
+    });
+    const summary = await h.promise;
+
+    // Attempt 1 was the route's build; the engine owns 2, 3 and 4.
+    expect(h.requests.map((r) => r.attempt)).toEqual([2, 3, 4]);
+    expect(h.requests.every((r) => r.stage === "build")).toBe(true);
+    expect(summary.reason).toBe("stage build failed after 4 attempts");
+    expect(h.reasons()).toContain(PIPELINE_REASONS.retry("build", 4, 4));
+    // The budget was asked for the build stage, not only for the later ones.
+    expect(h.budgetedStages[0]).toBe("build");
+  });
+
+  it("stops a BUILD composite at its last member even when the cap is higher", async () => {
+    // Two members under a cap of five. Attempts 3-5 would ask
+    // `resolveCompositeMemberAtRank` for ranks that do not exist, which
+    // throws inside `launchStage` and burns attempts on an internal error.
+    const h = runScripted({
+      maxAttempts: 5,
+      attemptBudget: 2,
+      build: { success: false },
+      stages: [{ success: false }, { success: false }, { success: false }],
+    });
+    const summary = await h.promise;
+
+    expect(h.requests.map((r) => r.attempt)).toEqual([2]);
+    expect(summary.reason).toBe("stage build failed after 2 attempts");
+  });
+
+  it("sizes each stage separately when build and review resolve differently", async () => {
+    // A composite for the code stages and a simple agent for review: the
+    // build ladder must follow the list while review keeps the configured
+    // cap. Re-asking per stage entry is what makes that possible.
+    const h = runScripted({
+      maxAttempts: 2,
+      attemptBudgetByStage: { build: 3 },
+      build: { success: false },
+      stages: [
+        { success: false },
+        { success: true },
+        { success: false },
+        { success: false },
+      ],
+    });
+    const summary = await h.promise;
+
+    expect(h.requests.map((r) => `${r.stage}:${r.attempt}`)).toEqual([
+      "build:2",
+      "build:3",
+      "review:1",
+      "review:2",
+    ]);
+    expect(summary.reason).toBe("stage review failed after 2 attempts");
   });
 
   it("lets the session ceiling cut a composite longer than the run's budget", async () => {

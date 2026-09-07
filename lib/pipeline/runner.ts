@@ -355,9 +355,12 @@ export async function runPipeline(
    * a run can hold a composite for its code stages and a simple agent for its
    * review (or the reverse).
    *
-   * Seeded with the configured cap rather than with the initial build's real
-   * budget: the initial build was dispatched by the ROUTE, before this engine
-   * existed, so its first retry is the first attempt this engine sizes.
+   * Seeded with the configured cap and then SIZED FOR THE BUILD STAGE before
+   * the loop runs. The initial build is attempt 1 of the build stage, but the
+   * ROUTE dispatched it, so it never passes through `dispatch()` where every
+   * other stage's budget is asked. Leaving the seed in place made
+   * `pipeline_max_attempts` — not the member count — govern a build
+   * composite's ladder, which is the one stage a build composite exists for.
    */
   let stageMaxAttempts = options.maxAttempts;
   let fixCycles = 0;
@@ -375,6 +378,33 @@ export async function runPipeline(
    * that carried it in order to still reach the reviewer's prompt.
    */
   let lastVerificationReport: VerificationReport | undefined;
+
+  /**
+   * Size the ladder for one stage entry.
+   *
+   * Asked ONCE per stage entry (attempt 1), never per attempt: a composite
+   * whose members were edited mid-run must not change the ladder under a run
+   * already climbing it. A budget that cannot be read leaves the configured
+   * cap in place rather than failing the run — the ladder is a retry policy,
+   * not a correctness gate.
+   */
+  const sizeStageBudget = async (
+    forStage: PipelineStageKind
+  ): Promise<void> => {
+    stageMaxAttempts = options.maxAttempts;
+    if (!options.attemptBudget) return;
+    try {
+      const budget = await options.attemptBudget(forStage);
+      if (Number.isFinite(budget) && budget >= 1) {
+        stageMaxAttempts = Math.floor(budget);
+      }
+    } catch (error) {
+      console.warn(
+        "[pipeline] Failed to size the attempt ladder; using the configured cap:",
+        error instanceof Error ? error.message : error
+      );
+    }
+  };
 
   const readStatusSafe = (sessionId: string): string | null => {
     try {
@@ -493,24 +523,8 @@ export async function runPipeline(
     stageAttempt = request.attempt;
     currentRequest = request;
 
-    // The budget is asked ONCE per stage entry (attempt 1), not per attempt:
-    // a composite whose members were edited mid-run must not change the
-    // ladder under a run already climbing it.
     if (request.attempt === 1) {
-      stageMaxAttempts = options.maxAttempts;
-      if (options.attemptBudget) {
-        try {
-          const budget = await options.attemptBudget(request.stage);
-          if (Number.isFinite(budget) && budget >= 1) {
-            stageMaxAttempts = Math.floor(budget);
-          }
-        } catch (error) {
-          console.warn(
-            "[pipeline] Failed to size the attempt ladder; using the configured cap:",
-            error instanceof Error ? error.message : error
-          );
-        }
-      }
+      await sizeStageBudget(request.stage);
     }
 
     callbacks.onStageChange?.(
@@ -670,6 +684,13 @@ export async function runPipeline(
 
     return finish("failed", reason);
   };
+
+  // The initial build is attempt 1 of the build stage and bypassed
+  // `dispatch()`, so this is the only place its ladder can be sized. Without
+  // it a build composite's members past `pipeline_max_attempts` are
+  // unreachable, and a composite SHORTER than that cap sends `launchStage`
+  // asking for a rank that does not exist.
+  await sizeStageBudget("build");
 
   // -------------------------------------------------------------------
   // Main loop — one settled stage per iteration.

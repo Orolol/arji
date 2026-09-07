@@ -394,3 +394,96 @@ describe("the designated default composite", () => {
     expect(readDefaultCompositeAgentId()).toBeNull();
   });
 });
+
+/**
+ * An EMPTIED composite in the resolution chain.
+ *
+ * Deleting a simple agent from the roster is an ordinary action with no
+ * guard: `composite_agent_members` cascades, and a composite whose only
+ * member went away is left with an empty list. Whether that is fatal depends
+ * entirely on WHO chose the composite, and this block pins both halves —
+ * they are the same code path with two different callers.
+ */
+describe("an emptied composite in the resolution chain", () => {
+  async function emptiedComposite(name = "Ladder") {
+    const { createCompositeAgent, deleteNamedAgent } = await import(
+      "@/lib/agent-config/named-agents"
+    );
+    const member = await makeSimple("Only member", "codex", "gpt-5");
+    const { data: composite } = await createCompositeAgent({
+      name,
+      memberIds: [member.id],
+    });
+    // The cascade: no composite API is called, only the roster delete.
+    await deleteNamedAgent(member.id);
+    return composite!;
+  }
+
+  /** The seeded catch-all `resolveAgent()` ends on. */
+  async function seedCatchAll() {
+    const { GLOBAL_DEFAULT_AGENT_NAME } = await import(
+      "@/lib/agent-config/agent-resolution"
+    );
+    return makeSimple(GLOBAL_DEFAULT_AGENT_NAME, "claude-code", "opus");
+  }
+
+  it("falls through to the builtin fallback when it is the DESIGNATED DEFAULT", async () => {
+    const { setDefaultCompositeAgentId } = await import(
+      "@/lib/agent-config/composite-agents"
+    );
+    const { resolveAgent } = await import(
+      "@/lib/agent-config/agent-resolution"
+    );
+    await seedCatchAll();
+    const composite = await emptiedComposite();
+    setDefaultCompositeAgentId(composite.id);
+
+    // The user set a default once and then deleted an agent. Throwing here
+    // takes down every unassigned resolution in the app — build routes, the
+    // chat stream, night runs, Full Auto, the scheduled routines.
+    expect(() => resolveAgent("build")).not.toThrow();
+    expect(resolveAgent("build").name).toBe("Claude Code");
+    expect(resolveAgent("chat").name).toBe("Claude Code");
+  });
+
+  it("falls through when it is a ROLE ASSIGNMENT, at global and project scope", async () => {
+    const { resolveAgent } = await import(
+      "@/lib/agent-config/agent-resolution"
+    );
+    const { agentProviderDefaults } = await import("@/lib/db/schema");
+    await seedCatchAll();
+    const composite = await emptiedComposite();
+
+    for (const scope of ["global", "proj-1"]) {
+      testDb
+        .insert(agentProviderDefaults)
+        .values({
+          id: `apd-${scope}`,
+          agentType: "build",
+          provider: "composite",
+          scope,
+          namedAgentId: composite.id,
+        })
+        .run();
+    }
+
+    // Same shape as the designated default, same cascade, second call site.
+    expect(() => resolveAgent("build", "proj-1")).not.toThrow();
+    expect(resolveAgent("build", "proj-1").name).toBe("Claude Code");
+  });
+
+  it("still THROWS for a caller that named the composite explicitly", async () => {
+    const { resolveAgentByNamedId, CompositeAgentUnusableError } = await import(
+      "@/lib/agent-config/agent-resolution"
+    );
+    await seedCatchAll();
+    const composite = await emptiedComposite("Named by hand");
+
+    // The other half of the contract: an explicit choice must hear the
+    // refusal rather than silently run on some other agent.
+    expect(() => resolveAgentByNamedId("build", undefined, composite.id))
+      .toThrow(CompositeAgentUnusableError);
+    expect(() => resolveAgentByNamedId("build", undefined, composite.id))
+      .toThrow(/has no members left/i);
+  });
+});

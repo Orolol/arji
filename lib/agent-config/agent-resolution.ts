@@ -289,15 +289,25 @@ export interface ResolvedAgent {
  * Raised when an id names a composite with no usable member left.
  *
  * A composite is emptied by DELETING its last member — the membership rows
- * cascade — so this is reachable state, not a corrupt database. It is a THROW
- * rather than a silent fall-through to the default chain on purpose: an agent
- * the user deliberately configured has become unusable, and resolving it to
- * whatever the builtin fallback happens to be would dispatch a different
- * agent than the one the ticket, the role assignment or the conversation
- * actually names.
+ * cascade — so this is reachable state, not a corrupt database.
+ *
+ * WHO CATCHES IT decides the behaviour, and the split is deliberate:
+ *
+ *  - A caller that NAMED this composite for a dispatch (an explicit choice,
+ *    a conversation) gets the throw. Falling back to whatever the builtin
+ *    chain happens to hold would run the work on an agent the user did not
+ *    ask for, which is the "resolve to an arbitrary default" outcome the
+ *    story explicitly refuses.
+ *  - The BACKGROUND CHAIN — a role assignment, the designated default —
+ *    catches it in `resolveNamedAgentIdInChain` and continues to the next
+ *    link, exactly as it already does for a deleted agent. Those links end in
+ *    a builtin fallback by design, and throwing there would take down every
+ *    unassigned resolution in the app.
  */
 export class CompositeAgentUnusableError extends Error {
   readonly compositeAgentId: string;
+  /** Kept for the chain's fall-through log, which names what it skipped. */
+  readonly compositeName: string;
 
   constructor(compositeAgentId: string, compositeName: string) {
     super(
@@ -305,6 +315,7 @@ export class CompositeAgentUnusableError extends Error {
     );
     this.name = "CompositeAgentUnusableError";
     this.compositeAgentId = compositeAgentId;
+    this.compositeName = compositeName;
   }
 }
 
@@ -457,6 +468,45 @@ function resolveNamedAgentId(agentId: string): ResolvedAgent | null {
 }
 
 /**
+ * `resolveNamedAgentId` for the RESOLUTION CHAIN, where an unusable composite
+ * must not be fatal.
+ *
+ * The difference is who chose the agent. When a caller NAMES a composite for
+ * a dispatch, an emptied one is a refusal it has to hear — resolving to some
+ * arbitrary other agent would run the work on something the user did not ask
+ * for. But a role assignment and the designated default are *background*
+ * links in a chain that already ends in a built-in fallback: the user set
+ * them once and then deleted a simple agent from the roster, which cascades
+ * `composite_agent_members` and can empty the list with no warning anywhere.
+ * Throwing there takes down every unassigned resolution in the app — build
+ * routes (a 500, not a typed 4xx), the chat stream, night runs, Full Auto and
+ * the scheduled routines, none of which catch it.
+ *
+ * So the chain treats an emptied composite exactly as it already treats a
+ * deleted agent: not an assignment, continue to the next link. The trace goes
+ * to the server log, because a silent skip here would be the "resolved
+ * configuration is invisible" trap.
+ */
+function resolveNamedAgentIdInChain(
+  agentId: string,
+  where: string
+): ResolvedAgent | null {
+  try {
+    return resolveNamedAgentId(agentId);
+  } catch (error) {
+    if (error instanceof CompositeAgentUnusableError) {
+      console.warn(
+        `[agent-config] ${where} points at composite "${error.compositeName}" ` +
+          `(${error.compositeAgentId}), which has no members left; falling through ` +
+          `to the next link of the resolution chain.`
+      );
+      return null;
+    }
+    throw error;
+  }
+}
+
+/**
  * Resolves the named agent for a given task type by looking up saved role
  * assignments (project → global → builtin).
  *
@@ -490,7 +540,10 @@ export function resolveAgent(
   // exist to prevent.
   const defaultCompositeId = readDefaultCompositeAgentId();
   if (defaultCompositeId) {
-    const resolved = resolveNamedAgentId(defaultCompositeId);
+    const resolved = resolveNamedAgentIdInChain(
+      defaultCompositeId,
+      "the designated default agent"
+    );
     if (resolved) return resolved;
   }
 
@@ -687,8 +740,13 @@ function resolveFromRow(row: {
   if (row.namedAgentId) {
     // A composite assigned to a role — at global or project scope — unfolds
     // here to its first member, so `agent_provider_defaults` needed no
-    // schema change at all to accept one.
-    const resolved = resolveNamedAgentId(row.namedAgentId);
+    // schema change at all to accept one. An EMPTIED one falls through to the
+    // next link rather than throwing: same reasoning as the designated
+    // default, and the same cascade empties it.
+    const resolved = resolveNamedAgentIdInChain(
+      row.namedAgentId,
+      "a role assignment"
+    );
     if (resolved) return resolved;
   }
 
