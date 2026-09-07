@@ -171,6 +171,20 @@ describe("the composer's keyboard contract", () => {
       screen.getByPlaceholderText("Write — ⏎ sends, ⇧⏎ new line, @ cites a doc"),
     ).toBeInTheDocument();
   });
+
+  it("holds the placeholder to a single line with truncation on narrow widths", async () => {
+    await renderComposer();
+    const input = field();
+    const classList = (input.getAttribute("class") ?? "").split(/\s+/);
+    // The placeholder is 51 characters. Without truncation, it wraps to two lines
+    // when the field is narrower than ~380px, causing the second line ("doc") to be clipped
+    // at the bottom of the single-row band. placeholder:truncate (overflow:hidden, text-overflow:ellipsis,
+    // white-space:nowrap) holds it to a single line clipped at the right edge without vertical overflow.
+    expect(
+      classList.includes("placeholder:truncate"),
+      "chat composer input textarea must carry placeholder:truncate to prevent multi-line wrapping",
+    ).toBe(true);
+  });
 });
 
 describe("attachments", () => {

@@ -192,7 +192,7 @@ export function ChatComposer({
             data-testid="chat-composer-input"
             rows={1}
             disabled={disabled}
-            className="min-h-[24px] max-h-[120px] min-w-0 flex-1 resize-none rounded-none border-0 bg-transparent p-0 py-[17px] text-[13.5px] font-medium text-foreground shadow-none placeholder:text-strata-feed-deep placeholder:opacity-90 focus-visible:border-0 focus-visible:ring-0"
+            className="min-h-[24px] max-h-[120px] min-w-0 flex-1 resize-none rounded-none border-0 bg-transparent p-0 py-[17px] text-[13.5px] font-medium text-foreground shadow-none placeholder:truncate placeholder:text-strata-feed-deep placeholder:opacity-90 focus-visible:border-0 focus-visible:ring-0"
           />
         </div>
 
