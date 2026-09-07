@@ -18,9 +18,10 @@
  *   - review verdict channels: a structured submit_findings verdict on the
  *     session row outranks the prose scan in BOTH directions, and the
  *     activity trail records which channel decided,
- *   - escalation: attempt 3 uses a configured stronger same-provider named
- *     agent before attempt 4 changes provider; without configuration attempt
- *     3 retains the legacy alternative-provider behaviour,
+ *   - retry ladder, in its two shapes and no third: a SIMPLE agent is retried
+ *     as itself at every attempt, with no switch of agent, model or provider;
+ *     a COMPOSITE descends one rank per attempt, and the session records the
+ *     member that ran plus the composite that dispatched it,
  *   - guard probe: foreign active session flagged, own sessions ignored,
  *     scope-correct review-target status.
  */
@@ -148,10 +149,6 @@ const { createPipelineStageDriver } = await import("@/lib/pipeline/stages");
 const { PIPELINE_FIX_INSTRUCTIONS_SECTION } = await import(
   "@/lib/pipeline/stages"
 );
-const { verifyTimeoutMsSettingKey } = await import(
-  "@/lib/verify/verify-constants"
-);
-
 let counter = 0;
 
 function claudeEnvelope(text: string): string {
