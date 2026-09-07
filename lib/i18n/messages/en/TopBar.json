@@ -1,0 +1,8 @@
+{
+  "digest": {
+    "shipped": "{count} landed today",
+    "blocking": "{count} blocked by a finding",
+    "ready": "{count} ready to land",
+    "waiting": "{count} waiting on you"
+  }
+}

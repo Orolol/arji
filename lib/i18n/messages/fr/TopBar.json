@@ -1,0 +1,8 @@
+{
+  "digest": {
+    "shipped": "{count, plural, one {# landé aujourd'hui} other {# landés aujourd'hui}}",
+    "blocking": "{count, plural, one {# bloqué par une finding} other {# bloqués par une finding}}",
+    "ready": "{count, plural, one {# prêt à lander} other {# prêts à lander}}",
+    "waiting": "{count} en attente de toi"
+  }
+}

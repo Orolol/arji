@@ -1,0 +1,21 @@
+{
+  "categories": {
+    "work": "Work",
+    "agents": "Agents",
+    "settings": "Settings"
+  },
+  "entries": {
+    "tickets": "Tickets",
+    "spec": "Spec & Memory",
+    "qa": "QA",
+    "qaChecks": "QA checks",
+    "releases": "Releases",
+    "namedAgents": "Named agents",
+    "sessions": "Sessions",
+    "usage": "Usage",
+    "workspace": "Workspace & Full Auto",
+    "nightRuns": "Night runs",
+    "notifications": "Notifications",
+    "integrations": "Integrations"
+  }
+}

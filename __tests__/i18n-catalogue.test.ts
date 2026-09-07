@@ -7,8 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import { messagesFor, partialCatalogueFor } from "@/lib/i18n/catalogue";
 import { UI_LOCALES } from "@/lib/i18n/locales";
-import en from "@/lib/i18n/messages/en.json";
-import fr from "@/lib/i18n/messages/fr.json";
+import { en, fr } from "@/lib/i18n/messages";
 
 type Tree = { [key: string]: string | Tree };
 

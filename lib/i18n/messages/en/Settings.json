@@ -1,0 +1,9 @@
+{
+  "tabs": {
+    "workspace": "Workspace",
+    "agents": "Agents",
+    "pipeline": "Pipeline",
+    "integrations": "Integrations",
+    "appearance": "Appearance"
+  }
+}

@@ -3,7 +3,7 @@
  * returns `UiLocale`. The augmentation targets `next-intl`, as its docs
  * prescribe; `use-intl` picks it up through the re-export.
  */
-import type en from "./messages/en.json";
+import type { en } from "./messages";
 import type { UiLocale } from "./locales";
 
 declare module "next-intl" {

@@ -2,12 +2,16 @@
  * THE CATALOGUE — every user-facing string of the interface, and the one way
  * code refers to one.
  *
- * `messages/en.json` is the source language. `messages/fr.json` is a PARTIAL
- * seed: it holds the original French of the screens that were rewritten in
- * English, and nothing for the screens that were English to begin with. A
- * key absent from `fr.json` renders its English text (deep merge below) — it
- * is never filled with an English placeholder, because a placeholder would
- * later read as "already translated".
+ * ONE FILE PER NAMESPACE. `messages/en/<Namespace>.json` is the source
+ * language; `messages/fr/<Namespace>.json` is a PARTIAL seed: it holds the
+ * original French of the screens that were rewritten in English, and nothing
+ * for the screens that were English to begin with. A key absent from the
+ * French file renders its English text (deep merge below) — it is never
+ * filled with an English placeholder, because a placeholder would later read
+ * as "already translated". `messages/index.ts` is GENERATED from the
+ * directory listing (`npm run i18n:index`); adding a namespace is adding one
+ * file and re-running it, so two bands can land at once without touching a
+ * shared file.
  *
  * ---------------------------------------------------------------------------
  * HOW COPY IS WRITTEN. Apply these mechanically; do not invent a per-file
@@ -53,6 +57,15 @@
  *    compile error. Proven on `lib/piscine/nav.ts` and
  *    `app/settings/layout.tsx` (a server component — no `"use client"`).
  *
+ *    COPY COMPOSED OUTSIDE REACT — a `lib/` derivation or an API route that
+ *    builds a display string from parts — takes a translator as an argument
+ *    rather than importing one: the component passes its
+ *    `useTranslations("Ns")`, a route passes
+ *    `translatorFor(resolveUiLocaleForRequest(request), "Ns")`
+ *    (lib/i18n/translator.ts). The copy still lives in the catalogue; only
+ *    the resolution moves to the caller, which is the one that knows the
+ *    locale.
+ *
  * 4. LOCALE-SENSITIVE FORMATTING (dates, numbers, plurals) goes through
  *    `lib/i18n/format.ts`, never through a bespoke helper: one family,
  *    parameterised by locale, is what stops a second language from cloning
@@ -67,9 +80,8 @@
 
 import type { MessageKeys, NestedKeyOf } from "next-intl";
 
-import en from "./messages/en.json";
-import fr from "./messages/fr.json";
 import { DEFAULT_UI_LOCALE, type UiLocale } from "./locales";
+import { en, fr } from "./messages";
 
 /** The shape of the source catalogue; every other locale is a partial of it. */
 export type Messages = typeof en;

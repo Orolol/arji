@@ -21,6 +21,7 @@ export {
 export type { UiLocale } from "./locales";
 
 export { catalogueValue, messagesFor, partialCatalogueFor } from "./catalogue";
+export { translatorFor } from "./translator";
 export type { Messages, TranslationKey } from "./catalogue";
 
 export {
